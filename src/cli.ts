@@ -131,6 +131,26 @@ function status(): void {
   console.log(`\nHooks: ${hooksInstalled ? "Installed" : "Not installed"}`);
   console.log(`  Location: ${getClaudeSettingsPath()}`);
 
+  // Check command verification
+  const verification = verifyCommandAvailable();
+  console.log(`\nCommand Status: ${verification.ok ? "✓ OK" : "✗ Problem detected"}`);
+  if (!verification.ok) {
+    console.log(`  Error: ${verification.error}`);
+    if (verification.details) {
+      console.log(`  ${verification.details.split("\n").join("\n  ")}`);
+    }
+  }
+
+  // Check for legacy binaries
+  const legacy = checkLegacyBinaries();
+  if (legacy.found.length > 0) {
+    console.log(`\n⚠️  Legacy binaries found (may conflict with shell aliases):`);
+    for (const binary of legacy.found) {
+      console.log(`  - ${binary}: ${legacy.paths[binary]}`);
+    }
+    console.log(`\n  Remove with: rm ${legacy.found.map(b => legacy.paths[b]).join(" ")}`);
+  }
+
   if (!hooksInstalled) {
     console.log("\nRun: honcho-claudis install");
   }

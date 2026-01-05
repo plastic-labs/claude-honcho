@@ -1,185 +1,166 @@
 /**
- * CLI loading animation for honcho-claudis
- * Minimal, wavy style - no emojis
- * Writes directly to /dev/tty to bypass Claude Code's output capture
+ * A beautiful wave spinner with colors, inspired by Claude Code's thinking animation
  */
 
-import * as fs from "fs";
+// ANSI color codes - using bright/bold variants for visibility
+const c = {
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  dim: "\x1b[2m",
+  // Rich gradient: purple → magenta → pink → coral → orange (warm Claude palette)
+  c1: "\x1b[38;5;129m", // deep purple
+  c2: "\x1b[38;5;135m", // purple
+  c3: "\x1b[38;5;171m", // magenta
+  c4: "\x1b[38;5;213m", // pink
+  c5: "\x1b[38;5;219m", // light pink
+  c6: "\x1b[38;5;217m", // peach
+  c7: "\x1b[38;5;216m", // coral
+  c8: "\x1b[38;5;215m", // light coral
+  // Success/fail
+  green: "\x1b[38;5;114m",
+  red: "\x1b[38;5;203m",
+  cyan: "\x1b[38;5;87m",
+};
 
-// Wavy/flow animation frames
-const WAVE_FRAMES = [
-  "~    ",
-  " ~   ",
-  "  ~  ",
-  "   ~ ",
-  "    ~",
-  "   ~ ",
-  "  ~  ",
-  " ~   ",
-];
+// Wave characters - smooth sine wave feel
+const waveChars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃", "▂"];
 
-const FLOW_FRAMES = [
-  "·    ",
-  "··   ",
-  "···  ",
-  " ··· ",
-  "  ···",
-  "   ··",
-  "    ·",
-  "   · ",
-  "  ·  ",
-  " ·   ",
-];
+// Sparkle characters that pulse
+const sparkles = ["⋆", "✧", "✦", "✧"];
 
-const DOTS_FRAMES = [
-  ".  ",
-  ".. ",
-  "...",
-  " ..",
-  "  .",
-  "   ",
-];
+// Color gradient array for easy indexing
+const gradient = [c.c1, c.c2, c.c3, c.c4, c.c5, c.c6, c.c7, c.c8, c.c7, c.c6, c.c5, c.c4, c.c3, c.c2];
 
-const PULSE_FRAMES = [
-  "▪    ",
-  " ▪   ",
-  "  ▪  ",
-  "   ▪ ",
-  "    ▪",
-  "   ▪ ",
-  "  ▪  ",
-  " ▪   ",
-];
-
-interface SpinnerOptions {
-  text?: string;
-  style?: "wave" | "flow" | "dots" | "pulse";
+export interface SpinnerOptions {
+  style?: "wave" | "dots" | "simple";
 }
 
+/**
+ * Class-based Spinner for use in hooks
+ */
 export class Spinner {
-  private frameIndex = 0;
   private interval: ReturnType<typeof setInterval> | null = null;
-  private text: string;
-  private frames: string[];
-  private startTime: number = 0;
-  private ttyFd: number | null = null;
+  private frame = 0;
+  private message = "";
+  private width = 16;
+  private style: string;
 
   constructor(options: SpinnerOptions = {}) {
-    this.text = options.text || "Loading";
-
-    switch (options.style) {
-      case "wave":
-        this.frames = WAVE_FRAMES;
-        break;
-      case "flow":
-        this.frames = FLOW_FRAMES;
-        break;
-      case "pulse":
-        this.frames = PULSE_FRAMES;
-        break;
-      case "dots":
-      default:
-        this.frames = DOTS_FRAMES;
-    }
-
-    // Try to open /dev/tty for direct terminal access
-    try {
-      this.ttyFd = fs.openSync("/dev/tty", "w");
-    } catch {
-      this.ttyFd = null;
-    }
+    this.style = options.style || "wave";
   }
 
-  private write(text: string): void {
-    if (this.ttyFd !== null) {
-      try {
-        fs.writeSync(this.ttyFd, text);
-        return;
-      } catch {
-        // Fall through to stderr
+  private render() {
+    let output = "";
+
+    if (this.style === "wave") {
+      // Build colorful wave
+      for (let i = 0; i < this.width; i++) {
+        const charIdx = (this.frame + i) % waveChars.length;
+        const colorIdx = (this.frame + i) % gradient.length;
+        output += gradient[colorIdx] + waveChars[charIdx];
       }
+
+      // Add pulsing sparkle
+      const sparkleIdx = Math.floor(this.frame / 3) % sparkles.length;
+      const sparkleColor = gradient[(this.frame * 2) % gradient.length];
+      output += " " + sparkleColor + sparkles[sparkleIdx];
+    } else {
+      // Simple dots fallback
+      const dots = ".".repeat((this.frame % 3) + 1).padEnd(3);
+      output = c.c4 + "●" + c.c5 + "●" + c.c6 + "●" + c.reset + dots;
     }
-    process.stderr.write(text);
+
+    output += c.reset + " " + c.dim + this.message + c.reset;
+
+    // Write to stderr (hooks output to stdout for Claude)
+    process.stderr.write(`\r\x1b[K${output}`);
+    this.frame++;
   }
 
-  start(text?: string): void {
-    if (text) this.text = text;
-    this.startTime = Date.now();
-    this.frameIndex = 0;
+  start(message = "Loading...") {
+    if (this.interval) return;
+    this.message = message;
+    this.frame = 0;
 
-    if (this.interval) {
-      clearInterval(this.interval);
-    }
+    // Hide cursor
+    process.stderr.write("\x1b[?25l");
 
+    // Render immediately, then animate
     this.render();
-
-    this.interval = setInterval(() => {
-      this.frameIndex = (this.frameIndex + 1) % this.frames.length;
-      this.render();
-    }, 100);
+    this.interval = setInterval(() => this.render(), 60);
   }
 
-  private render(): void {
-    const frame = this.frames[this.frameIndex];
-    this.write(`\r  ${frame} ${this.text}`);
+  update(message: string) {
+    this.message = message;
   }
 
-  update(text: string): void {
-    this.text = text;
-  }
-
-  stop(finalText?: string): void {
+  stop(successMessage?: string) {
     if (this.interval) {
       clearInterval(this.interval);
       this.interval = null;
     }
 
-    // Clear the line
-    this.write("\r" + " ".repeat(60) + "\r");
+    // Clear line and show cursor
+    process.stderr.write("\r\x1b[K\x1b[?25h");
 
-    if (finalText) {
-      this.write(`  [ok] ${finalText}\n`);
+    if (successMessage) {
+      // Pretty success message with checkmark
+      const sparkle = c.c5 + "✦" + c.reset;
+      process.stderr.write(`${sparkle} ${c.green}${successMessage}${c.reset}\n`);
     }
-
-    this.closeTty();
   }
 
-  fail(errorText?: string): void {
+  fail(message?: string) {
     if (this.interval) {
       clearInterval(this.interval);
       this.interval = null;
     }
 
-    this.write("\r" + " ".repeat(60) + "\r");
+    process.stderr.write("\r\x1b[K\x1b[?25h");
 
-    if (errorText) {
-      this.write(`  [error] ${errorText}\n`);
-    }
-
-    this.closeTty();
-  }
-
-  private closeTty(): void {
-    if (this.ttyFd !== null) {
-      try {
-        fs.closeSync(this.ttyFd);
-      } catch {
-        // Ignore close errors
-      }
-      this.ttyFd = null;
+    if (message) {
+      process.stderr.write(`${c.red}✗${c.reset} ${c.dim}${message}${c.reset}\n`);
     }
   }
 }
 
 /**
- * Simple status message
+ * Functional spinner creator (alternative API)
  */
-export function showStatus(message: string): void {
+export function createSpinner(options?: SpinnerOptions) {
+  return new Spinner(options);
+}
+
+/**
+ * Simple inline wave for one-shot display (no animation)
+ */
+export function renderWave(length = 8): string {
+  let wave = "";
+  const offset = Math.floor(Math.random() * waveChars.length);
+  for (let i = 0; i < length; i++) {
+    const charIdx = (offset + i) % waveChars.length;
+    const colorIdx = (offset + i) % gradient.length;
+    wave += gradient[colorIdx] + waveChars[charIdx];
+  }
+  return wave + c.reset;
+}
+
+/**
+ * Wrap an async operation with the spinner
+ */
+export async function withSpinner<T>(
+  operation: () => Promise<T>,
+  message = "Loading...",
+  successMessage?: string
+): Promise<T> {
+  const spinner = new Spinner({ style: "wave" });
+  spinner.start(message);
   try {
-    const fd = fs.openSync("/dev/tty", "w");
-    fs.writeSync(fd, `  ${message}\n`);
-    fs.closeSync(fd);
-  } catch {
-    process.stderr.write(`  ${message}\n`);
+    const result = await operation();
+    spinner.stop(successMessage);
+    return result;
+  } catch (error) {
+    spinner.fail();
+    throw error;
   }
 }
