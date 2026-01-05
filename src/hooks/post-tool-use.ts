@@ -3,8 +3,11 @@ import { loadConfig, getSessionForPath } from "../config.js";
 import { basename } from "path";
 import {
   getCachedWorkspaceId,
+  setCachedWorkspaceId,
   getCachedPeerId,
+  setCachedPeerId,
   getCachedSessionId,
+  setCachedSessionId,
   appendClawdWork,
 } from "../cache.js";
 
@@ -22,8 +25,7 @@ function getSessionName(cwd: string): string {
   if (configuredSession) {
     return configuredSession;
   }
-  const dirName = basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-  return `project-${dirName}`;
+  return basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
 function shouldLogTool(toolName: string, toolInput: Record<string, any>): boolean {
@@ -124,13 +126,14 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
   let sessionId = getCachedSessionId(cwd);
   let clawdPeerId = getCachedPeerId(config.claudePeer);
 
-  // If we don't have cached IDs, do full setup
+  // If we don't have cached IDs, do full setup and cache results
   if (!workspaceId || !sessionId || !clawdPeerId) {
     const workspace = await client.workspaces.getOrCreate({
       id: config.workspace,
       metadata: { app: WORKSPACE_APP_TAG },
     });
     workspaceId = workspace.id;
+    setCachedWorkspaceId(config.workspace, workspaceId);
 
     const sessionName = getSessionName(cwd);
     const session = await client.workspaces.sessions.getOrCreate(workspaceId, {
@@ -138,9 +141,11 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
       metadata: { cwd },
     });
     sessionId = session.id;
+    setCachedSessionId(cwd, sessionName, sessionId);
 
     const clawdPeer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
     clawdPeerId = clawdPeer.id;
+    setCachedPeerId(config.claudePeer, clawdPeerId);
   }
 
   // Log the tool use

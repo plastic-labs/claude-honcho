@@ -37,8 +37,7 @@ function getSessionName(cwd: string): string {
   if (configuredSession) {
     return configuredSession;
   }
-  const dirName = basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-  return `project-${dirName}`;
+  return basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
 function parseTranscript(transcriptPath: string): Array<{ role: string; content: string }> {
@@ -184,13 +183,17 @@ export async function handleSessionEnd(): Promise<void> {
     const transcriptMessages = transcriptPath ? parseTranscript(transcriptPath) : [];
 
     // =====================================================
-    // Step 1: Process queue backup (for any messages that failed fire-and-forget)
-    // Note: Most messages are already uploaded in real-time via user-prompt/post-tool-use
-    // The queue is only for reliability - catches network failures, etc.
+    // Step 1: Upload queued user messages (backup for failed fire-and-forget)
     // =====================================================
     const queuedMessages = getQueuedMessages();
-    // Queue messages were already attempted via fire-and-forget, just clear the backup
     if (queuedMessages.length > 0) {
+      const userMessages = queuedMessages.map((msg) => ({
+        content: msg.content,
+        peer_id: config.peerName,
+      }));
+      await client.workspaces.sessions.messages.create(workspaceId, sessionId, {
+        messages: userMessages,
+      });
       markMessagesUploaded();
     }
 

@@ -29,8 +29,7 @@ function getSessionName(cwd: string): string {
   if (configuredSession) {
     return configuredSession;
   }
-  const dirName = basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-  return `project-${dirName}`;
+  return basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
 function formatRepresentation(rep: any): string {
@@ -140,10 +139,8 @@ export async function handleSessionStart(): Promise<void> {
     // Step 4: Set session peers (fire-and-forget)
     client.workspaces.sessions.peers
       .set(workspaceId, sessionId, {
-        peers: {
-          [config.peerName]: { observe_me: true, observe_others: false },
-          [config.claudePeer]: { observe_me: false, observe_others: true },
-        },
+        [config.peerName]: { observe_me: true, observe_others: false },
+        [config.claudePeer]: { observe_me: false, observe_others: true },
       })
       .catch(() => {});
 

@@ -191,7 +191,7 @@ Located at `~/.honcho-clawd/config.json`:
 |--------|-------------|---------|
 | `peerName` | Your identity in Honcho | (required) |
 | `apiKey` | Honcho API key | (required) |
-| `workspace` | Honcho workspace name | `"collab"` |
+| `workspace` | Honcho workspace name | `"claude_code"` |
 | `claudePeer` | AI identity in Honcho | `"clawd"` |
 | `saveMessages` | Save conversation history | `true` |
 | `sessions` | Directory → session mappings | `{}` |

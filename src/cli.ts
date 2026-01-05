@@ -107,13 +107,13 @@ async function init(): Promise<void> {
       workspace = existingWorkspaces[choiceNum - 1].name;
       console.log(`✓ Using existing workspace: ${workspace}`);
     } else if (choiceNum === existingWorkspaces.length + 1 || !wsChoice) {
-      workspace = await prompt("Enter new workspace name (default: collab): ") || "collab";
+      workspace = await prompt("Enter new workspace name (default: claude_code): ") || "claude_code";
     } else {
       // They typed a name directly
       workspace = wsChoice;
     }
   } else {
-    workspace = await prompt("Enter workspace name (default: collab): ") || "collab";
+    workspace = await prompt("Enter workspace name (default: claude_code): ") || "claude_code";
   }
 
   let workspaceId: string;
@@ -414,10 +414,8 @@ async function sessionNew(name?: string): Promise<void> {
 
     try {
       await client.workspaces.sessions.peers.set(workspace.id, session.id, {
-        peers: {
-          [config.peerName]: { observe_me: true, observe_others: false },
-          [config.claudePeer]: { observe_me: false, observe_others: true },
-        },
+        [config.peerName]: { observe_me: true, observe_others: false },
+        [config.claudePeer]: { observe_me: false, observe_others: true },
       });
     } catch {
       // Session peers API may not be available
@@ -513,7 +511,7 @@ function sessionCurrent(): void {
   } else {
     // Show what the default would be
     const dirName = require("path").basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-    const defaultSession = `project-${dirName}`;
+    const defaultSession = dirName;
     console.log(`Session: ${defaultSession} (default)`);
     console.log("\nTip: Use 'honcho-clawd session new <name>' to set a custom session name.");
   }

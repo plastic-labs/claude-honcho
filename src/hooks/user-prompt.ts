@@ -3,8 +3,10 @@ import { loadConfig, getSessionForPath } from "../config.js";
 import { basename } from "path";
 import {
   getCachedWorkspaceId,
+  setCachedWorkspaceId,
   getCachedPeerId,
   getCachedSessionId,
+  setCachedSessionId,
   getCachedUserContext,
   isContextCacheStale,
   setCachedUserContext,
@@ -36,8 +38,7 @@ function getSessionName(cwd: string): string {
   if (configuredSession) {
     return configuredSession;
   }
-  const dirName = basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-  return `project-${dirName}`;
+  return basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
 export async function handleUserPrompt(): Promise<void> {
@@ -129,9 +130,10 @@ async function uploadMessageAsync(config: any, cwd: string, prompt: string): Pro
   let sessionId = getCachedSessionId(cwd);
 
   if (!workspaceId || !sessionId) {
-    // No cache - need full setup
+    // No cache - need full setup and cache the results
     const workspace = await client.workspaces.getOrCreate({ id: config.workspace });
     workspaceId = workspace.id;
+    setCachedWorkspaceId(config.workspace, workspaceId);
 
     const sessionName = getSessionName(cwd);
     const session = await client.workspaces.sessions.getOrCreate(workspaceId, {
@@ -139,6 +141,7 @@ async function uploadMessageAsync(config: any, cwd: string, prompt: string): Pro
       metadata: { cwd },
     });
     sessionId = session.id;
+    setCachedSessionId(cwd, sessionName, sessionId);
   }
 
   await client.workspaces.sessions.messages.create(workspaceId, sessionId, {
