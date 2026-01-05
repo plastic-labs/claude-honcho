@@ -14,7 +14,7 @@ export interface ContextRefreshConfig {
   skipDialectic?: boolean; // Skip chat() calls in user-prompt (default: true, saves $0.03/call)
 }
 
-export interface EriHonchoConfig {
+export interface HonchoClaudisConfig {
   peerName: string; // The user's peer name
   apiKey: string; // Honcho API key
   workspace: string; // Honcho workspace name
@@ -40,19 +40,19 @@ export function configExists(): boolean {
   return existsSync(CONFIG_FILE);
 }
 
-export function loadConfig(): EriHonchoConfig | null {
+export function loadConfig(): HonchoClaudisConfig | null {
   if (!configExists()) {
     return null;
   }
   try {
     const content = readFileSync(CONFIG_FILE, "utf-8");
-    return JSON.parse(content) as EriHonchoConfig;
+    return JSON.parse(content) as HonchoClaudisConfig;
   } catch {
     return null;
   }
 }
 
-export function saveConfig(config: EriHonchoConfig): void {
+export function saveConfig(config: HonchoClaudisConfig): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
   }

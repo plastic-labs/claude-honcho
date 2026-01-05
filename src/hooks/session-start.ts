@@ -8,7 +8,7 @@ import {
   setCachedPeerId,
   getCachedSessionId,
   setCachedSessionId,
-  setCachedEriContext,
+  setCachedUserContext,
   setCachedClaudisContext,
   loadClaudisLocalContext,
   resetMessageCount,
@@ -166,9 +166,9 @@ export async function handleSessionStart(): Promise<void> {
     }
 
     // Parallel API calls for rich context
-    const [eriContextResult, claudisContextResult, summariesResult, eriChatResult, claudisChatResult] =
+    const [userContextResult, claudisContextResult, summariesResult, userChatResult, claudisChatResult] =
       await Promise.allSettled([
-        // 1. Get eri's context
+        // 1. Get user's context
         client.workspaces.peers.getContext(workspaceId, userPeerId!, {
           max_observations: 30,
           include_most_derived: true,
@@ -180,7 +180,7 @@ export async function handleSessionStart(): Promise<void> {
         }),
         // 3. Get session summaries
         client.workspaces.sessions.summaries(workspaceId, sessionId),
-        // 4. Dialectic: Ask about eri
+        // 4. Dialectic: Ask about user
         client.workspaces.peers.chat(workspaceId, userPeerId!, {
           query: `Summarize what you know about ${config.peerName} in 2-3 sentences. Focus on their preferences, current projects, and working style.`,
           session_id: sessionId,
@@ -192,10 +192,10 @@ export async function handleSessionStart(): Promise<void> {
         }),
       ]);
 
-    // Process eri context
-    if (eriContextResult.status === "fulfilled" && eriContextResult.value) {
-      const context = eriContextResult.value;
-      setCachedEriContext(context); // Cache for user-prompt hook
+    // Process user context
+    if (userContextResult.status === "fulfilled" && userContextResult.value) {
+      const context = userContextResult.value;
+      setCachedUserContext(context); // Cache for user-prompt hook
 
       if (context.peer_card && context.peer_card.length > 0) {
         contextParts.push(`## ${config.peerName}'s Profile\n${context.peer_card.join("\n")}`);
@@ -233,9 +233,9 @@ export async function handleSessionStart(): Promise<void> {
       }
     }
 
-    // Process eri dialectic response
-    if (eriChatResult.status === "fulfilled" && eriChatResult.value?.content) {
-      contextParts.push(`## AI Summary of ${config.peerName}\n${eriChatResult.value.content}`);
+    // Process user dialectic response
+    if (userChatResult.status === "fulfilled" && userChatResult.value?.content) {
+      contextParts.push(`## AI Summary of ${config.peerName}\n${userChatResult.value.content}`);
     }
 
     // Process claudis dialectic response (self-reflection)

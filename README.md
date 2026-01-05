@@ -83,7 +83,7 @@ honcho-claudis init
 ```
 
 You'll be prompted for:
-- **Your name/peer ID**: How Honcho identifies you (e.g., "eri")
+- **Your name/peer ID**: How Honcho identifies you (e.g., "yourname")
 - **Workspace name**: Your Honcho workspace (e.g., "myworkspace")
 - **Claude's peer name**: AI identity in Honcho (default: "claudis")
 - **Enable message saving**: Whether to save conversation history
@@ -130,7 +130,7 @@ claude
 │                         Honcho API                               │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────┐  ┌─────────────┐ │
 │  │Workspace │  │ Session  │  │    Peers     │  │  Messages   │ │
-│  │ (aeris)  │──│(project) │──│ eri/claudis  │──│ (history)   │ │
+│  │(workspace)│──│(project) │──│ user/claudis │──│ (history)   │ │
 │  └──────────┘  └──────────┘  └──────────────┘  └─────────────┘ │
 │                                     │                           │
 │                    ┌────────────────┴────────────────┐          │
@@ -149,7 +149,7 @@ honcho-claudis creates two "peers" in Honcho:
 
 | Peer | Represents | Observes | Purpose |
 |------|------------|----------|---------|
-| `eri` (you) | The user | Self | Build knowledge about your preferences, projects, style |
+| `user` (you) | The user | Self | Build knowledge about your preferences, projects, style |
 | `claudis` | Claude AI | You | Build knowledge about what Claude has done, AI self-awareness |
 
 This enables Claude to understand both what **you** know/want and what **it** has been working on.
@@ -164,7 +164,7 @@ Located at `~/.honcho-claudis/config.json`:
 
 ```json
 {
-  "peerName": "eri",
+  "peerName": "yourname",
   "apiKey": "hch-v2-...",
   "workspace": "myworkspace",
   "claudePeer": "claudis",
@@ -236,9 +236,9 @@ honcho-claudis includes slash commands you can use directly in Claude Code:
 You: /honcho-claudis-status
 
 Claude: Current Honcho session status:
-- Workspace: aeris
-- Session: eri-honcho
-- User Peer: eri
+- Workspace: myworkspace
+- Session: my-project
+- User Peer: yourname
 - AI Peer: claudis
 - Message Saving: enabled
 ```
@@ -366,7 +366,7 @@ After a context wipe, Claude still knows:
 ## Claudis Local Context (What I Was Working On)
 
 Last updated: 2026-01-05T08:41:00.000Z
-Session: eri-honcho
+Session: my-project
 
 ## Recent Activity
 - [2026-01-05T08:30:00.000Z] Edited src/hooks/user-prompt.ts

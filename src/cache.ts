@@ -82,11 +82,11 @@ export function setCachedSessionId(cwd: string, name: string, id: string): void 
 }
 
 // ============================================
-// Context Cache - eri + claudis context with TTL
+// Context Cache - user + claudis context with TTL
 // ============================================
 
 interface ContextCache {
-  eriContext?: { data: any; fetchedAt: number };
+  userContext?: { data: any; fetchedAt: number };
   claudisContext?: { data: any; fetchedAt: number };
   summaries?: { data: any; fetchedAt: number };
   messageCount?: number; // Track messages since last refresh
@@ -121,17 +121,17 @@ export function saveContextCache(cache: ContextCache): void {
   writeFileSync(CONTEXT_CACHE_FILE, JSON.stringify(cache, null, 2));
 }
 
-export function getCachedEriContext(): any | null {
+export function getCachedUserContext(): any | null {
   const cache = loadContextCache();
-  if (cache.eriContext && Date.now() - cache.eriContext.fetchedAt < getContextTTL()) {
-    return cache.eriContext.data;
+  if (cache.userContext && Date.now() - cache.userContext.fetchedAt < getContextTTL()) {
+    return cache.userContext.data;
   }
   return null;
 }
 
-export function setCachedEriContext(data: any): void {
+export function setCachedUserContext(data: any): void {
   const cache = loadContextCache();
-  cache.eriContext = { data, fetchedAt: Date.now() };
+  cache.userContext = { data, fetchedAt: Date.now() };
   saveContextCache(cache);
 }
 
@@ -151,8 +151,8 @@ export function setCachedClaudisContext(data: any): void {
 
 export function isContextCacheStale(): boolean {
   const cache = loadContextCache();
-  if (!cache.eriContext) return true;
-  return Date.now() - cache.eriContext.fetchedAt >= getContextTTL();
+  if (!cache.userContext) return true;
+  return Date.now() - cache.userContext.fetchedAt >= getContextTTL();
 }
 
 // Track message count for threshold-based refresh

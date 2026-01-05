@@ -2,7 +2,7 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "name": "eri-honcho",
+      "name": "honcho-claudis",
       "dependencies": {
         "@honcho-ai/core": "^1.8.0",
       },

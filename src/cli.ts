@@ -10,7 +10,7 @@ import {
   setSessionForPath,
   getAllSessions,
   removeSessionForPath,
-  type EriHonchoConfig,
+  type HonchoClaudisConfig,
 } from "./config.js";
 import Honcho from "@honcho-ai/core";
 import { installHooks, uninstallHooks, checkHooksInstalled, verifyCommandAvailable, checkLegacyBinaries } from "./install.js";
@@ -36,7 +36,7 @@ function prompt(question: string): Promise<string> {
 }
 
 async function init(): Promise<void> {
-  console.log("\n🧠 honcho-claudis setup\n");
+  console.log("\nhoncho-claudis setup\n");
   console.log("This will configure persistent memory for Claude Code using Honcho.\n");
 
   // Check for existing config
@@ -81,7 +81,7 @@ async function init(): Promise<void> {
   }
 
   // Save config
-  const config: EriHonchoConfig = {
+  const config: HonchoClaudisConfig = {
     peerName,
     apiKey,
     workspace,
@@ -111,7 +111,7 @@ async function init(): Promise<void> {
 }
 
 function status(): void {
-  console.log("\n🧠 honcho-claudis status\n");
+  console.log("\nhoncho-claudis status\n");
 
   const config = loadConfig();
   if (!config) {
@@ -348,7 +348,7 @@ function sessionCurrent(): void {
   const cwd = process.cwd();
   const currentSession = getSessionForPath(cwd);
 
-  console.log("\n🧠 Current Honcho Session\n");
+  console.log("\nCurrent Honcho Session\n");
   console.log(`Directory: ${cwd}`);
 
   if (currentSession) {

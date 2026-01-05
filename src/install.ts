@@ -11,7 +11,7 @@ const CLI_COMMAND = "honcho-claudis";
 const EXPECTED_VERSION_PREFIX = "honcho-claudis v";
 
 // Legacy binary names that might conflict
-const LEGACY_BINARIES = ["claudis", "eri-honcho"];
+const LEGACY_BINARIES = ["claudis"];
 
 interface CommandVerification {
   ok: boolean;
@@ -211,12 +211,11 @@ export function installHooks(): { success: boolean; message: string; warnings?: 
   settings.hooks = settings.hooks || {};
 
   for (const [event, eventHooks] of Object.entries(honchoClaudisHooks)) {
-    // Remove any existing honcho-claudis, claudis (old name), or eri-honcho hooks for this event
+    // Remove any existing honcho-claudis or claudis (old name) hooks for this event
     if (settings.hooks[event]) {
       settings.hooks[event] = settings.hooks[event].filter(
         (h) => !h.hooks.some((hook) =>
           hook.command.includes("honcho-claudis") ||
-          hook.command.includes("eri-honcho") ||
           (hook.command.includes("claudis") && !hook.command.includes("honcho-claudis"))
         )
       );
@@ -254,7 +253,6 @@ export function uninstallHooks(): { success: boolean; message: string } {
         settings.hooks[event] = settings.hooks[event].filter(
           (h) => !h.hooks.some((hook) =>
             hook.command.includes("honcho-claudis") ||
-            hook.command.includes("eri-honcho") ||
             (hook.command.includes("claudis") && !hook.command.includes("honcho-claudis"))
           )
         );

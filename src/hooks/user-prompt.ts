@@ -5,9 +5,9 @@ import {
   getCachedWorkspaceId,
   getCachedPeerId,
   getCachedSessionId,
-  getCachedEriContext,
+  getCachedUserContext,
   isContextCacheStale,
-  setCachedEriContext,
+  setCachedUserContext,
   queueMessage,
   incrementMessageCount,
   shouldRefreshKnowledgeGraph,
@@ -87,7 +87,7 @@ export async function handleUserPrompt(): Promise<void> {
 
   // Determine if we should refresh: either cache is stale OR message threshold reached
   const forceRefresh = shouldRefreshKnowledgeGraph();
-  const cachedContext = getCachedEriContext();
+  const cachedContext = getCachedUserContext();
   const cacheIsStale = isContextCacheStale();
 
   if (cachedContext && !cacheIsStale && !forceRefresh) {
@@ -211,7 +211,7 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
   });
 
   if (contextResult) {
-    setCachedEriContext(contextResult); // Update cache
+    setCachedUserContext(contextResult); // Update cache
 
     if (contextResult.representation?.explicit?.length) {
       const explicit = contextResult.representation.explicit
