@@ -23,8 +23,10 @@ import { execSync } from "child_process";
 
 const WORKSPACE_APP_TAG = "honcho-clawd";
 
-// How far back to look for messages (in minutes)
-const DEFAULT_TIME_WINDOW_MINUTES = 60;
+// How many messages to look at by default
+const DEFAULT_MESSAGE_COUNT = 50;
+// Skip messages over this length (likely code dumps)
+const MAX_MESSAGE_LENGTH = 5000;
 
 interface GitContext {
   branch: string;
@@ -113,7 +115,7 @@ function getSessionName(cwd: string): string {
 interface HandoffOptions {
   verbose?: boolean;
   instanceOnly?: boolean;  // Filter to current instance only (default: true)
-  timeWindowMinutes?: number;  // How far back to look (default: 60)
+  messageCount?: number;   // How many messages to look at (default: 50)
 }
 
 interface Message {
@@ -236,8 +238,7 @@ export async function generateHandoff(options: HandoffOptions = {}): Promise<str
 
   const cwd = process.cwd();
   const instanceId = getClaudeInstanceId();
-  const timeWindow = options.timeWindowMinutes;  // undefined = no limit
-  const cutoffTime = timeWindow ? new Date(Date.now() - timeWindow * 60 * 1000) : null;
+  const messageCount = options.messageCount ?? DEFAULT_MESSAGE_COUNT;
 
   const client = new Honcho({
     apiKey: config.apiKey,
@@ -294,21 +295,16 @@ export async function generateHandoff(options: HandoffOptions = {}): Promise<str
     }),
   ]);
 
-  // Process messages - filter by time and collect
+  // Process messages - filter by count and length
   let messages: Message[] = [];
   if (messagesResult.status === "fulfilled") {
     const page = messagesResult.value as any;
     const allMessages = page.data || [];
 
-    // Filter to time window (if set)
-    if (cutoffTime) {
-      messages = allMessages.filter((msg: Message) => {
-        const msgTime = new Date(msg.created_at);
-        return msgTime >= cutoffTime;
-      });
-    } else {
-      messages = allMessages;  // No time filter
-    }
+    // Filter: skip very long messages (code dumps), take up to messageCount
+    messages = allMessages
+      .filter((msg: Message) => msg.content.length <= MAX_MESSAGE_LENGTH)
+      .slice(0, messageCount);  // Already sorted by most recent first
   }
 
   // Analyze patterns
@@ -325,8 +321,20 @@ export async function generateHandoff(options: HandoffOptions = {}): Promise<str
   if (gitContext.isGitRepo && gitContext.branch) {
     parts.push(`Branch: ${gitContext.branch}`);
   }
-  const timeDesc = timeWindow ? `Last ${timeWindow} min` : "All time";
-  parts.push(`Time: ${timeDesc} | ${messages.length} messages`);
+
+  // Calculate time span from messages
+  let timeSpan = "";
+  if (messages.length > 0) {
+    const oldest = new Date(messages[messages.length - 1].created_at);
+    const newest = new Date(messages[0].created_at);
+    const spanMinutes = Math.round((newest.getTime() - oldest.getTime()) / 60000);
+    if (spanMinutes > 60) {
+      timeSpan = ` spanning ${Math.round(spanMinutes / 60)}h`;
+    } else if (spanMinutes > 0) {
+      timeSpan = ` spanning ${spanMinutes}m`;
+    }
+  }
+  parts.push(`Messages: ${messages.length}${timeSpan}`);
   if (instanceId) {
     parts.push(`Instance: ${instanceId.slice(0, 8)}...`);
   }
@@ -449,7 +457,7 @@ export async function handleHandoff(args: string[]): Promise<void> {
   console.log("");
 
   let instanceOnly = true;
-  let timeWindowMinutes: number | undefined = DEFAULT_TIME_WINDOW_MINUTES;
+  let messageCount: number = DEFAULT_MESSAGE_COUNT;
 
   // Interactive mode (unless --quick flag)
   if (!quick) {
@@ -460,32 +468,29 @@ export async function handleHandoff(args: string[]): Promise<void> {
     ]);
     instanceOnly = scopeChoice === "1";
 
-    // Question 2: Time range (only if current instance)
-    if (instanceOnly) {
-      const timeChoice = await askChoice("Time range?", [
-        { key: "1", label: "Last hour (default)" },
-        { key: "2", label: "Last 30 min" },
-        { key: "3", label: "All time" },
-      ]);
-      if (timeChoice === "2") timeWindowMinutes = 30;
-      else if (timeChoice === "3") timeWindowMinutes = undefined;  // No limit
-    } else {
-      // --all mode: no time limit
-      timeWindowMinutes = undefined;
-    }
+    // Question 2: Message count
+    const countChoice = await askChoice("How many messages?", [
+      { key: "1", label: "Last 50 messages (default)" },
+      { key: "2", label: "Last 100 messages" },
+      { key: "3", label: "Last 200 messages" },
+      { key: "4", label: "All messages" },
+    ]);
+    if (countChoice === "2") messageCount = 100;
+    else if (countChoice === "3") messageCount = 200;
+    else if (countChoice === "4") messageCount = 10000;  // Effectively all
 
     console.log("");
   }
 
-  const timeDesc = timeWindowMinutes ? `last ${timeWindowMinutes} min` : "all time";
-  console.log(s.dim(`Analyzing ${timeDesc} of this session...`));
+  const countDesc = messageCount >= 10000 ? "all" : `last ${messageCount}`;
+  console.log(s.dim(`Analyzing ${countDesc} messages...`));
   console.log("");
 
   try {
     const handoff = await generateHandoff({
       verbose,
       instanceOnly,
-      timeWindowMinutes,
+      messageCount,
     });
 
     // Output the handoff

@@ -7,15 +7,16 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [State Locations](#state-locations)
-3. [Hook Execution Flow](#hook-execution-flow)
-4. [API Call Dependencies](#api-call-dependencies)
-5. [File I/O Matrix](#file-io-matrix)
-6. [Identified Loopholes & Edge Cases](#identified-loopholes--edge-cases)
-7. [Testable Boundaries](#testable-boundaries)
-8. [Test Suite Structure](#test-suite-structure)
-9. [Recommended Fixes](#recommended-fixes)
-10. [Manual Testing Commands](#manual-testing-commands)
+2. [How We Use Honcho](#how-we-use-honcho)
+3. [State Locations](#state-locations)
+4. [Hook Execution Flow](#hook-execution-flow)
+5. [API Call Dependencies](#api-call-dependencies)
+6. [File I/O Matrix](#file-io-matrix)
+7. [Identified Loopholes & Edge Cases](#identified-loopholes--edge-cases)
+8. [Testable Boundaries](#testable-boundaries)
+9. [Test Suite Structure](#test-suite-structure)
+10. [Recommended Fixes](#recommended-fixes)
+11. [Manual Testing Commands](#manual-testing-commands)
 
 ---
 
@@ -40,6 +41,254 @@
 | `src/hooks/session-end.ts` | Save messages, generate summary |
 | `src/hooks/post-tool-use.ts` | Track AI actions for self-awareness |
 | `src/hooks/user-prompt.ts` | Queue messages, retrieve context |
+| `src/hooks/pre-compact.ts` | Inject context before conversation compaction |
+| `src/skills/handoff.ts` | Generate research handoff summaries |
+
+---
+
+## How We Use Honcho
+
+This section maps each honcho-clawd feature to the specific Honcho API endpoints that power it.
+
+### Feature: Persistent User Memory
+
+**What it does**: Remembers facts about you across sessions (preferences, background, patterns)
+
+**Honcho endpoints used**:
+- `workspaces.peers.getOrCreate(workspace, {id: "eri"})` - Create user peer
+- `messages.create()` with `peer_id: eri` - Feed user messages for extraction
+- `peers.getContext(workspace, eri)` - Retrieve extracted facts & insights
+
+**Data flow**:
+```
+User prompt → messages.create() → [Honcho extracts facts] → peers.getContext() → injected at startup
+```
+
+### Feature: AI Self-Awareness (clawd context)
+
+**What it does**: Clawd remembers what it was working on, recent actions, patterns
+
+**Honcho endpoints used**:
+- `workspaces.peers.getOrCreate(workspace, {id: "clawd"})` - Create AI peer
+- `messages.create()` with `peer_id: clawd` - Feed AI actions (tool uses)
+- `peers.getContext(workspace, clawd)` - Retrieve AI's accumulated self-knowledge
+
+**Data flow**:
+```
+Tool use → messages.create("[Tool] Edited auth.ts") → peers.getContext(clawd) → "What CLAWD Was Working On"
+```
+
+### Feature: Session Summaries
+
+**What it does**: "Last time in this project, you were working on X"
+
+**Honcho endpoints used**:
+- `workspaces.sessions.getOrCreate(workspace, {id: "honcho-clawd"})` - One session per project dir
+- `sessions.summaries(workspace, session)` - Get short/long summaries
+
+**Data flow**:
+```
+End of session → messages uploaded → [Honcho generates summary] → sessions.summaries() → "Recent Session Summary"
+```
+
+### Feature: Dialectic Chat (Intelligent Queries)
+
+**What it does**: Ask Honcho's LLM to synthesize insights about user/AI
+
+**Honcho endpoints used**:
+- `peers.chat(workspace, eri, {query: "What is eri working on?", session_id})` - LLM query ($0.03)
+
+**Data flow**:
+```
+Session start → peers.chat() → "eri is focused on billing components and prefers..." → system prompt
+```
+
+### Feature: Observation Model
+
+**What it does**: Control whose knowledge gets updated from which messages
+
+**Honcho endpoints used**:
+- `sessions.peers.set(workspace, session, {peer_config})` - Configure observers
+
+**Configuration**:
+```typescript
+{
+  "eri": { "observe": ["eri", "clawd"] },  // eri's context updated from both
+  "clawd": { "observe": ["eri"] }          // clawd only learns about eri
+}
+```
+
+### Feature: Handoff Summary
+
+**What it does**: Generate debugging summary for research handoff
+
+**Honcho endpoints used**:
+- `sessions.messages.list(workspace, session, {filters, reverse: true})` - Raw message history
+- `sessions.getContext(workspace, session, {limit_to_session: true})` - Session-specific context
+
+**Data flow**:
+```
+honcho-clawd handoff → messages.list() → local analysis (stuck patterns, topics) → markdown summary
+```
+
+### Feature: Instance Isolation
+
+**What it does**: Track parallel Claude instances separately
+
+**Implementation**:
+- `metadata.instance_id` attached to each message
+- `messages.list({filters: {"metadata.instance_id": "abc123"}})` - Filter by instance
+- Local cache tracks `instanceId` per message in `message-queue.jsonl`
+
+### Feature: Pre-Compact Context Injection
+
+**What it does**: Re-inject critical context when Claude's context window compacts
+
+**Honcho endpoints used**:
+- `peers.getContext()` - Fetch fresh context
+- `sessions.summaries()` - Get current summary
+
+**Trigger**: Claude Code's `UserPromptSubmit` hook with compact detection
+
+### Endpoint Cost Summary
+
+| Feature | Endpoint | Cost | Frequency |
+|---------|----------|------|-----------|
+| User Memory | `peers.getContext` | FREE | Every session start |
+| AI Self-Awareness | `peers.getContext` | FREE | Every session start |
+| Session Summaries | `sessions.summaries` | FREE | Every session start |
+| Dialectic Chat | `peers.chat` | $0.03 | 2x per session start |
+| Message Upload | `messages.create` | ~$0.001/msg | Every prompt + tool use |
+| Handoff | `messages.list` | FREE | On demand |
+| Handoff | `sessions.getContext` | FREE | On demand |
+
+### What Happens When (Practical Walkthrough)
+
+#### Starting Claude Code in a project:
+
+```
+You: $ claude
+     │
+     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ Claude Code triggers SessionStart hook                             │
+│ → honcho-clawd hook session-start                                  │
+└────────────────────────────────────────────────────────────────────┘
+     │
+     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ 1. Read local config (~/.honcho-clawd/config.json)                 │
+│ 2. Get/create workspace ID (cached or API call)                    │
+│ 3. Get/create session ID based on current directory                │
+│ 4. Get/create peer IDs (user + clawd)                              │
+│ 5. Configure observation: clawd observes user                      │
+└────────────────────────────────────────────────────────────────────┘
+     │
+     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ PARALLEL API CALLS (all at once for speed):                        │
+│                                                                    │
+│ • peers.getContext(user)   → Facts about you                       │
+│ • peers.getContext(clawd)  → AI's self-knowledge                   │
+│ • sessions.summaries()     → What you worked on before             │
+│ • peers.chat(user)         → "What does eri care about?" ($0.03)   │
+│ • peers.chat(clawd)        → "What should I remember?" ($0.03)     │
+└────────────────────────────────────────────────────────────────────┘
+     │
+     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ OUTPUT: Context block injected into Claude's system prompt         │
+│                                                                    │
+│ "[Honcho Memory for eri]: Relevant facts: eri prefers tabs..."     │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+#### During conversation (each message):
+
+```
+You: "Fix the bug in auth.ts"
+     │
+     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ Claude Code triggers UserPromptSubmit hook                         │
+│ → honcho-clawd hook user-prompt                                    │
+└────────────────────────────────────────────────────────────────────┘
+     │
+     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ 1. Queue message locally (message-queue.jsonl) - FAST              │
+│ 2. Fire-and-forget: upload to Honcho (async, don't wait)           │
+│ 3. Check if context cache is stale                                 │
+│ 4. Return cached context OR fetch fresh                            │
+└────────────────────────────────────────────────────────────────────┘
+     │
+     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ OUTPUT: Additional context for this prompt                         │
+│                                                                    │
+│ {"hookSpecificOutput": {"additionalContext": "Insights: ..."}}     │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+#### When Claude uses a tool (Write, Edit, Bash):
+
+```
+Claude: [Uses Edit tool on auth.ts]
+     │
+     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ Claude Code triggers PostToolUse hook                              │
+│ → honcho-clawd hook post-tool-use                                  │
+└────────────────────────────────────────────────────────────────────┘
+     │
+     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ 1. Log action to clawd-context.md (local file, survives wipes)     │
+│    "- [timestamp] Edited auth.ts: 'old...' -> 'new...'"            │
+│ 2. Fire-and-forget: upload to Honcho as AI action                  │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+#### Ending the session:
+
+```
+You: ctrl+c (or type /exit)
+     │
+     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ Claude Code triggers SessionEnd hook                               │
+│ → honcho-clawd hook session-end                                    │
+└────────────────────────────────────────────────────────────────────┘
+     │
+     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ 1. Process any remaining queued messages                           │
+│ 2. Parse Claude's transcript for assistant messages                │
+│ 3. Upload assistant messages to Honcho                             │
+│ 4. Update clawd-context.md with session summary                    │
+└────────────────────────────────────────────────────────────────────┘
+     │
+     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ Honcho processes all messages → updates knowledge graph            │
+│ Next session will have updated context!                            │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### Skills
+
+Skills are Claude Code slash commands that run honcho-clawd functionality:
+
+| Skill | Command | What It Does |
+|-------|---------|--------------|
+| `/honcho-clawd-new` | `honcho-clawd session new` | Create/connect to named session |
+| `/honcho-clawd-list` | `honcho-clawd session list` | Show all sessions |
+| `/honcho-clawd-switch` | `honcho-clawd session switch` | Switch to different session |
+| `/honcho-clawd-status` | `honcho-clawd status` | Show current memory status |
+| `/honcho-clawd-clear` | `honcho-clawd session clear` | Reset to default session |
+| `/honcho-clawd-handoff` | `honcho-clawd handoff` | Generate debugging summary |
+
+**Note**: Skills are cached at session start. New skills won't appear until you start a fresh Claude session.
 
 ---
 
@@ -53,14 +302,14 @@
 │   └── Properties: peerName, apiKey, workspace, claudePeer, sessions{}, saveMessages
 │
 ├── cache.json            # Cached Honcho IDs (avoid redundant API calls)
-│   └── Properties: workspace.{name, id}, peers.{name: id}, sessions.{cwd: {id, name}}
+│   └── Properties: workspace.{name, id}, peers.{name: id}, sessions.{cwd: {id, name, updatedAt}}, claudeInstanceId
 │
 ├── context-cache.json    # Pre-fetched context with TTL tracking
-│   └── Properties: eriContext.{data, fetchedAt}, clawdContext.{data, fetchedAt},
-│                   messageCount, lastRefreshMessageCount
+│   └── Properties: userContext.{data, fetchedAt}, clawdContext.{data, fetchedAt},
+│                   summaries.{data, fetchedAt}, messageCount, lastRefreshMessageCount
 │
 ├── message-queue.jsonl   # Local message queue for reliability (append-only)
-│   └── Format: {content, peerId, cwd, timestamp, uploaded}[] (one JSON per line)
+│   └── Format: {content, peerId, cwd, timestamp, uploaded, instanceId}[] (one JSON per line)
 │
 └── clawd-context.md    # AI self-summary (survives context wipes)
     └── Format: Markdown with "## Recent Activity" section, capped at 50 entries
@@ -86,10 +335,11 @@ Workspace
 ```json
 {
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "command": "honcho-clawd hook session-start" }] }],
-    "SessionEnd": [{ "hooks": [{ "command": "honcho-clawd hook session-end" }] }],
-    "PostToolUse": [{ "matcher": "Write|Edit|Bash|Task", "hooks": [...] }],
-    "UserPromptSubmit": [{ "hooks": [...] }]
+    "SessionStart": [{ "hooks": [{ "command": "honcho-clawd hook session-start", "timeout": 30000 }] }],
+    "SessionEnd": [{ "hooks": [{ "command": "honcho-clawd hook session-end", "timeout": 30000 }] }],
+    "PostToolUse": [{ "matcher": "Write|Edit|Bash|Task", "hooks": [{ "command": "honcho-clawd hook post-tool-use", "timeout": 10000 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "command": "honcho-clawd hook user-prompt", "timeout": 15000 }] }],
+    "PreCompact": [{ "matcher": "auto|manual", "hooks": [{ "command": "honcho-clawd hook pre-compact", "timeout": 20000 }] }]
   }
 }
 ```
@@ -124,76 +374,105 @@ Workspace
     ├─► peers.getContext(clawd)
     ├─► sessions.summaries()
     ├─► peers.chat(user)        # $0.03 per call
-    └─► peers.chat(clawd)     # $0.03 per call
-[11] setCachedEriContext()          → Write context-cache.json
-[12] setCachedClaudisContext()      → Write context-cache.json
-[13] console.log(context)           → Output to Claude
-[14] process.exit(0)
+    └─► peers.chat(clawd)       # $0.03 per call
+[11] setCachedUserContext()         → Write context-cache.json
+[12] setCachedClawdContext()        → Write context-cache.json
+[13] displayHonchoStartup()         → Show pixel art banner
+[14] console.log(context)           → Output to Claude
+[15] process.exit(0)
 ```
 
 ### User Prompt (`user-prompt.ts`)
 
-**Trigger**: User sends a message  
-**Latency**: ~10-20ms (cached), ~200ms (fresh fetch)  
+**Trigger**: User sends a message
+**Latency**: ~10-20ms (cached), ~200ms (fresh fetch)
 **Output**: JSON with `hookSpecificOutput.additionalContext`
 
 ```
 [1] loadConfig()                    → Read config.json
 [2] Bun.stdin.text()                → Parse JSON from Claude Code
-[3] shouldSkipContextRetrieval()    → Regex check for trivial prompts
-    └─► TRUE: process.exit(0)
-[4] queueMessage()                  → APPEND to message-queue.jsonl (~1-3ms)
-[5] uploadMessageAsync()            → FIRE-AND-FORGET (Promise not awaited)
-[6] incrementMessageCount()         → Read+Write context-cache.json
-[7] shouldRefreshKnowledgeGraph()   → Read context-cache.json
-[8] getCachedEriContext()           → Read context-cache.json
+[3] queueMessage()                  → APPEND to message-queue.jsonl (instant backup)
+[4] uploadMessageAsync()            → START async upload (will await before exit)
+[5] incrementMessageCount()         → Read+Write context-cache.json
+[6] shouldSkipContextRetrieval()    → Regex check for trivial prompts
+    └─► TRUE: await uploadPromise, process.exit(0)
+[7] shouldRefreshKnowledgeGraph()   → Check if threshold reached (every 50 msgs)
+[8] getCachedUserContext()          → Read context-cache.json
     ├─► CACHE HIT + FRESH: formatCachedContext() → console.log(JSON)
     └─► CACHE MISS/STALE:
-        ├─► await fetchFreshContext() → API call
-        ├─► setCachedEriContext()     → Write context-cache.json
+        ├─► await fetchFreshContext() → API call with search_query
+        ├─► setCachedUserContext()    → Write context-cache.json
         └─► markKnowledgeGraphRefreshed() → Write context-cache.json
-[9] process.exit(0)
+[9] await uploadPromise             → WAIT for upload to complete
+[10] process.exit(0)
 ```
 
 ### Post Tool Use (`post-tool-use.ts`)
 
-**Trigger**: After Write, Edit, Bash, or Task tools  
-**Latency**: ~5ms  
-**Output**: None (fire-and-forget logging)
+**Trigger**: After Write, Edit, Bash, or Task tools
+**Latency**: ~50-200ms (includes API call)
+**Output**: None (logs AI actions)
 
 ```
 [1] loadConfig()                    → Read config.json
 [2] Bun.stdin.text()                → Parse JSON from Claude Code
-[3] shouldLogTool()                 → Filter significant tools
+[3] shouldLogTool()                 → Filter significant tools (skip ls, pwd, cat, etc.)
     └─► FALSE: process.exit(0)
 [4] formatToolSummary()             → Pure string formatting
-[5] appendClaudisWork()             → Read+Write clawd-context.md (capped 50)
-[6] logToHonchoAsync()              → FIRE-AND-FORGET
+[5] appendClawdWork()               → Read+Write clawd-context.md (capped 50 entries)
+[6] await logToHonchoAsync()        → Upload to Honcho with instance_id
 [7] process.exit(0)
 ```
 
 ### Session End (`session-end.ts`)
 
-**Trigger**: Claude Code session ends  
-**Latency**: ~500ms  
+**Trigger**: Claude Code session ends
+**Latency**: ~500-1000ms
 **Output**: Console log of messages saved
 
 ```
 [1] loadConfig()                    → Read config.json
-[2] Bun.stdin.text()                → Parse JSON (includes transcript_path)
-[3] Get/create workspace, session, peers → cache.json + API calls
-[4] parseTranscript()               → Read transcript file from Claude
-[5] getQueuedMessages()             → Read message-queue.jsonl
-    └─► markMessagesUploaded()      → Clear message-queue.jsonl
-[6] Filter assistant messages from transcript
-[7] await messages.create(assistant) → API call (BLOCKING)
-[8] extractWorkItems()              → Regex parse assistant messages
-[9] loadClaudisLocalContext()       → Read clawd-context.md
-[10] generateClaudisSummary()       → Pure function
-[11] saveClaudisLocalContext()      → Write clawd-context.md
-[12] await messages.create([marker]) → API call
-[13] process.exit(0)
+[2] Bun.stdin.text()                → Parse JSON (includes transcript_path, reason)
+[3] playCooldown()                  → Show exit animation
+[4] Get/create workspace, session, peers → cache.json + API calls
+[5] parseTranscript()               → Read transcript file from Claude
+[6] getQueuedMessages(cwd)          → Read message-queue.jsonl (filtered by cwd)
+[7] await messages.create(queued)   → Upload queued user messages (with instance_id)
+[8] markMessagesUploaded(cwd)       → Clear only this session's messages
+[9] Filter assistant messages from transcript (last 30)
+[10] await messages.create(assistant) → Upload assistant messages (with instance_id)
+[11] extractWorkItems()             → Regex parse assistant messages
+[12] loadClawdLocalContext()        → Read clawd-context.md
+[13] generateClawdSummary()         → Pure function
+[14] saveClawdLocalContext()        → Write clawd-context.md (preserves recent activity)
+[15] await messages.create([marker]) → Log session end marker
+[16] process.exit(0)
 ```
+
+### Pre-Compact (`pre-compact.ts`)
+
+**Trigger**: Context window about to be summarized (auto or manual compaction)
+**Latency**: ~500-1000ms
+**Output**: Memory anchor block to preserve in summary
+
+```
+[1] loadConfig()                    → Read config.json
+[2] Bun.stdin.text()                → Parse JSON (trigger: auto|manual)
+[3] spinner.start()                 → Show "anchoring memory" animation (if auto)
+[4] Get/create workspace, session, peers → cache.json + API calls
+[5] Promise.allSettled([5 API calls]) → PARALLEL (worth the cost at compaction):
+    ├─► peers.getContext(user)      → Full user context
+    ├─► peers.getContext(clawd)     → Full AI context
+    ├─► sessions.summaries()        → Session summaries
+    ├─► peers.chat(user)            → Fresh dialectic about user ($0.03)
+    └─► peers.chat(clawd)           → Fresh dialectic about AI ($0.03)
+[6] formatMemoryCard()              → Build "HONCHO MEMORY ANCHOR" block
+[7] spinner.stop()                  → Show "memory anchored"
+[8] console.log(memoryCard)         → Output anchor block (marked with PRESERVE tags)
+[9] process.exit(0)
+```
+
+**Purpose**: The memory anchor block contains critical facts marked with `(PRESERVE)` tags that should survive conversation summarization.
 
 ---
 
@@ -250,7 +529,7 @@ workspaces.sessions.messages.create(workspaceId, sessionId, {messages})
 | `config.json` | ALL | READ | Yes | Low |
 | `config.json` | session-start | WRITE | Yes | **MEDIUM** |
 | `cache.json` | ALL | READ | Yes | Low |
-| `cache.json` | session-start | WRITE | Yes | **MEDIUM** |
+| `cache.json` | ALL | WRITE | Yes | **MEDIUM** |
 | `context-cache.json` | user-prompt | READ+WRITE | Yes | **HIGH** |
 | `context-cache.json` | session-start | WRITE | Yes | Low |
 | `message-queue.jsonl` | user-prompt | APPEND | Yes | **MEDIUM** |
@@ -258,6 +537,7 @@ workspaces.sessions.messages.create(workspaceId, sessionId, {messages})
 | `clawd-context.md` | session-start | READ | Yes | Low |
 | `clawd-context.md` | post-tool-use | READ+WRITE | Yes | **HIGH** |
 | `clawd-context.md` | session-end | READ+WRITE | Yes | Low |
+| `clawd-context.md` | pre-compact | NONE | - | - |
 
 ---
 
@@ -267,7 +547,7 @@ workspaces.sessions.messages.create(workspaceId, sessionId, {messages})
 
 #### 1. Cache File Race Conditions
 
-**Location**: `cache.ts:65-70` (and similar patterns)
+**Location**: `cache.ts:66-71` (and similar patterns)
 
 **Problem**: `loadIdCache()` → modify → `saveIdCache()` is not atomic.
 
@@ -284,37 +564,34 @@ export function setCachedPeerId(peerName: string, peerId: string): void {
 
 ---
 
-#### 2. Message Queue Not Actually Re-Processed
+#### 2. ~~Message Queue Not Actually Re-Processed~~ ✅ FIXED
 
-**Location**: `session-end.ts:186-189`
+**Status**: This issue has been fixed.
 
-**Problem**: Queued messages are never re-uploaded on session end.
+**What was fixed**: `session-end.ts` now:
+1. Calls `getQueuedMessages(cwd)` to get queued messages for the current session
+2. Uploads them via `messages.create()` with proper instance_id
+3. Only then calls `markMessagesUploaded(cwd)` to clear
 
-```typescript
-const queuedMessages = getQueuedMessages();
-if (queuedMessages.length > 0) {
-  markMessagesUploaded();  // Just clears the file!
-}
-```
-
-If `uploadMessageAsync()` fails (network error), messages are lost forever.
+Messages are now properly uploaded as backup if fire-and-forget failed.
 
 ---
 
-#### 3. Fire-and-Forget Loses Errors Silently
+#### 3. ~~Fire-and-Forget Loses Errors Silently~~ ✅ PARTIALLY FIXED
 
-**Locations**:
-- `session-start.ts:136-143`: `sessions.peers.set().catch(() => {})`
-- `user-prompt.ts:77`: `uploadMessageAsync().catch(() => {})`
-- `post-tool-use.ts:103`: `logToHonchoAsync().catch(() => {})`
+**Status**: Partially fixed - uploads are now awaited.
 
-**Problem**: No logging, no retry, no visibility into failures.
+**What was fixed**:
+- `user-prompt.ts`: Now awaits `uploadPromise` before exit
+- `post-tool-use.ts`: Now awaits `logToHonchoAsync()` before exit
+
+**Remaining issue**: Only `sessions.peers.set()` in session-start is still fire-and-forget (but this is acceptable since it's not critical data).
 
 ---
 
 #### 4. Stale Cache IDs Never Invalidated
 
-**Location**: `cache.ts:46-52`
+**Location**: `cache.ts:47-53`
 
 **Problem**: IDs are cached forever with no TTL.
 
@@ -561,16 +838,16 @@ export const mockConfig = (overrides = {}) => ({
 
 ## Recommended Fixes
 
-| Issue | Severity | Recommended Fix |
-|-------|----------|-----------------|
-| Cache race conditions | 🔴 Critical | Use file locking (`proper-lockfile`) or atomic writes (write to temp, then rename) |
-| Queue not re-uploaded | 🔴 Critical | Actually process queue in session-end with retry logic |
-| Fire-and-forget silent | 🔴 Critical | Add failure counter to context-cache, log to debug file |
-| Stale cache IDs | 🟡 Medium | Add TTL to ID cache (e.g., 24 hours) |
-| JSONL parsing throws | 🟡 Medium | Wrap each line parse in try/catch, log corrupt lines |
-| Context file fragile | 🟡 Medium | Use structured JSON instead of markdown parsing |
-| Session name collision | 🟡 Medium | Include parent directory hash in session name |
-| Transcript path trust | 🟡 Medium | Validate path is under Claude's data directory |
+| Issue | Severity | Status | Recommended Fix |
+|-------|----------|--------|-----------------|
+| Cache race conditions | 🔴 Critical | Open | Use file locking (`proper-lockfile`) or atomic writes (write to temp, then rename) |
+| Queue not re-uploaded | 🔴 Critical | ✅ Fixed | ~~Actually process queue in session-end~~ Now uploads queued messages |
+| Fire-and-forget silent | 🔴 Critical | ✅ Fixed | ~~Add failure counter~~ Now awaits uploads before exit |
+| Stale cache IDs | 🟡 Medium | Open | Add TTL to ID cache (e.g., 24 hours) |
+| JSONL parsing throws | 🟡 Medium | Open | Wrap each line parse in try/catch, log corrupt lines |
+| Context file fragile | 🟡 Medium | Open | Use structured JSON instead of markdown parsing |
+| Session name collision | 🟡 Medium | Open | Include parent directory hash in session name |
+| Transcript path trust | 🟡 Medium | Open | Validate path is under Claude's data directory |
 
 ---
 
@@ -611,15 +888,17 @@ cat ~/.claude/settings.json | jq '.hooks'
 
 2. **Two caching layers**: ID cache (`cache.json`) for API object IDs, context cache (`context-cache.json`) for actual context data with TTL.
 
-3. **Message reliability pattern**: Queue locally first (fast, survives crashes), fire-and-forget upload (async), batch reconciliation on session-end.
+3. **Message reliability pattern**: Queue locally first (instant, survives crashes), start async upload, await before exit, reconcile on session-end.
 
 4. **Dual peer model**: User peer observes self (builds knowledge about user), clawd peer observes user (builds AI self-awareness).
 
-5. **Cost optimization**: `getContext()` is free, `chat()` costs $0.03. Only use `chat()` at session-start, use cached/free APIs during session.
+5. **Cost optimization**: `getContext()` is free, `chat()` costs $0.03. Only use `chat()` at session-start and pre-compact, use cached/free APIs during session.
 
-6. **Critical bug**: Message queue is cleared but not re-processed. Failed uploads are silently lost.
+6. **Instance isolation**: Parallel Claude sessions in the same directory are tracked via `instance_id` in message metadata.
 
-7. **Race condition**: All cache read-modify-write patterns can lose data under concurrent access.
+7. **Pre-compact strategy**: When context window fills, inject a "memory anchor" block with PRESERVE tags to survive summarization.
+
+8. **Remaining risk**: Cache file race conditions can still lose data under concurrent hook access (non-atomic read-modify-write).
 
 ---
 
