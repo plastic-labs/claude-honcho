@@ -237,7 +237,7 @@ export async function handlePostToolUse(): Promise<void> {
   appendClawdWork(summary);
 
   // Upload to Honcho and wait for completion
-  await logToHonchoAsync(config, cwd, summary).catch(() => {});
+  await logToHonchoAsync(config, cwd, summary).catch((e) => logHook("post-tool-use", `Upload failed: ${e}`, { error: String(e) }));
 
   process.exit(0);
 }

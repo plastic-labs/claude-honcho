@@ -346,41 +346,51 @@ export function formatLogGroup(entries: LogEntry[], title?: string): string[] {
 export function watchLogs(callback: (entries: LogEntry[]) => void): () => void {
   ensureLogDir();
 
-  let lastSize = 0;
+  // Track by line count, not byte size (more reliable)
+  let lastLineCount = 0;
   if (existsSync(LOG_FILE)) {
-    lastSize = Bun.file(LOG_FILE).size;
+    try {
+      const content = readFileSync(LOG_FILE, "utf-8");
+      lastLineCount = content.trim().split("\n").filter(l => l).length;
+    } catch {
+      lastLineCount = 0;
+    }
   }
 
   const checkForUpdates = () => {
     if (!existsSync(LOG_FILE)) return;
 
-    const currentSize = Bun.file(LOG_FILE).size;
-    if (currentSize > lastSize) {
+    try {
       const content = readFileSync(LOG_FILE, "utf-8");
-      const lines = content.trim().split("\n");
+      const lines = content.trim().split("\n").filter(l => l);
+      const currentLineCount = lines.length;
 
-      // Get only new lines
-      const newLines = lines.slice(-Math.ceil((currentSize - lastSize) / 100));
-      const newEntries = newLines
-        .map(line => {
-          try {
-            return JSON.parse(line) as LogEntry;
-          } catch {
-            return null;
-          }
-        })
-        .filter((e): e is LogEntry => e !== null);
+      if (currentLineCount > lastLineCount) {
+        // Get only the new lines since last check
+        const newLines = lines.slice(lastLineCount);
+        const newEntries = newLines
+          .map(line => {
+            try {
+              return JSON.parse(line) as LogEntry;
+            } catch {
+              return null;
+            }
+          })
+          .filter((e): e is LogEntry => e !== null);
 
-      if (newEntries.length > 0) {
-        callback(newEntries);
+        if (newEntries.length > 0) {
+          callback(newEntries);
+        }
+
+        lastLineCount = currentLineCount;
       }
-
-      lastSize = currentSize;
+    } catch {
+      // Ignore read errors during polling
     }
   };
 
-  // Poll every 300ms for snappier response
-  const interval = setInterval(checkForUpdates, 300);
+  // Poll every 200ms for snappier response
+  const interval = setInterval(checkForUpdates, 200);
 
   return () => {
     clearInterval(interval);

@@ -193,6 +193,17 @@ function getHonchoCLAWDHooks(): ClaudeSettings["hooks"] {
         ],
       },
     ],
+    Stop: [
+      {
+        hooks: [
+          {
+            type: "command",
+            command: "honcho-clawd hook stop",
+            timeout: 10000,
+          },
+        ],
+      },
+    ],
   };
 }
 

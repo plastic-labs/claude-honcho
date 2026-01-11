@@ -23,10 +23,12 @@ import { handleSessionEnd } from "./hooks/session-end.js";
 import { handlePostToolUse } from "./hooks/post-tool-use.js";
 import { handleUserPrompt } from "./hooks/user-prompt.js";
 import { handlePreCompact } from "./hooks/pre-compact.js";
+import { handleStop } from "./hooks/stop.js";
 import * as s from "./styles.js";
 import { previewAll as previewPixel } from "./pixel.js";
 import { handleHandoff } from "./skills/handoff.js";
 import { getRecentLogs, watchLogs, formatLogEntry, clearLogs, getLogPath, printLegend, LogFilter } from "./log.js";
+import { loadIdCache, clearAllCaches, getClaudeInstanceId, loadContextCache } from "./cache.js";
 // import { handleCerebras } from "./skills/cerebras.js";  // Disabled for now
 
 const VERSION = "0.1.0";
@@ -451,6 +453,9 @@ async function handleHook(hookName: string): Promise<void> {
       break;
     case "pre-compact":
       await handlePreCompact();
+      break;
+    case "stop":
+      await handleStop();
       break;
     default:
       console.error(`Unknown hook: ${hookName}`);
@@ -919,11 +924,89 @@ Session Management Commands:
 }
 
 // ============================================
+// Cache Command - Inspect/Clear Cache
+// ============================================
+
+function handleCache(subcommand: string): void {
+  switch (subcommand) {
+    case "show":
+    case "status":
+    case undefined:
+    case "": {
+      const idCache = loadIdCache();
+      const contextCache = loadContextCache();
+      const instanceId = getClaudeInstanceId();
+
+      console.log("");
+      console.log(s.header("Honcho-Clawd Cache"));
+      console.log("");
+
+      console.log(s.section("ID Cache"));
+      if (idCache.workspace) {
+        console.log(`  Workspace: ${idCache.workspace.name} → ${s.dim(idCache.workspace.id.slice(0, 8) + "...")}`);
+      } else {
+        console.log(`  Workspace: ${s.dim("(not cached)")}`);
+      }
+
+      if (idCache.sessions) {
+        const sessionCount = Object.keys(idCache.sessions).length;
+        console.log(`  Sessions: ${sessionCount} cached`);
+        for (const [cwd, session] of Object.entries(idCache.sessions).slice(0, 5)) {
+          const shortCwd = cwd.split("/").slice(-2).join("/");
+          console.log(`    ${s.dim(shortCwd)}: ${session.name} (${s.dim(session.updatedAt?.slice(0, 10) || "?")})`);
+        }
+        if (sessionCount > 5) {
+          console.log(`    ${s.dim(`...and ${sessionCount - 5} more`)}`);
+        }
+      }
+
+      if (idCache.peers) {
+        console.log(`  Peers: ${Object.keys(idCache.peers).join(", ")}`);
+      }
+
+      console.log("");
+      console.log(s.section("Instance Tracking"));
+      console.log(`  Claude Instance ID: ${instanceId ? instanceId.slice(0, 12) + "..." : s.dim("(not set)")}`);
+
+      console.log("");
+      console.log(s.section("Context Cache"));
+      if (contextCache.userContext) {
+        const age = Math.round((Date.now() - contextCache.userContext.fetchedAt) / 1000);
+        console.log(`  User Context: ${age}s old`);
+      } else {
+        console.log(`  User Context: ${s.dim("(not cached)")}`);
+      }
+      if (contextCache.messageCount) {
+        console.log(`  Message Count: ${contextCache.messageCount}`);
+      }
+
+      console.log("");
+      console.log(s.dim("Run 'honcho-clawd cache clear' to reset all caches"));
+      break;
+    }
+    case "clear": {
+      clearAllCaches();
+      console.log(s.success("All caches cleared"));
+      console.log(s.dim("Next hook will re-fetch IDs from Honcho"));
+      break;
+    }
+    default:
+      console.log(`
+Cache Commands:
+  honcho-clawd cache [show]   Show current cache state
+  honcho-clawd cache clear    Clear all cached IDs (forces re-fetch)
+`);
+  }
+}
+
+// ============================================
 // Tail Command - Live Activity Log
 // ============================================
 
 async function handleTail(args: string[]): Promise<void> {
-  const subcommand = args[0];
+  // Filter out flags to find the actual subcommand
+  const nonFlagArgs = args.filter(a => !a.startsWith("-"));
+  const subcommand = nonFlagArgs[0];
 
   if (subcommand === "clear") {
     clearLogs();
@@ -941,7 +1024,10 @@ async function handleTail(args: string[]): Promise<void> {
     return;
   }
 
-  const follow = args.includes("-f") || args.includes("--follow") || !subcommand;
+  // Live follow is the default behavior (the whole point of tail!)
+  // Only disable with explicit --no-follow
+  const noFollow = args.includes("--no-follow");
+  const follow = !noFollow;
   const showAll = args.includes("-a") || args.includes("--all");
   const countArg = args.find(a => a.startsWith("-n"));
   const count = countArg ? parseInt(countArg.slice(2)) || 50 : 50;
@@ -1188,6 +1274,9 @@ switch (command) {
     break;
   case "logs":
     await handleTail(args.slice(1));
+    break;
+  case "cache":
+    handleCache(args[1]);
     break;
   // case "cerebras":
   // case "fast":

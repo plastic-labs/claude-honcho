@@ -139,7 +139,7 @@ export async function handleUserPrompt(): Promise<void> {
   // For trivial prompts, skip heavy context retrieval but still upload
   if (shouldSkipContextRetrieval(prompt)) {
     logHook("user-prompt", "Skipping context (trivial prompt)");
-    if (uploadPromise) await uploadPromise.catch(() => {});
+    if (uploadPromise) await uploadPromise.catch((e) => logHook("user-prompt", `Upload failed: ${e}`, { error: String(e) }));
     process.exit(0);
   }
 
@@ -155,7 +155,7 @@ export async function handleUserPrompt(): Promise<void> {
     if (contextParts.length > 0) {
       outputContext(config.peerName, contextParts);
     }
-    if (uploadPromise) await uploadPromise.catch(() => {});
+    if (uploadPromise) await uploadPromise.catch((e) => logHook("user-prompt", `Upload failed: ${e}`, { error: String(e) }));
     process.exit(0);
   }
 
@@ -177,7 +177,7 @@ export async function handleUserPrompt(): Promise<void> {
   }
 
   // Ensure upload completes before exit
-  if (uploadPromise) await uploadPromise.catch(() => {});
+  if (uploadPromise) await uploadPromise.catch((e) => logHook("user-prompt", `Upload failed: ${e}`, { error: String(e) }));
   process.exit(0);
 }
 

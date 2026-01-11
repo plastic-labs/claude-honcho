@@ -179,7 +179,7 @@ export async function handleSessionStart(): Promise<void> {
       logCache("hit", "session", sessionName);
       // Update session metadata with current git state (fire-and-forget)
       logApiCall("sessions.update", "PUT", `metadata for ${sessionName}`);
-      client.workspaces.sessions.update(workspaceId, sessionId, { metadata: sessionMetadata }).catch(() => {});
+      client.workspaces.sessions.update(workspaceId, sessionId, { metadata: sessionMetadata }).catch((e) => logHook("session-start", `Metadata update failed: ${e}`));
     } else {
       logCache("miss", "session", "fetching from Honcho");
       const startTime = Date.now();
@@ -237,7 +237,7 @@ export async function handleSessionStart(): Promise<void> {
         [config.peerName]: { observe_me: true, observe_others: false },
         [config.claudePeer]: { observe_me: false, observe_others: true },
       })
-      .catch(() => {});
+      .catch((e) => logHook("session-start", `Set peers failed: ${e}`));
 
     // Store session mapping
     if (!getSessionForPath(cwd)) {
@@ -270,7 +270,7 @@ export async function handleSessionStart(): Promise<void> {
               metadata: obs.metadata,
             })
           )
-        ).catch(() => {});
+        ).catch((e) => logHook("session-start", `Git observations upload failed: ${e}`));
       }
     }
 
