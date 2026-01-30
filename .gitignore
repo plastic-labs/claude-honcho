@@ -41,7 +41,8 @@ coverage/
 # TypeScript cache
 *.tsbuildinfo
 
-# Claude Code project instructions (user-specific)
+# Claude Code project-specific settings (user-specific)
+.claude/
 CLAUDE.md
 
 # Temporary files
