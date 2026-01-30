@@ -170,36 +170,13 @@ export HONCHO_ENDPOINT="local"  # Uses localhost:8000
 export HONCHO_ENDPOINT="http://your-server:8000/v3"
 ```
 
----
-
-## Alternative: CLI Installation
-
-If you prefer using the CLI instead of the plugin system:
+### Temporarily disabling memory
 
 ```bash
-# Clone and install
-git clone https://github.com/plastic-labs/honcho-claude-code-plugin.git
-cd honcho-claude-code-plugin
-bun install && bun link
-
-# Configure interactively
-honcho init
-
-# Install hooks to Claude Code
-honcho install
+export HONCHO_ENABLED="false"
 ```
 
-The CLI provides additional commands:
-
-```bash
-honcho status              # Show status
-honcho enable/disable      # Toggle memory on/off
-honcho session new <name>  # Create named session
-honcho session switch <n>  # Switch sessions
-honcho endpoint local      # Switch to local Honcho
-honcho tail                # Watch activity log
-honcho handoff             # Generate handoff summary
-```
+Then restart Claude Code. Set back to `true` (or remove the line) to re-enable.
 
 ---
 
@@ -232,25 +209,6 @@ The plugin hooks into Claude Code's lifecycle events:
 
 ---
 
-## Configuration File (Advanced)
-
-If you prefer a config file over environment variables, create `~/.honcho/config.json`:
-
-```json
-{
-  "apiKey": "hch-v2-...",
-  "peerName": "yourname",
-  "workspace": "claude_code",
-  "claudePeer": "claude",
-  "saveMessages": true,
-  "enabled": true
-}
-```
-
-Environment variables take precedence over the config file.
-
----
-
 ## Uninstalling
 
 ```
@@ -258,7 +216,7 @@ Environment variables take precedence over the config file.
 /plugin marketplace remove honcho-memory
 ```
 
-Or remove the environment variables from your shell config.
+Then remove the environment variables from your shell config if desired.
 
 ---
 

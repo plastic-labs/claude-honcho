@@ -3,19 +3,6 @@
   "version": "0.1.0",
   "description": "Persistent memory for Claude Code sessions using Honcho by Plastic Labs",
   "type": "module",
-  "bin": {
-    "honcho": "./dist/cli.js"
-  },
-  "scripts": {
-    "build": "bun build ./src/cli.ts --outdir ./dist --target node",
-    "dev": "bun run ./src/cli.ts",
-    "update": "rm -f bun.lockb && bun install && bun run build && bun link",
-    "prepublishOnly": "bun run build"
-  },
-  "files": [
-    "dist",
-    "README.md"
-  ],
   "keywords": [
     "claude",
     "claude-code",
@@ -23,10 +10,9 @@
     "memory",
     "context",
     "ai",
-    "llm",
-    "honcho-claude-code-plugin"
+    "llm"
   ],
-  "author": "",
+  "author": "Plastic Labs",
   "license": "MIT",
   "dependencies": {
     "@honcho-ai/sdk": "^2.0.0"
