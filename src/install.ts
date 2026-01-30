@@ -209,6 +209,7 @@ export function installHooks(): { success: boolean; message: string; warnings?: 
   settings.hooks = settings.hooks || {};
 
   for (const [event, eventHooks] of Object.entries(honchoHooks)) {
+    settings.hooks[event] = settings.hooks[event] || [];
     settings.hooks[event].push(...eventHooks);
   }
 

@@ -1,14 +1,8 @@
-import Honcho from "@honcho-ai/core";
+import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getHonchoClientOptions } from "../config.js";
 import { existsSync, readFileSync } from "fs";
 import { basename } from "path";
 import {
-  getCachedWorkspaceId,
-  setCachedWorkspaceId,
-  getCachedPeerId,
-  setCachedPeerId,
-  getCachedSessionId,
-  setCachedSessionId,
   getQueuedMessages,
   markMessagesUploaded,
   generateClaudeSummary,
@@ -19,7 +13,6 @@ import {
 import { playCooldown } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 
-const WORKSPACE_APP_TAG = "honcho-plugin";
 
 interface HookInput {
   session_id?: string;
@@ -220,45 +213,13 @@ export async function handleSessionEnd(): Promise<void> {
   logHook("session-end", `Session ending`, { reason });
 
   try {
-    const client = new Honcho(getHonchoClientOptions(config));
-
-    // Get or create workspace (use cache)
-    let workspaceId = getCachedWorkspaceId(config.workspace);
-    if (!workspaceId) {
-      const workspace = await client.workspaces.getOrCreate({
-        id: config.workspace,
-        metadata: { app: WORKSPACE_APP_TAG },
-      });
-      workspaceId = workspace.id;
-      setCachedWorkspaceId(config.workspace, workspaceId);
-    }
-
-    // Get or create session (use cache)
+    const honcho = new Honcho(getHonchoClientOptions(config));
     const sessionName = getSessionName(cwd);
-    let sessionId = getCachedSessionId(cwd);
-    if (!sessionId) {
-      const session = await client.workspaces.sessions.getOrCreate(workspaceId, {
-        id: sessionName,
-        metadata: { cwd },
-      });
-      sessionId = session.id;
-      setCachedSessionId(cwd, sessionName, sessionId);
-    }
 
-    // Ensure peers exist (use cache)
-    let userPeerId = getCachedPeerId(config.peerName);
-    let claudePeerId = getCachedPeerId(config.claudePeer);
-
-    if (!userPeerId) {
-      const peer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.peerName });
-      userPeerId = peer.id;
-      setCachedPeerId(config.peerName, peer.id);
-    }
-    if (!claudePeerId) {
-      const peer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
-      claudePeerId = peer.id;
-      setCachedPeerId(config.claudePeer, peer.id);
-    }
+    // Get session and peers using new fluent API
+    const session = await honcho.session(sessionName);
+    const userPeer = await honcho.peer(config.peerName);
+    const claudePeer = await honcho.peer(config.claudePeer);
 
     // Parse transcript
     const transcriptMessages = transcriptPath ? parseTranscript(transcriptPath) : [];
@@ -274,18 +235,14 @@ export async function handleSessionEnd(): Promise<void> {
       // Skip oversized messages (likely pastes/dumps, not useful observations)
       const validMessages = queuedMessages.filter((msg) => msg.content.length < 5000);
       if (validMessages.length > 0) {
-        logApiCall("sessions.messages.create", "POST", `${validMessages.length} queued user messages`);
-        const userMessages = validMessages.map((msg) => ({
-          content: msg.content,
-          peer_id: config.peerName,
-          metadata: {
-            ...(msg.instanceId ? { instance_id: msg.instanceId } : {}),
-            session_affinity: sessionName,  // Tag for project-scoped fact extraction
-          },
-        }));
-        await client.workspaces.sessions.messages.create(workspaceId, sessionId, {
-          messages: userMessages,
-        });
+        logApiCall("session.addMessages", "POST", `${validMessages.length} queued user messages`);
+        const userMessages = validMessages.map((msg) =>
+          userPeer.message(msg.content, {
+            instance_id: msg.instanceId || undefined,
+            session_affinity: sessionName,
+          })
+        );
+        await session.addMessages(userMessages);
       }
       markMessagesUploaded(cwd);  // Only clear this session's messages
     }
@@ -314,22 +271,18 @@ export async function handleSessionEnd(): Promise<void> {
       // This is the KEY fix: capturing actual reasoning, not just tool calls
       if (assistantMessages.length > 0) {
         const meaningfulCount = assistantMessages.filter(m => m.isMeaningful).length;
-        logApiCall("sessions.messages.create", "POST", `${assistantMessages.length} assistant msgs (${meaningfulCount} meaningful)`);
+        logApiCall("session.addMessages", "POST", `${assistantMessages.length} assistant msgs (${meaningfulCount} meaningful)`);
 
-        const messagesToSend = assistantMessages.map((msg) => ({
-          content: msg.content,
-          peer_id: config.claudePeer,
-          metadata: {
-            ...(instanceId ? { instance_id: instanceId } : {}),
+        const messagesToSend = assistantMessages.map((msg) =>
+          claudePeer.message(msg.content, {
+            instance_id: instanceId || undefined,
             type: msg.isMeaningful ? 'assistant_prose' : 'assistant_brief',
             meaningful: msg.isMeaningful || false,
-            session_affinity: sessionName,  // Tag for project-scoped fact extraction
-          },
-        }));
+            session_affinity: sessionName,
+          })
+        );
 
-        await client.workspaces.sessions.messages.create(workspaceId, sessionId, {
-          messages: messagesToSend,
-        });
+        await session.addMessages(messagesToSend);
       }
     }
 
@@ -360,18 +313,15 @@ export async function handleSessionEnd(): Promise<void> {
     // =====================================================
     // Step 4: Log session end marker
     // =====================================================
-    await client.workspaces.sessions.messages.create(workspaceId, sessionId, {
-      messages: [
+    await session.addMessages([
+      claudePeer.message(
+        `[Session ended] Reason: ${reason}, Messages: ${transcriptMessages.length}, Time: ${new Date().toISOString()}`,
         {
-          content: `[Session ended] Reason: ${reason}, Messages: ${transcriptMessages.length}, Time: ${new Date().toISOString()}`,
-          peer_id: config.claudePeer,
-          metadata: {
-            ...(instanceId ? { instance_id: instanceId } : {}),
-            session_affinity: sessionName,  // Tag for project-scoped fact extraction
-          },
-        },
-      ],
-    });
+          instance_id: instanceId || undefined,
+          session_affinity: sessionName,
+        }
+      ),
+    ]);
 
     const meaningfulCount = assistantMessages.filter(m => m.isMeaningful).length;
     logHook("session-end", `Session saved: ${assistantMessages.length} assistant msgs (${meaningfulCount} meaningful), ${queuedMessages.length} queued msgs`);

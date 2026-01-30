@@ -16,7 +16,8 @@ import {
   type HonchoCLAUDEConfig,
   type HonchoEnvironment,
 } from "./config.js";
-import Honcho from "@honcho-ai/core";
+import { Honcho } from "@honcho-ai/sdk";
+import { getHonchoBaseUrl } from "./config.js";
 import { installHooks, uninstallHooks, checkHooksInstalled, verifyCommandAvailable } from "./install.js";
 import { handleSessionStart } from "./hooks/session-start.js";
 import { handleSessionEnd } from "./hooks/session-end.js";
@@ -89,45 +90,42 @@ async function init(): Promise<void> {
     apiKey = apiKeyInput;
   }
 
-  // Validate API key by connecting
-  const client = new Honcho({
-    apiKey,
-    environment: endpointEnv,
-  });
+  // Determine base URL for the new SDK
+  const baseUrl = endpointEnv === "local"
+    ? "http://localhost:8000/v3"
+    : "https://api.honcho.dev/v3";
 
   console.log(`Connecting to Honcho ${isLocal ? "(local)" : "(SaaS)"}...`);
 
-  // Step 2: Workspace - Try to discover existing honcho workspaces first
+  // Step 2: Workspace - New SDK requires workspace at construction
   console.log("");
   console.log(s.section("Step 2: Workspace"));
   console.log(s.dim("Workspaces group your sessions and peers together."));
 
+  // For setup, we need to list workspaces first (before we know which one to use)
+  // Try to discover existing workspaces using a temporary client
   let existingWorkspaces: Array<{ id: string; name: string; sessions: number }> = [];
   try {
-    // Try to list workspaces (may not be available in all API versions)
-    const workspaces = await (client as any).workspaces.list();
+    // Create a temporary client with a placeholder workspace to list workspaces
+    const tempHoncho = new Honcho({ apiKey, baseUrl, workspaceId: "_temp" });
+    const workspaces = await tempHoncho.workspaces();
     if (workspaces && Array.isArray(workspaces)) {
       // Filter to only show honcho tagged workspaces
       for (const ws of workspaces) {
         const metadata = (ws as any).metadata || {};
         if (metadata.app === WORKSPACE_APP_TAG) {
-          let sessionCount = 0;
-          try {
-            const sessions = await client.workspaces.sessions.list(ws.id);
-            sessionCount = Array.isArray(sessions) ? sessions.length : 0;
-          } catch { /* ignore */ }
-          existingWorkspaces.push({ id: ws.id, name: ws.id, sessions: sessionCount });
+          existingWorkspaces.push({ id: ws.id, name: ws.id, sessions: 0 });
         }
       }
     }
   } catch {
-    // workspaces.list may not be available, continue to manual entry
+    // workspaces() may not be available, continue to manual entry
   }
 
   let workspace: string;
   if (existingWorkspaces.length > 0) {
     console.log(`\nExisting honcho workspaces found:`);
-    existingWorkspaces.forEach((ws, i) => console.log(`  ${i + 1}. ${ws.name} (${ws.sessions} session${ws.sessions === 1 ? '' : 's'})`));
+    existingWorkspaces.forEach((ws, i) => console.log(`  ${i + 1}. ${ws.name}`));
     console.log(`  ${existingWorkspaces.length + 1}. Create new workspace`);
 
     const wsChoice = await prompt(`\nSelect workspace (1-${existingWorkspaces.length + 1}) or enter name: `);
@@ -146,34 +144,19 @@ async function init(): Promise<void> {
     workspace = await prompt("Enter workspace name (default: claude_code): ") || "claude_code";
   }
 
-  let workspaceId: string;
+  // Now create the real Honcho client with the chosen workspace
+  let honcho: Honcho;
   let isExistingWorkspace = false;
   try {
-    // Create workspace with honcho app tag in metadata
-    const ws = await client.workspaces.getOrCreate({
-      id: workspace,
-      metadata: { app: WORKSPACE_APP_TAG },
-    });
-    workspaceId = ws.id;
+    honcho = new Honcho({ apiKey, baseUrl, workspaceId: workspace });
 
-    // If workspace existed but doesn't have our tag, update it
-    const wsMetadata = (ws as any).metadata || {};
-    if (wsMetadata.app !== WORKSPACE_APP_TAG) {
-      try {
-        await (client.workspaces as any).update(workspaceId, {
-          metadata: { ...wsMetadata, app: WORKSPACE_APP_TAG },
-        });
-      } catch {
-        // Update may not be available, continue anyway
-      }
-    }
-
-    // Check if workspace has existing sessions to determine if it's "existing"
+    // The workspace is created lazily on first API call
+    // Try to list peers to see if it's an existing workspace
     try {
-      const sessions = await client.workspaces.sessions.list(workspaceId);
-      if (sessions && Array.isArray(sessions) && sessions.length > 0) {
+      const peers = await honcho.peers();
+      if (peers && Array.isArray(peers) && peers.length > 0) {
         isExistingWorkspace = true;
-        console.log(s.success(`Connected to existing workspace ${s.highlight(workspace)} (${sessions.length} session${sessions.length === 1 ? '' : 's'})`));
+        console.log(s.success(`Connected to existing workspace ${s.highlight(workspace)}`));
       } else {
         console.log(s.success(`Created new workspace ${s.highlight(workspace)}`));
       }
@@ -196,8 +179,8 @@ async function init(): Promise<void> {
 
   if (isExistingWorkspace) {
     try {
-      // Try to list peers from the workspace
-      const peers = await (client.workspaces as any).peers.list(workspaceId);
+      // Try to list peers from the workspace using new SDK
+      const peers = await honcho.peers();
       if (peers && Array.isArray(peers)) {
         existingPeers = peers.map((p: any) => p.id).filter((id: string) => !id.includes('claude'));
         if (existingPeers.length > 0) {
@@ -220,7 +203,7 @@ async function init(): Promise<void> {
         }
       }
     } catch {
-      // peers.list may not exist, fall through to manual entry
+      // peers() may not exist, fall through to manual entry
     }
   }
 
@@ -234,9 +217,9 @@ async function init(): Promise<void> {
     process.exit(1);
   }
 
-  // Verify/create the peer
+  // Verify/create the peer using new SDK fluent API
   try {
-    await client.workspaces.peers.getOrCreate(workspaceId, { id: peerName });
+    await honcho.peer(peerName);
     if (!existingPeers.includes(peerName)) {
       console.log(s.success(`Created peer: ${s.highlight(peerName)}`));
     }
@@ -250,9 +233,9 @@ async function init(): Promise<void> {
   console.log(s.section("Step 4: Claude Configuration"));
   const claudePeer = await prompt("Enter Claude's peer name (default: claude): ") || "claude";
 
-  // Create Claude's peer
+  // Create Claude's peer using new SDK
   try {
-    await client.workspaces.peers.getOrCreate(workspaceId, { id: claudePeer });
+    await honcho.peer(claudePeer);
   } catch {
     // Ignore errors for Claude peer creation
   }
@@ -477,26 +460,20 @@ async function sessionNew(name?: string): Promise<void> {
   }
 
   try {
-    // Connect to Honcho
-    const client = new Honcho(getHonchoClientOptions(config));
+    // Connect to Honcho using new SDK
+    const honcho = new Honcho(getHonchoClientOptions(config));
 
-    const workspace = await client.workspaces.getOrCreate({
-      id: config.workspace,
-      metadata: { app: WORKSPACE_APP_TAG },
-    });
-
-    // Use getOrCreate - this will find existing session or create new one
-    const session = await client.workspaces.sessions.getOrCreate(workspace.id, {
-      id: validName,
-      metadata: { cwd, updated_at: new Date().toISOString() },
-    });
+    // Use honcho.session() - this will find existing session or create new one
+    const session = await honcho.session(validName);
 
     // Check if this is an existing session with history
     let isExisting = false;
     try {
-      const summaries = await client.workspaces.sessions.summaries(workspace.id, session.id);
-      const s = summaries as any;
-      if (s?.short_summary?.content || s?.long_summary?.content) {
+      const summaries = await session.summaries();
+      const sum = summaries as any;
+      const shortSummary = sum?.shortSummary || sum?.short_summary;
+      const longSummary = sum?.longSummary || sum?.long_summary;
+      if (shortSummary?.content || longSummary?.content) {
         isExisting = true;
       }
     } catch {
@@ -504,14 +481,14 @@ async function sessionNew(name?: string): Promise<void> {
     }
 
     // Ensure peers exist and configure observation
-    await client.workspaces.peers.getOrCreate(workspace.id, { id: config.peerName });
-    await client.workspaces.peers.getOrCreate(workspace.id, { id: config.claudePeer });
+    const userPeer = await honcho.peer(config.peerName);
+    const claudePeer = await honcho.peer(config.claudePeer);
 
     try {
-      await client.workspaces.sessions.peers.set(workspace.id, session.id, {
-        [config.peerName]: { observe_me: true, observe_others: false },
-        [config.claudePeer]: { observe_me: false, observe_others: true },
-      });
+      await Promise.all([
+        session.setPeerConfiguration(userPeer, { observeMe: true, observeOthers: false }),
+        session.setPeerConfiguration(claudePeer, { observeMe: false, observeOthers: true }),
+      ]);
     } catch {
       // Session peers API may not be available
     }
@@ -561,29 +538,10 @@ async function sessionList(): Promise<void> {
     console.log(s.dim("No local session mappings yet."));
   }
 
-  // Try to list sessions from Honcho
-  try {
-    const client = new Honcho(getHonchoClientOptions(config));
-
-    const workspace = await client.workspaces.getOrCreate({
-      id: config.workspace,
-      metadata: { app: WORKSPACE_APP_TAG },
-    });
-    const sessions = await client.workspaces.sessions.list(workspace.id);
-
-    if (sessions && Array.isArray(sessions)) {
-      console.log(`\nAll sessions in workspace "${config.workspace}":`);
-      for (const session of sessions.slice(0, 20)) {
-        const s = session as any;
-        console.log(`  - ${s.id}`);
-      }
-      if (sessions.length > 20) {
-        console.log(`  ... and ${sessions.length - 20} more`);
-      }
-    }
-  } catch {
-    // Could not list from Honcho, just show local
-  }
+  // Try to list sessions from Honcho using new SDK
+  // Note: The new SDK doesn't have a direct sessions list method at the honcho level
+  // For now, we just show local mappings
+  // TODO: Check if there's a way to list all sessions in the new SDK
 
   console.log("");
 }
@@ -673,9 +631,9 @@ async function workspaceList(): Promise<void> {
   console.log(`${s.label("Current")}: ${s.highlight(config.workspace)}`);
 
   try {
-    const client = new Honcho(getHonchoClientOptions(config));
+    const honcho = new Honcho(getHonchoClientOptions(config));
+    const workspaces = await honcho.workspaces();
 
-    const workspaces = await (client as any).workspaces.list();
     if (workspaces && Array.isArray(workspaces)) {
       const claudeWorkspaces = workspaces.filter((ws: any) =>
         ws.metadata?.app === WORKSPACE_APP_TAG
@@ -721,17 +679,13 @@ async function workspaceSwitch(name: string): Promise<void> {
   const oldWorkspace = config.workspace;
 
   try {
-    const client = new Honcho(getHonchoClientOptions(config));
-
-    // Verify or create the workspace
-    await client.workspaces.getOrCreate({
-      id: name,
-      metadata: { app: WORKSPACE_APP_TAG },
-    });
-
-    // Update config
+    // Just update config - workspace will be created lazily on first API call
     config.workspace = name;
     saveConfig(config);
+
+    // Verify it works by making a simple API call
+    const honcho = new Honcho(getHonchoClientOptions(config));
+    await honcho.peers(); // This will create the workspace if needed
 
     console.log(s.success("Switched workspace"));
     console.log(`  ${s.label("From")}: ${oldWorkspace}`);
@@ -739,6 +693,9 @@ async function workspaceSwitch(name: string): Promise<void> {
     console.log("");
     console.log(s.dim("New Claude Code sessions will use this workspace."));
   } catch (error) {
+    // Revert config on failure
+    config.workspace = oldWorkspace;
+    saveConfig(config);
     console.error(`Error switching workspace: ${error}`);
     process.exit(1);
   }
@@ -767,13 +724,13 @@ async function workspaceRename(newName: string): Promise<void> {
   }
 
   try {
-    const client = new Honcho(getHonchoClientOptions(config));
+    // Update config with new workspace name
+    config.workspace = newName;
+    saveConfig(config);
 
-    // Create the new workspace
-    await client.workspaces.getOrCreate({
-      id: newName,
-      metadata: { app: WORKSPACE_APP_TAG },
-    });
+    // Verify it works by making a simple API call (workspace created lazily)
+    const honcho = new Honcho(getHonchoClientOptions(config));
+    await honcho.peers();
 
     // Update config
     config.workspace = newName;
@@ -825,13 +782,8 @@ async function peerList(): Promise<void> {
   console.log("");
 
   try {
-    const client = new Honcho(getHonchoClientOptions(config));
-
-    const workspace = await client.workspaces.getOrCreate({
-      id: config.workspace,
-      metadata: { app: WORKSPACE_APP_TAG },
-    });
-    const peers = await (client.workspaces as any).peers.list(workspace.id);
+    const honcho = new Honcho(getHonchoClientOptions(config));
+    const peers = await honcho.peers();
 
     if (peers && Array.isArray(peers)) {
       const userPeers = peers.filter((p: any) => !p.id.includes('claude'));
@@ -1135,8 +1087,9 @@ async function handleEndpoint(subcommand: string, arg?: string): Promise<void> {
       console.log(s.dim(`Testing connection to ${info.url}...`));
       try {
         const clientOpts = getHonchoClientOptions(config);
-        const client = new Honcho(clientOpts);
-        await client.workspaces.getOrCreate({ id: config.workspace });
+        const honcho = new Honcho(clientOpts);
+        // Test by listing peers (workspace will be created lazily)
+        await honcho.peers();
         console.log(s.success("Connection successful"));
       } catch (error: any) {
         console.error(s.error(`Connection failed: ${error.message}`));

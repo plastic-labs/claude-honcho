@@ -1,18 +1,9 @@
-import Honcho from "@honcho-ai/core";
+import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getHonchoClientOptions } from "../config.js";
 import { basename } from "path";
-import {
-  getCachedWorkspaceId,
-  setCachedWorkspaceId,
-  getCachedPeerId,
-  setCachedPeerId,
-  getCachedSessionId,
-  setCachedSessionId,
-} from "../cache.js";
 import { Spinner } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 
-const WORKSPACE_APP_TAG = "honcho-plugin";
 
 interface HookInput {
   session_id?: string;
@@ -148,80 +139,48 @@ export async function handlePreCompact(): Promise<void> {
   }
 
   try {
-    const client = new Honcho(getHonchoClientOptions(config));
-
-    // Get workspace ID (use cache)
-    let workspaceId = getCachedWorkspaceId(config.workspace);
-    if (!workspaceId) {
-      const workspace = await client.workspaces.getOrCreate({
-        id: config.workspace,
-        metadata: { app: WORKSPACE_APP_TAG },
-      });
-      workspaceId = workspace.id;
-      setCachedWorkspaceId(config.workspace, workspaceId);
-    }
-
-    // Get session ID (use cache)
+    const honcho = new Honcho(getHonchoClientOptions(config));
     const sessionName = getSessionName(cwd);
-    let sessionId = getCachedSessionId(cwd);
-    if (!sessionId) {
-      const session = await client.workspaces.sessions.getOrCreate(workspaceId, {
-        id: sessionName,
-        metadata: { cwd },
-      });
-      sessionId = session.id;
-      setCachedSessionId(cwd, sessionName, sessionId);
-    }
 
-    // Get peer IDs (use cache)
-    let userPeerId = getCachedPeerId(config.peerName);
-    let claudePeerId = getCachedPeerId(config.claudePeer);
-
-    if (!userPeerId) {
-      const peer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.peerName });
-      userPeerId = peer.id;
-      setCachedPeerId(config.peerName, peer.id);
-    }
-    if (!claudePeerId) {
-      const peer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
-      claudePeerId = peer.id;
-      setCachedPeerId(config.claudePeer, peer.id);
-    }
+    // Get session and peers using new fluent API
+    const session = await honcho.session(sessionName);
+    const userPeer = await honcho.peer(config.peerName);
+    const claudePeer = await honcho.peer(config.claudePeer);
 
     if (trigger === "auto") {
       spinner.update("fetching memory context");
     }
 
-    logApiCall("peers.getContext", "GET", `${config.peerName} + ${config.claudePeer}`);
-    logApiCall("sessions.summaries", "GET", sessionName);
-    logApiCall("peers.chat", "POST", "dialectic queries x2");
+    logApiCall("peer.context", "GET", `${config.peerName} + ${config.claudePeer}`);
+    logApiCall("session.summaries", "GET", sessionName);
+    logApiCall("peer.chat", "POST", "dialectic queries x2");
 
     // Fetch ALL context in parallel - this is the RIGHT time for expensive calls
     // because the context is about to be reset anyway
     const [userContextResult, claudeContextResult, summariesResult, userChatResult, claudeChatResult] =
       await Promise.allSettled([
         // User's full context
-        client.workspaces.peers.getContext(workspaceId, userPeerId, {
-          max_observations: 30,
-          include_most_derived: true,
+        userPeer.context({
+          maxObservations: 30,
+          includeMostDerived: true,
         }),
         // Claude's self-context
-        client.workspaces.peers.getContext(workspaceId, claudePeerId, {
-          max_observations: 20,
-          include_most_derived: true,
+        claudePeer.context({
+          maxObservations: 20,
+          includeMostDerived: true,
         }),
         // Session summaries
-        client.workspaces.sessions.summaries(workspaceId, sessionId),
+        session.summaries(),
         // Fresh dialectic - ask about user (worth the cost at compaction time)
-        client.workspaces.peers.chat(workspaceId, userPeerId, {
-          query: `Summarize the most important things to remember about ${config.peerName}. Focus on their preferences, working style, current projects, and any critical context that should survive a conversation summary.`,
-          session_id: sessionId,
-        }),
+        userPeer.chat(
+          `Summarize the most important things to remember about ${config.peerName}. Focus on their preferences, working style, current projects, and any critical context that should survive a conversation summary.`,
+          { session }
+        ),
         // Fresh dialectic - claude self-reflection
-        client.workspaces.peers.chat(workspaceId, claudePeerId, {
-          query: `What are the most important things ${config.claudePeer} was working on with ${config.peerName}? Summarize key context that should be preserved.`,
-          session_id: sessionId,
-        }),
+        claudePeer.chat(
+          `What are the most important things ${config.claudePeer} was working on with ${config.peerName}? Summarize key context that should be preserved.`,
+          { session }
+        ),
       ]);
 
     // Extract results

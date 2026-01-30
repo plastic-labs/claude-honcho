@@ -25,6 +25,12 @@ export interface HonchoEndpointConfig {
   baseUrl?: string; // Custom URL override (takes precedence over environment)
 }
 
+// Default base URLs for the new SDK (v3 API)
+const HONCHO_BASE_URLS = {
+  production: "https://api.honcho.dev/v3",
+  local: "http://localhost:8000/v3",
+} as const;
+
 export interface HonchoCLAUDEConfig {
   peerName: string; // The user's peer name
   apiKey: string; // Honcho API key
@@ -157,31 +163,36 @@ export function truncateToTokens(text: string, maxTokens: number): string {
 
 export interface HonchoClientOptions {
   apiKey: string;
-  environment?: HonchoEnvironment;
-  baseURL?: string;
+  baseUrl: string;
+  workspaceId: string;
+}
+
+/**
+ * Get the base URL for Honcho API based on config.
+ * Priority: baseUrl > environment > "production" (default)
+ */
+export function getHonchoBaseUrl(config: HonchoCLAUDEConfig): string {
+  if (config.endpoint?.baseUrl) {
+    // Custom URL takes precedence - ensure it has /v3 suffix
+    const url = config.endpoint.baseUrl;
+    return url.endsWith("/v3") ? url : `${url}/v3`;
+  }
+  if (config.endpoint?.environment === "local") {
+    return HONCHO_BASE_URLS.local;
+  }
+  return HONCHO_BASE_URLS.production;
 }
 
 /**
  * Get Honcho client options based on config.
- * Priority: baseUrl > environment > "production" (default)
+ * New SDK requires baseUrl and workspaceId at construction time.
  */
 export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClientOptions {
-  const options: HonchoClientOptions = {
+  return {
     apiKey: config.apiKey,
+    baseUrl: getHonchoBaseUrl(config),
+    workspaceId: config.workspace,
   };
-
-  if (config.endpoint?.baseUrl) {
-    // Custom URL takes precedence
-    options.baseURL = config.endpoint.baseUrl;
-  } else if (config.endpoint?.environment) {
-    // Use configured environment
-    options.environment = config.endpoint.environment;
-  } else {
-    // Default to production (SaaS)
-    options.environment = "production";
-  }
-
-  return options;
 }
 
 /**
@@ -192,9 +203,9 @@ export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url
     return { type: "custom", url: config.endpoint.baseUrl };
   }
   if (config.endpoint?.environment === "local") {
-    return { type: "local", url: "http://localhost:8000" };
+    return { type: "local", url: HONCHO_BASE_URLS.local };
   }
-  return { type: "production", url: "https://api.honcho.dev" };
+  return { type: "production", url: HONCHO_BASE_URLS.production };
 }
 
 /**

@@ -1,19 +1,9 @@
-import Honcho from "@honcho-ai/core";
+import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getHonchoClientOptions } from "../config.js";
 import { basename } from "path";
-import {
-  getCachedWorkspaceId,
-  setCachedWorkspaceId,
-  getCachedPeerId,
-  setCachedPeerId,
-  getCachedSessionId,
-  setCachedSessionId,
-  appendClaudeWork,
-  getClaudeInstanceId,
-} from "../cache.js";
+import { appendClaudeWork, getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 
-const WORKSPACE_APP_TAG = "honcho-plugin";
 
 interface HookInput {
   tool_name?: string;
@@ -248,48 +238,21 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
     return;
   }
 
-  const client = new Honcho(getHonchoClientOptions(config));
-
-  // Try to use cached IDs for speed
-  let workspaceId = getCachedWorkspaceId(config.workspace);
-  let sessionId = getCachedSessionId(cwd);
-  let claudePeerId = getCachedPeerId(config.claudePeer);
+  const honcho = new Honcho(getHonchoClientOptions(config));
   const sessionName = getSessionName(cwd);
 
-  // If we don't have cached IDs, do full setup and cache results
-  if (!workspaceId || !sessionId || !claudePeerId) {
-    const workspace = await client.workspaces.getOrCreate({
-      id: config.workspace,
-      metadata: { app: WORKSPACE_APP_TAG },
-    });
-    workspaceId = workspace.id;
-    setCachedWorkspaceId(config.workspace, workspaceId);
-
-    const session = await client.workspaces.sessions.getOrCreate(workspaceId, {
-      id: sessionName,
-      metadata: { cwd },
-    });
-    sessionId = session.id;
-    setCachedSessionId(cwd, sessionName, sessionId);
-
-    const claudePeer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
-    claudePeerId = claudePeer.id;
-    setCachedPeerId(config.claudePeer, claudePeerId);
-  }
+  // Get session and peer using new fluent API
+  const session = await honcho.session(sessionName);
+  const claudePeer = await honcho.peer(config.claudePeer);
 
   // Log the tool use with instance_id and session_affinity for project-scoped fact extraction
-  logApiCall("sessions.messages.create", "POST", `tool: ${summary.slice(0, 50)}`);
+  logApiCall("session.addMessages", "POST", `tool: ${summary.slice(0, 50)}`);
   const instanceId = getClaudeInstanceId();
-  await client.workspaces.sessions.messages.create(workspaceId, sessionId, {
-    messages: [
-      {
-        content: `[Tool] ${summary}`,
-        peer_id: config.claudePeer,
-        metadata: {
-          ...(instanceId ? { instance_id: instanceId } : {}),
-          session_affinity: sessionName,  // Tag for project-scoped fact extraction
-        },
-      },
-    ],
-  });
+
+  await session.addMessages([
+    claudePeer.message(`[Tool] ${summary}`, {
+      instance_id: instanceId || undefined,
+      session_affinity: sessionName,
+    }),
+  ]);
 }

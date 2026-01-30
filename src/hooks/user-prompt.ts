@@ -1,12 +1,7 @@
-import Honcho from "@honcho-ai/core";
+import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getHonchoClientOptions } from "../config.js";
 import { basename } from "path";
 import {
-  getCachedWorkspaceId,
-  setCachedWorkspaceId,
-  getCachedPeerId,
-  getCachedSessionId,
-  setCachedSessionId,
   getCachedUserContext,
   isContextCacheStale,
   setCachedUserContext,
@@ -16,7 +11,7 @@ import {
   markKnowledgeGraphRefreshed,
   getClaudeInstanceId,
 } from "../cache.js";
-import { logHook, logApiCall, logCache, logFlow, setLogContext } from "../log.js";
+import { logHook, logApiCall, logCache, setLogContext } from "../log.js";
 
 interface HookInput {
   prompt?: string;
@@ -182,41 +177,22 @@ export async function handleUserPrompt(): Promise<void> {
 }
 
 async function uploadMessageAsync(config: any, cwd: string, prompt: string): Promise<void> {
-  logApiCall("sessions.messages.create", "POST", `user prompt (${prompt.length} chars)`);
-  const client = new Honcho(getHonchoClientOptions(config));
-
-  // Try to use cached IDs for speed
-  let workspaceId = getCachedWorkspaceId(config.workspace);
-  let sessionId = getCachedSessionId(cwd);
+  logApiCall("session.addMessages", "POST", `user prompt (${prompt.length} chars)`);
+  const honcho = new Honcho(getHonchoClientOptions(config));
   const sessionName = getSessionName(cwd);
 
-  if (!workspaceId || !sessionId) {
-    // No cache - need full setup and cache the results
-    const workspace = await client.workspaces.getOrCreate({ id: config.workspace });
-    workspaceId = workspace.id;
-    setCachedWorkspaceId(config.workspace, workspaceId);
-
-    const session = await client.workspaces.sessions.getOrCreate(workspaceId, {
-      id: sessionName,
-      metadata: { cwd },
-    });
-    sessionId = session.id;
-    setCachedSessionId(cwd, sessionName, sessionId);
-  }
+  // Get session and peer using new fluent API
+  const session = await honcho.session(sessionName);
+  const userPeer = await honcho.peer(config.peerName);
 
   // Include instance_id and session_affinity in metadata
-  // session_affinity helps Honcho's deriver tag extracted facts with their source project
   const instanceId = getClaudeInstanceId();
-  await client.workspaces.sessions.messages.create(workspaceId, sessionId, {
-    messages: [{
-      content: prompt,
-      peer_id: config.peerName,
-      metadata: {
-        ...(instanceId ? { instance_id: instanceId } : {}),
-        session_affinity: sessionName,  // Tag for project-scoped fact extraction
-      },
-    }],
-  });
+  await session.addMessages([
+    userPeer.message(prompt, {
+      instance_id: instanceId || undefined,
+      session_affinity: sessionName,
+    }),
+  ]);
 }
 
 function formatCachedContext(context: any, peerName: string): string[] {
@@ -250,31 +226,15 @@ function formatCachedContext(context: any, peerName: string): string[] {
 }
 
 async function fetchFreshContext(config: any, cwd: string, prompt: string): Promise<string[]> {
-  const client = new Honcho(getHonchoClientOptions(config));
-
-  // Try to use cached IDs
-  let workspaceId = getCachedWorkspaceId(config.workspace);
-  if (!workspaceId) {
-    const workspace = await client.workspaces.getOrCreate({ id: config.workspace });
-    workspaceId = workspace.id;
-  }
-
-  const userPeerId = getCachedPeerId(config.peerName);
-  if (!userPeerId) {
-    // Can't fetch context without peer ID
-    return [];
-  }
-
+  const honcho = new Honcho(getHonchoClientOptions(config));
   const sessionName = getSessionName(cwd);
-  let sessionId = getCachedSessionId(cwd);
-  if (!sessionId) {
-    const session = await client.workspaces.sessions.getOrCreate(workspaceId, { id: sessionName });
-    sessionId = session.id;
-  }
+
+  // Get peer using new fluent API
+  const userPeer = await honcho.peer(config.peerName);
 
   const contextParts: string[] = [];
 
-  // Only use getContext() here - it's free/cheap and returns pre-computed knowledge
+  // Only use context() here - it's free/cheap and returns pre-computed knowledge
   // Skip chat() ($0.03 per call) - only use at session-start
   const startTime = Date.now();
 
@@ -282,24 +242,26 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
   const topics = extractTopics(prompt);
   const searchQuery = topics.length > 0 ? topics.join(' ') : prompt.slice(0, 200);
 
-  const contextResult = await client.workspaces.peers.getContext(workspaceId, userPeerId, {
-    search_query: searchQuery,
-    search_top_k: 10,
-    search_max_distance: 0.7,
-    max_observations: 15,
-    include_most_derived: true,
-    session_name: sessionName,  // SESSION-SCOPED for relevance
+  // New SDK uses peer.context() instead of peers.getContext()
+  const contextResult = await userPeer.context({
+    searchQuery,
+    searchTopK: 10,
+    searchMaxDistance: 0.7,
+    maxObservations: 15,
+    includeMostDerived: true,
+    sessionName,  // SESSION-SCOPED for relevance
   });
 
-  logApiCall("peers.getContext", "GET", `search query`, Date.now() - startTime, true);
+  logApiCall("peer.context", "GET", `search query`, Date.now() - startTime, true);
 
   if (contextResult) {
     setCachedUserContext(contextResult); // Update cache
-    logCache("write", "userContext", `${contextResult.representation?.explicit?.length || 0} facts`);
+    logCache("write", "userContext", `${(contextResult as any).representation?.explicit?.length || 0} facts`);
 
-    if (contextResult.representation?.explicit?.length) {
+    const rep = (contextResult as any).representation;
+    if (rep?.explicit?.length) {
       // Sort by recency - recent facts are more relevant
-      const sorted = sortByRecency(contextResult.representation.explicit);
+      const sorted = sortByRecency(rep.explicit);
       const explicit = sorted
         .slice(0, 5)
         .map((e: any) => e.content || e)
@@ -307,9 +269,9 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
       contextParts.push(`Relevant facts: ${explicit}`);
     }
 
-    if (contextResult.representation?.deductive?.length) {
+    if (rep?.deductive?.length) {
       // Sort by recency
-      const sorted = sortByRecency(contextResult.representation.deductive);
+      const sorted = sortByRecency(rep.deductive);
       const deductive = sorted
         .slice(0, 3)
         .map((d: any) => d.conclusion)
@@ -317,8 +279,9 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
       contextParts.push(`Insights: ${deductive}`);
     }
 
-    if (contextResult.peer_card?.length) {
-      contextParts.push(`Profile: ${contextResult.peer_card.join("; ")}`);
+    const peerCard = (contextResult as any).peerCard || (contextResult as any).peer_card;
+    if (peerCard?.length) {
+      contextParts.push(`Profile: ${peerCard.join("; ")}`);
     }
   }
 
