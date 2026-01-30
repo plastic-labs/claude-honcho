@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getHonchoClientOptions } from "../config.js";
+import { loadConfig, getSessionForPath, getHonchoClientOptions, isPluginEnabled } from "../config.js";
 import { basename } from "path";
 import {
   getCachedUserContext,
@@ -90,6 +90,11 @@ function getSessionName(cwd: string): string {
 export async function handleUserPrompt(): Promise<void> {
   const config = loadConfig();
   if (!config) {
+    process.exit(0);
+  }
+
+  // Early exit if plugin is disabled
+  if (!isPluginEnabled()) {
     process.exit(0);
   }
 

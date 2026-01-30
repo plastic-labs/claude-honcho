@@ -21,6 +21,7 @@ Give Claude Code long-term memory that survives context wipes, session restarts,
 - **Per-Directory Sessions**: Each project directory maintains its own conversation history
 - **SaaS/Local Switching**: Easily switch between Honcho SaaS and local instances
 - **Claude Code Skills**: Built-in slash commands for session management
+- **Temporary Disable**: Quickly disable/enable Honcho when you want a vanilla Claude experience
 
 ---
 
@@ -31,6 +32,7 @@ Give Claude Code long-term memory that survives context wipes, session restarts,
 - [How It Works](#how-it-works)
 - [Configuration](#configuration)
 - [Endpoint Switching](#endpoint-switching)
+- [Temporarily Disabling Honcho](#temporarily-disabling-honcho)
 - [Git State Tracking](#git-state-tracking)
 - [Claude Code Skills](#claude-code-skills)
 - [Cost Optimization](#cost-optimization)
@@ -199,6 +201,7 @@ Located at `~/.honcho/config.json`:
 | `claudePeer` | AI identity in Honcho | `"claude"` |
 | `saveMessages` | Save conversation history | `true` |
 | `sessions` | Directory → session mappings | `{}` |
+| `enabled` | Enable/disable the plugin | `true` |
 
 ### Context Refresh Options
 
@@ -266,6 +269,25 @@ Enter your Honcho API key: local
 Local mode enabled
 Enter local API key (or press enter for 'local'):
 ```
+
+---
+
+## Temporarily Disabling Honcho
+
+Sometimes you want to use Claude Code without the memory system - for quick throwaway tasks, testing, or just a vanilla experience.
+
+```bash
+# Disable honcho (hooks will exit silently)
+honcho disable
+
+# Re-enable when ready
+honcho enable
+
+# Check current status
+honcho status
+```
+
+When disabled, all hooks exit immediately with no API calls, no context loading, and no message saving. Your config and data remain intact - it just pauses the plugin until you re-enable it.
 
 ---
 
@@ -466,6 +488,8 @@ Commands:
   uninstall   Remove hooks from Claude settings
   update      Rebuild and reinstall (removes lockfile, builds, links)
   status      Show current configuration and hook status
+  enable      Enable honcho memory
+  disable     Temporarily disable honcho (use Claude without memory)
   help        Show help message
 
 Session Commands:

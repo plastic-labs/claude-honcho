@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getHonchoClientOptions } from "../config.js";
+import { loadConfig, getSessionForPath, getHonchoClientOptions, isPluginEnabled } from "../config.js";
 import { basename } from "path";
 import { existsSync, readFileSync } from "fs";
 import { getClaudeInstanceId } from "../cache.js";
@@ -102,6 +102,11 @@ function getLastAssistantMessage(transcriptPath: string): string | null {
 export async function handleStop(): Promise<void> {
   const config = loadConfig();
   if (!config) {
+    process.exit(0);
+  }
+
+  // Early exit if plugin is disabled
+  if (!isPluginEnabled()) {
     process.exit(0);
   }
 

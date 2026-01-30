@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getHonchoClientOptions } from "../config.js";
+import { loadConfig, getSessionForPath, setSessionForPath, getHonchoClientOptions, isPluginEnabled } from "../config.js";
 import { basename } from "path";
 import {
   setCachedUserContext,
@@ -78,6 +78,11 @@ export async function handleSessionStart(): Promise<void> {
   if (!config) {
     console.error("[honcho] Not configured. Run: honcho init");
     process.exit(1);
+  }
+
+  // Early exit if plugin is disabled
+  if (!isPluginEnabled()) {
+    process.exit(0);
   }
 
   let hookInput: HookInput = {};

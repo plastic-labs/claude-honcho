@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getHonchoClientOptions } from "../config.js";
+import { loadConfig, getSessionForPath, getHonchoClientOptions, isPluginEnabled } from "../config.js";
 import { basename } from "path";
 import { appendClaudeWork, getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -195,6 +195,11 @@ function formatToolSummary(
 export async function handlePostToolUse(): Promise<void> {
   const config = loadConfig();
   if (!config) {
+    process.exit(0);
+  }
+
+  // Early exit if plugin is disabled
+  if (!isPluginEnabled()) {
     process.exit(0);
   }
 

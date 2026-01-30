@@ -13,6 +13,8 @@ import {
   getEndpointInfo,
   setEndpoint,
   getHonchoClientOptions,
+  isPluginEnabled,
+  setPluginEnabled,
   type HonchoCLAUDEConfig,
   type HonchoEnvironment,
 } from "./config.js";
@@ -296,6 +298,11 @@ function status(): void {
     console.log(s.dim("Run: honcho init"));
     return;
   }
+
+  const enabled = isPluginEnabled();
+  console.log(s.section("Plugin Status"));
+  console.log(`  ${s.label("Status")}:        ${enabled ? s.success("enabled") : s.warn("disabled (run: honcho enable)")}`);
+  console.log("");
 
   console.log(s.section("Configuration"));
   console.log(s.dim(getConfigPath()));
@@ -1123,6 +1130,8 @@ function showHelp(): void {
   console.log(`  ${s.highlight("uninstall")}   Remove hooks from Claude settings`);
   console.log(`  ${s.highlight("update")}      Rebuild and reinstall (removes lockfile, builds, links)`);
   console.log(`  ${s.highlight("status")}      Show current configuration and hook status`);
+  console.log(`  ${s.highlight("enable")}      Enable honcho memory`);
+  console.log(`  ${s.highlight("disable")}     Temporarily disable honcho (use Claude without memory)`);
   console.log(`  ${s.highlight("help")}        Show this help message`);
   console.log("");
   console.log(s.section("Session Commands"));
@@ -1179,6 +1188,16 @@ switch (command) {
     break;
   case "status":
     status();
+    break;
+  case "enable":
+    setPluginEnabled(true);
+    console.log(s.success("Honcho enabled"));
+    console.log(s.dim("Memory and context will be active in new sessions."));
+    break;
+  case "disable":
+    setPluginEnabled(false);
+    console.log(s.warn("Honcho disabled"));
+    console.log(s.dim("Run 'honcho enable' to re-enable."));
     break;
   case "session":
     await handleSession(args[1], args[2]);
