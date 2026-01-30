@@ -1,16 +1,8 @@
-import Honcho from "@honcho-ai/core";
+import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getHonchoClientOptions } from "../config.js";
 import { basename } from "path";
 import { existsSync, readFileSync } from "fs";
-import {
-  getCachedWorkspaceId,
-  setCachedWorkspaceId,
-  getCachedPeerId,
-  setCachedPeerId,
-  getCachedSessionId,
-  setCachedSessionId,
-  getClaudeInstanceId,
-} from "../cache.js";
+import { getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 
 interface HookInput {
@@ -152,51 +144,25 @@ export async function handleStop(): Promise<void> {
   logHook("stop", `Capturing assistant response (${lastMessage.length} chars)`);
 
   try {
-    const client = new Honcho(getHonchoClientOptions(config));
+    const honcho = new Honcho(getHonchoClientOptions(config));
 
-    // Get cached IDs
-    let workspaceId = getCachedWorkspaceId(config.workspace);
-    let sessionId = getCachedSessionId(cwd);
-    let clawdPeerId = getCachedPeerId(config.claudePeer);
-
-    // If we don't have cached IDs, fetch them
-    if (!workspaceId || !sessionId || !clawdPeerId) {
-      const workspace = await client.workspaces.getOrCreate({
-        id: config.workspace,
-        metadata: { app: "honcho-clawd" },
-      });
-      workspaceId = workspace.id;
-      setCachedWorkspaceId(config.workspace, workspaceId);
-
-      const session = await client.workspaces.sessions.getOrCreate(workspaceId, {
-        id: sessionName,
-        metadata: { cwd },
-      });
-      sessionId = session.id;
-      setCachedSessionId(cwd, sessionName, sessionId);
-
-      const clawdPeer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
-      clawdPeerId = clawdPeer.id;
-      setCachedPeerId(config.claudePeer, clawdPeerId);
-    }
+    // Get session and peer using new fluent API
+    const session = await honcho.session(sessionName);
+    const claudePeer = await honcho.peer(config.claudePeer);
 
     // Upload the assistant response
     const instanceId = getClaudeInstanceId();
-    logApiCall("sessions.messages.create", "POST", `assistant response (${lastMessage.length} chars)`);
+    logApiCall("session.addMessages", "POST", `assistant response (${lastMessage.length} chars)`);
 
-    await client.workspaces.sessions.messages.create(workspaceId, sessionId, {
-      messages: [
-        {
-          content: lastMessage.slice(0, 3000), // Limit to avoid huge messages
-          peer_id: config.claudePeer,
-          metadata: {
-            ...(instanceId ? { instance_id: instanceId } : {}),
-            type: "assistant_response",
-            session_affinity: sessionName,
-          },
+    await session.addMessages([
+      claudePeer.message(lastMessage.slice(0, 3000), {
+        metadata: {
+          instance_id: instanceId || undefined,
+          type: "assistant_response",
+          session_affinity: sessionName,
         },
-      ],
-    });
+      }),
+    ]);
 
     logHook("stop", `Assistant response saved`);
   } catch (error) {

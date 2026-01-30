@@ -7,11 +7,8 @@ interface ClaudeSettings {
   [key: string]: any;
 }
 
-const CLI_COMMAND = "honcho-clawd";
-const EXPECTED_VERSION_PREFIX = "honcho-clawd v";
-
-// Legacy binary names that might conflict
-const LEGACY_BINARIES = ["claudis", "honcho-claudis"];
+const CLI_COMMAND = "honcho";
+const EXPECTED_VERSION_PREFIX = "honcho v";
 
 interface CommandVerification {
   ok: boolean;
@@ -21,44 +18,12 @@ interface CommandVerification {
 }
 
 /**
- * Checks for legacy binaries that might conflict with user aliases
- */
-export function checkLegacyBinaries(): { found: string[]; paths: Record<string, string> } {
-  const found: string[] = [];
-  const paths: Record<string, string> = {};
-
-  for (const binary of LEGACY_BINARIES) {
-    try {
-      const path = execSync(`which ${binary} 2>/dev/null`, { encoding: "utf-8" }).trim();
-      if (path) {
-        found.push(binary);
-        paths[binary] = path;
-      }
-    } catch {
-      // Binary not found, that's good
-    }
-  }
-
-  return { found, paths };
-}
-
-/**
  * Verifies that the CLI command is properly installed and not shadowed by an alias
  */
 export function verifyCommandAvailable(): CommandVerification {
   const warnings: string[] = [];
 
   try {
-    // Check for legacy binaries that might conflict with user aliases
-    const legacy = checkLegacyBinaries();
-    if (legacy.found.length > 0) {
-      const legacyList = legacy.found.map(b => `  - ${b} (${legacy.paths[b]})`).join("\n");
-      warnings.push(
-        `Legacy binaries found that may conflict with shell aliases:\n${legacyList}\n` +
-        `Remove them with: rm ${legacy.found.map(b => legacy.paths[b]).join(" ")}`
-      );
-    }
-
     // First check if command exists using 'which' (works in bash/zsh)
     let commandPath: string;
     try {
@@ -124,14 +89,14 @@ export function verifyCommandAvailable(): CommandVerification {
   }
 }
 
-function getHonchoCLAWDHooks(): ClaudeSettings["hooks"] {
+function getHonchoHooks(): NonNullable<ClaudeSettings["hooks"]> {
   return {
     SessionStart: [
       {
         hooks: [
           {
             type: "command",
-            command: "honcho-clawd hook session-start",
+            command: "honcho hook session-start",
             timeout: 30000,
           },
         ],
@@ -142,7 +107,7 @@ function getHonchoCLAWDHooks(): ClaudeSettings["hooks"] {
         hooks: [
           {
             type: "command",
-            command: "honcho-clawd hook session-end",
+            command: "honcho hook session-end",
             timeout: 30000,
           },
         ],
@@ -154,7 +119,7 @@ function getHonchoCLAWDHooks(): ClaudeSettings["hooks"] {
         hooks: [
           {
             type: "command",
-            command: "honcho-clawd hook post-tool-use",
+            command: "honcho hook post-tool-use",
             timeout: 10000,
           },
         ],
@@ -165,7 +130,7 @@ function getHonchoCLAWDHooks(): ClaudeSettings["hooks"] {
         hooks: [
           {
             type: "command",
-            command: "honcho-clawd hook user-prompt",
+            command: "honcho hook user-prompt",
             timeout: 15000,
           },
         ],
@@ -177,7 +142,7 @@ function getHonchoCLAWDHooks(): ClaudeSettings["hooks"] {
         hooks: [
           {
             type: "command",
-            command: "honcho-clawd hook pre-compact",
+            command: "honcho hook pre-compact",
             timeout: 20000,
           },
         ],
@@ -187,7 +152,7 @@ function getHonchoCLAWDHooks(): ClaudeSettings["hooks"] {
         hooks: [
           {
             type: "command",
-            command: "honcho-clawd hook pre-compact",
+            command: "honcho hook pre-compact",
             timeout: 20000,
           },
         ],
@@ -198,7 +163,7 @@ function getHonchoCLAWDHooks(): ClaudeSettings["hooks"] {
         hooks: [
           {
             type: "command",
-            command: "honcho-clawd hook stop",
+            command: "honcho hook stop",
             timeout: 10000,
           },
         ],
@@ -240,24 +205,11 @@ export function installHooks(): { success: boolean; message: string; warnings?: 
   }
 
   // Merge hooks
-  const honchoCLAWDHooks = getHonchoCLAWDHooks();
+  const honchoHooks = getHonchoHooks();
   settings.hooks = settings.hooks || {};
 
-  for (const [event, eventHooks] of Object.entries(honchoCLAWDHooks)) {
-    // Remove any existing honcho-clawd, honcho-claudis or claudis (old names) hooks for this event
-    if (settings.hooks[event]) {
-      settings.hooks[event] = settings.hooks[event].filter(
-        (h) => !h.hooks.some((hook) =>
-          hook.command.includes("honcho-clawd") ||
-          hook.command.includes("honcho-claudis") ||
-          (hook.command.includes("claudis") && !hook.command.includes("honcho-claudis"))
-        )
-      );
-    } else {
-      settings.hooks[event] = [];
-    }
-
-    // Add new honcho-clawd hooks
+  for (const [event, eventHooks] of Object.entries(honchoHooks)) {
+    settings.hooks[event] = settings.hooks[event] || [];
     settings.hooks[event].push(...eventHooks);
   }
 
@@ -284,14 +236,6 @@ export function uninstallHooks(): { success: boolean; message: string } {
 
     if (settings.hooks) {
       for (const event of Object.keys(settings.hooks)) {
-        settings.hooks[event] = settings.hooks[event].filter(
-          (h) => !h.hooks.some((hook) =>
-            hook.command.includes("honcho-clawd") ||
-            hook.command.includes("honcho-claudis") ||
-            (hook.command.includes("claudis") && !hook.command.includes("honcho-claudis"))
-          )
-        );
-
         // Remove empty arrays
         if (settings.hooks[event].length === 0) {
           delete settings.hooks[event];
@@ -324,12 +268,12 @@ export function checkHooksInstalled(): boolean {
 
     if (!settings.hooks) return false;
 
-    // Check if any honcho-clawd hooks exist
+    // Check if any honcho hooks exist
     for (const event of Object.keys(settings.hooks)) {
-      const hasHonchoCLAWDHook = settings.hooks[event].some((h) =>
-        h.hooks.some((hook) => hook.command.includes("honcho-clawd"))
+      const hasHonchoCLAUDEHook = settings.hooks[event].some((h) =>
+        h.hooks.some((hook) => hook.command.includes("honcho"))
       );
-      if (hasHonchoCLAWDHook) return true;
+      if (hasHonchoCLAUDEHook) return true;
     }
 
     return false;

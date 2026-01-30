@@ -1,18 +1,9 @@
-import Honcho from "@honcho-ai/core";
+import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getHonchoClientOptions } from "../config.js";
 import { basename } from "path";
-import {
-  getCachedWorkspaceId,
-  setCachedWorkspaceId,
-  getCachedPeerId,
-  setCachedPeerId,
-  getCachedSessionId,
-  setCachedSessionId,
-} from "../cache.js";
 import { Spinner } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 
-const WORKSPACE_APP_TAG = "honcho-clawd";
 
 interface HookInput {
   session_id?: string;
@@ -38,10 +29,10 @@ function formatMemoryCard(
   config: { peerName: string; claudePeer: string; workspace: string },
   sessionName: string,
   userContext: any,
-  clawdContext: any,
+  claudeContext: any,
   summaries: any,
   userDialectic: string | null,
-  clawdDialectic: string | null
+  claudeDialectic: string | null
 ): string {
   const parts: string[] = [];
 
@@ -82,14 +73,14 @@ ${facts}`);
 ${insights}`);
   }
 
-  // Clawd's self-context - what was I working on
-  if (clawdContext?.representation?.explicit?.length > 0) {
-    const clawdFacts = clawdContext.representation.explicit
+  // Claude's self-context - what was I working on
+  if (claudeContext?.representation?.explicit?.length > 0) {
+    const claudeFacts = claudeContext.representation.explicit
       .slice(0, 8)
       .map((e: any) => `- ${e.content || e}`)
       .join("\n");
     parts.push(`### ${config.claudePeer}'s Recent Work (PRESERVE)
-${clawdFacts}`);
+${claudeFacts}`);
   }
 
   // Session summary - what we were doing
@@ -104,9 +95,9 @@ ${summaries.short_summary.content}`);
 ${userDialectic}`);
   }
 
-  if (clawdDialectic) {
+  if (claudeDialectic) {
     parts.push(`### ${config.claudePeer}'s Self-Reflection (PRESERVE)
-${clawdDialectic}`);
+${claudeDialectic}`);
   }
 
   parts.push(`### End Memory Anchor
@@ -148,93 +139,61 @@ export async function handlePreCompact(): Promise<void> {
   }
 
   try {
-    const client = new Honcho(getHonchoClientOptions(config));
-
-    // Get workspace ID (use cache)
-    let workspaceId = getCachedWorkspaceId(config.workspace);
-    if (!workspaceId) {
-      const workspace = await client.workspaces.getOrCreate({
-        id: config.workspace,
-        metadata: { app: WORKSPACE_APP_TAG },
-      });
-      workspaceId = workspace.id;
-      setCachedWorkspaceId(config.workspace, workspaceId);
-    }
-
-    // Get session ID (use cache)
+    const honcho = new Honcho(getHonchoClientOptions(config));
     const sessionName = getSessionName(cwd);
-    let sessionId = getCachedSessionId(cwd);
-    if (!sessionId) {
-      const session = await client.workspaces.sessions.getOrCreate(workspaceId, {
-        id: sessionName,
-        metadata: { cwd },
-      });
-      sessionId = session.id;
-      setCachedSessionId(cwd, sessionName, sessionId);
-    }
 
-    // Get peer IDs (use cache)
-    let userPeerId = getCachedPeerId(config.peerName);
-    let clawdPeerId = getCachedPeerId(config.claudePeer);
-
-    if (!userPeerId) {
-      const peer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.peerName });
-      userPeerId = peer.id;
-      setCachedPeerId(config.peerName, peer.id);
-    }
-    if (!clawdPeerId) {
-      const peer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
-      clawdPeerId = peer.id;
-      setCachedPeerId(config.claudePeer, peer.id);
-    }
+    // Get session and peers using new fluent API
+    const session = await honcho.session(sessionName);
+    const userPeer = await honcho.peer(config.peerName);
+    const claudePeer = await honcho.peer(config.claudePeer);
 
     if (trigger === "auto") {
       spinner.update("fetching memory context");
     }
 
-    logApiCall("peers.getContext", "GET", `${config.peerName} + ${config.claudePeer}`);
-    logApiCall("sessions.summaries", "GET", sessionName);
-    logApiCall("peers.chat", "POST", "dialectic queries x2");
+    logApiCall("peer.context", "GET", `${config.peerName} + ${config.claudePeer}`);
+    logApiCall("session.summaries", "GET", sessionName);
+    logApiCall("peer.chat", "POST", "dialectic queries x2");
 
     // Fetch ALL context in parallel - this is the RIGHT time for expensive calls
     // because the context is about to be reset anyway
-    const [userContextResult, clawdContextResult, summariesResult, userChatResult, clawdChatResult] =
+    const [userContextResult, claudeContextResult, summariesResult, userChatResult, claudeChatResult] =
       await Promise.allSettled([
         // User's full context
-        client.workspaces.peers.getContext(workspaceId, userPeerId, {
-          max_observations: 30,
-          include_most_derived: true,
+        userPeer.context({
+          maxConclusions: 30,
+          includeMostFrequent: true,
         }),
-        // Clawd's self-context
-        client.workspaces.peers.getContext(workspaceId, clawdPeerId, {
-          max_observations: 20,
-          include_most_derived: true,
+        // Claude's self-context
+        claudePeer.context({
+          maxConclusions: 20,
+          includeMostFrequent: true,
         }),
         // Session summaries
-        client.workspaces.sessions.summaries(workspaceId, sessionId),
+        session.summaries(),
         // Fresh dialectic - ask about user (worth the cost at compaction time)
-        client.workspaces.peers.chat(workspaceId, userPeerId, {
-          query: `Summarize the most important things to remember about ${config.peerName}. Focus on their preferences, working style, current projects, and any critical context that should survive a conversation summary.`,
-          session_id: sessionId,
-        }),
-        // Fresh dialectic - clawd self-reflection
-        client.workspaces.peers.chat(workspaceId, clawdPeerId, {
-          query: `What are the most important things ${config.claudePeer} was working on with ${config.peerName}? Summarize key context that should be preserved.`,
-          session_id: sessionId,
-        }),
+        userPeer.chat(
+          `Summarize the most important things to remember about ${config.peerName}. Focus on their preferences, working style, current projects, and any critical context that should survive a conversation summary.`,
+          { session }
+        ),
+        // Fresh dialectic - claude self-reflection
+        claudePeer.chat(
+          `What are the most important things ${config.claudePeer} was working on with ${config.peerName}? Summarize key context that should be preserved.`,
+          { session }
+        ),
       ]);
 
     // Extract results
     const userContext = userContextResult.status === "fulfilled" ? userContextResult.value : null;
-    const clawdContext = clawdContextResult.status === "fulfilled" ? clawdContextResult.value : null;
+    const claudeContext = claudeContextResult.status === "fulfilled" ? claudeContextResult.value : null;
     const summaries = summariesResult.status === "fulfilled" ? summariesResult.value : null;
     const userDialectic =
-      userChatResult.status === "fulfilled" && userChatResult.value?.content
-        ? userChatResult.value.content
+      userChatResult.status === "fulfilled"
+        ? userChatResult.value
         : null;
-    const clawdDialectic =
-      clawdChatResult.status === "fulfilled" && clawdChatResult.value?.content
-        ? clawdChatResult.value.content
+    const claudeDialectic =
+      claudeChatResult.status === "fulfilled"
+        ? claudeChatResult.value
         : null;
 
     // Format the memory card
@@ -242,10 +201,10 @@ export async function handlePreCompact(): Promise<void> {
       config,
       sessionName,
       userContext,
-      clawdContext,
+      claudeContext,
       summaries,
       userDialectic,
-      clawdDialectic
+      claudeDialectic
     );
 
     if (trigger === "auto") {
@@ -264,7 +223,7 @@ export async function handlePreCompact(): Promise<void> {
       spinner.fail("memory anchor failed");
     }
     // Don't block compaction on failure
-    console.error(`[honcho-clawd] Pre-compact warning: ${error}`);
+    console.error(`[honcho] Pre-compact warning: ${error}`);
     process.exit(0);
   }
 }

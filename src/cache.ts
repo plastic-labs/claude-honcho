@@ -3,11 +3,11 @@ import { join } from "path";
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "fs";
 import { getContextRefreshConfig, getLocalContextConfig } from "./config.js";
 
-const CACHE_DIR = join(homedir(), ".honcho-clawd");
+const CACHE_DIR = join(homedir(), ".honcho");
 const ID_CACHE_FILE = join(CACHE_DIR, "cache.json");
 const CONTEXT_CACHE_FILE = join(CACHE_DIR, "context-cache.json");
 const MESSAGE_QUEUE_FILE = join(CACHE_DIR, "message-queue.jsonl");
-const CLAWD_CONTEXT_FILE = join(CACHE_DIR, "clawd-context.md");
+const CLAUDE_CONTEXT_FILE = join(CACHE_DIR, "claude-context.md");
 
 // Ensure cache directory exists
 function ensureCacheDir(): void {
@@ -95,12 +95,12 @@ export function setClaudeInstanceId(instanceId: string): void {
 }
 
 // ============================================
-// Context Cache - user + clawd context with TTL
+// Context Cache - user + claude context with TTL
 // ============================================
 
 interface ContextCache {
   userContext?: { data: any; fetchedAt: number };
-  clawdContext?: { data: any; fetchedAt: number };
+  claudeContext?: { data: any; fetchedAt: number };
   summaries?: { data: any; fetchedAt: number };
   messageCount?: number; // Track messages since last refresh
   lastRefreshMessageCount?: number; // Message count at last knowledge graph refresh
@@ -148,17 +148,17 @@ export function setCachedUserContext(data: any): void {
   saveContextCache(cache);
 }
 
-export function getCachedClawdContext(): any | null {
+export function getCachedClaudeContext(): any | null {
   const cache = loadContextCache();
-  if (cache.clawdContext && Date.now() - cache.clawdContext.fetchedAt < getContextTTL()) {
-    return cache.clawdContext.data;
+  if (cache.claudeContext && Date.now() - cache.claudeContext.fetchedAt < getContextTTL()) {
+    return cache.claudeContext.data;
   }
   return null;
 }
 
-export function setCachedClawdContext(data: any): void {
+export function setCachedClaudeContext(data: any): void {
   const cache = loadContextCache();
-  cache.clawdContext = { data, fetchedAt: Date.now() };
+  cache.claudeContext = { data, fetchedAt: Date.now() };
   saveContextCache(cache);
 }
 
@@ -275,42 +275,45 @@ export function markMessagesUploaded(forCwd?: string): void {
 }
 
 // ============================================
-// CLAWD Context File - self-summary
+// CLAUDE Context File - self-summary
 // ============================================
 
-export function getClawdContextPath(): string {
-  return CLAWD_CONTEXT_FILE;
+export function getClaudeContextPath(): string {
+  return CLAUDE_CONTEXT_FILE;
 }
 
-export function loadClawdLocalContext(): string {
+export function loadClaudeLocalContext(): string {
   ensureCacheDir();
-  if (!existsSync(CLAWD_CONTEXT_FILE)) {
+  if (!existsSync(CLAUDE_CONTEXT_FILE)) {
     return "";
   }
   try {
-    return readFileSync(CLAWD_CONTEXT_FILE, "utf-8");
+    return readFileSync(CLAUDE_CONTEXT_FILE, "utf-8");
   } catch {
     return "";
   }
 }
 
-export function saveClawdLocalContext(content: string): void {
+export function saveClaudeLocalContext(content: string): void {
   ensureCacheDir();
-  writeFileSync(CLAWD_CONTEXT_FILE, content);
+  writeFileSync(CLAUDE_CONTEXT_FILE, content);
 }
 
-export function appendClawdWork(workDescription: string): void {
+export function appendClaudeWork(workDescription: string): void {
   ensureCacheDir();
   const timestamp = new Date().toISOString();
   const entry = `\n- [${timestamp}] ${workDescription}`;
 
-  let existing = loadClawdLocalContext();
+  let existing = loadClaudeLocalContext();
   if (!existing) {
-    existing = `# CLAWD Work Context\n\nAuto-generated log of CLAWD's recent work.\n\n## Recent Activity\n`;
+    existing = `# CLAUDE Work Context\n\nAuto-generated log of CLAUDE's recent work.\n\n## Recent Activity\n`;
   }
 
   // Keep only last N entries to prevent file from growing too large
-  const { maxEntries } = getLocalContextConfig();
+  let maxEntries = getLocalContextConfig().maxEntries;
+  if (!maxEntries) {
+    maxEntries = 10;
+  }
   const lines = existing.split("\n");
   const activityStart = lines.findIndex((l) => l.includes("## Recent Activity"));
   if (activityStart !== -1) {
@@ -320,10 +323,10 @@ export function appendClawdWork(workDescription: string): void {
     existing = [...header, ...recentActivities].join("\n");
   }
 
-  saveClawdLocalContext(existing + entry);
+  saveClaudeLocalContext(existing + entry);
 }
 
-export function generateClawdSummary(
+export function generateClaudeSummary(
   sessionName: string,
   workItems: string[],
   assistantMessages: string[]
@@ -342,12 +345,12 @@ export function generateClawdSummary(
     }
   }
 
-  let summary = `# CLAWD Work Context
+  let summary = `# CLAUDE Work Context
 
 Last updated: ${timestamp}
 Session: ${sessionName}
 
-## What CLAWD Was Working On
+## What CLAUDE Was Working On
 
 `;
 
@@ -481,5 +484,5 @@ export function clearAllCaches(): void {
   if (existsSync(CONTEXT_CACHE_FILE)) writeFileSync(CONTEXT_CACHE_FILE, "{}");
   if (existsSync(MESSAGE_QUEUE_FILE)) writeFileSync(MESSAGE_QUEUE_FILE, "");
   if (existsSync(GIT_STATE_FILE)) writeFileSync(GIT_STATE_FILE, "{}");
-  // Don't clear clawd-context.md - that's valuable history
+  // Don't clear claude-context.md - that's valuable history
 }

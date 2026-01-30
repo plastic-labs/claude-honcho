@@ -1,19 +1,9 @@
-import Honcho from "@honcho-ai/core";
+import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getHonchoClientOptions } from "../config.js";
 import { basename } from "path";
-import {
-  getCachedWorkspaceId,
-  setCachedWorkspaceId,
-  getCachedPeerId,
-  setCachedPeerId,
-  getCachedSessionId,
-  setCachedSessionId,
-  appendClawdWork,
-  getClaudeInstanceId,
-} from "../cache.js";
+import { appendClaudeWork, getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 
-const WORKSPACE_APP_TAG = "honcho-clawd";
 
 interface HookInput {
   tool_name?: string;
@@ -114,8 +104,8 @@ function summarizeEdit(oldStr: string, newStr: string, filePath: string): string
   }
 
   // Look for meaningful changes
-  const oldTokens = oldStr.match(/\w+/g) || [];
-  const newTokens = newStr.match(/\w+/g) || [];
+  const oldTokens: string[] = oldStr.match(/\w+/g) ?? [];
+  const newTokens: string[] = newStr.match(/\w+/g) ?? [];
 
   // Find added/removed identifiers
   const added = newTokens.filter(t => !oldTokens.includes(t) && t.length > 2);
@@ -233,8 +223,8 @@ export async function handlePostToolUse(): Promise<void> {
   const summary = formatToolSummary(toolName, toolInput, toolResponse);
   logHook("post-tool-use", summary, { tool: toolName });
 
-  // INSTANT: Update local clawd context file (~2ms)
-  appendClawdWork(summary);
+  // INSTANT: Update local claude context file (~2ms)
+  appendClaudeWork(summary);
 
   // Upload to Honcho and wait for completion
   await logToHonchoAsync(config, cwd, summary).catch((e) => logHook("post-tool-use", `Upload failed: ${e}`, { error: String(e) }));
@@ -248,48 +238,23 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
     return;
   }
 
-  const client = new Honcho(getHonchoClientOptions(config));
-
-  // Try to use cached IDs for speed
-  let workspaceId = getCachedWorkspaceId(config.workspace);
-  let sessionId = getCachedSessionId(cwd);
-  let clawdPeerId = getCachedPeerId(config.claudePeer);
+  const honcho = new Honcho(getHonchoClientOptions(config));
   const sessionName = getSessionName(cwd);
 
-  // If we don't have cached IDs, do full setup and cache results
-  if (!workspaceId || !sessionId || !clawdPeerId) {
-    const workspace = await client.workspaces.getOrCreate({
-      id: config.workspace,
-      metadata: { app: WORKSPACE_APP_TAG },
-    });
-    workspaceId = workspace.id;
-    setCachedWorkspaceId(config.workspace, workspaceId);
-
-    const session = await client.workspaces.sessions.getOrCreate(workspaceId, {
-      id: sessionName,
-      metadata: { cwd },
-    });
-    sessionId = session.id;
-    setCachedSessionId(cwd, sessionName, sessionId);
-
-    const clawdPeer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
-    clawdPeerId = clawdPeer.id;
-    setCachedPeerId(config.claudePeer, clawdPeerId);
-  }
+  // Get session and peer using new fluent API
+  const session = await honcho.session(sessionName);
+  const claudePeer = await honcho.peer(config.claudePeer);
 
   // Log the tool use with instance_id and session_affinity for project-scoped fact extraction
-  logApiCall("sessions.messages.create", "POST", `tool: ${summary.slice(0, 50)}`);
+  logApiCall("session.addMessages", "POST", `tool: ${summary.slice(0, 50)}`);
   const instanceId = getClaudeInstanceId();
-  await client.workspaces.sessions.messages.create(workspaceId, sessionId, {
-    messages: [
-      {
-        content: `[Tool] ${summary}`,
-        peer_id: config.claudePeer,
-        metadata: {
-          ...(instanceId ? { instance_id: instanceId } : {}),
-          session_affinity: sessionName,  // Tag for project-scoped fact extraction
-        },
+
+  await session.addMessages([
+    claudePeer.message(`[Tool] ${summary}`, {
+      metadata: {
+        instance_id: instanceId || undefined,
+        session_affinity: sessionName,
       },
-    ],
-  });
+    }),
+  ]);
 }

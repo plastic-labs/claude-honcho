@@ -11,11 +11,11 @@ export interface MessageUploadConfig {
 export interface ContextRefreshConfig {
   messageThreshold?: number; // Refresh every N messages (default: 50)
   ttlSeconds?: number; // Cache TTL in seconds (default: 300)
-  skipDialectic?: boolean; // Skip chat() calls in user-prompt (default: true, saves $0.03/call)
+  skipDialectic?: boolean; // Skip chat() calls in user-prompt (default: true)
 }
 
 export interface LocalContextConfig {
-  maxEntries?: number; // Max entries in clawd-context.md (default: 50)
+  maxEntries?: number; // Max entries in claude-context.md (default: 50)
 }
 
 export type HonchoEnvironment = "production" | "local";
@@ -25,20 +25,26 @@ export interface HonchoEndpointConfig {
   baseUrl?: string; // Custom URL override (takes precedence over environment)
 }
 
-export interface HonchoCLAWDConfig {
+// Default base URLs for the new SDK (v3 API)
+const HONCHO_BASE_URLS = {
+  production: "https://api.honcho.dev/v3",
+  local: "http://localhost:8000/v3",
+} as const;
+
+export interface HonchoCLAUDEConfig {
   peerName: string; // The user's peer name
   apiKey: string; // Honcho API key
   workspace: string; // Honcho workspace name
-  claudePeer: string; // Claude's peer name (default: "clawd")
+  claudePeer: string; // Claude's peer name (default: "claude")
   sessions?: Record<string, string>; // Map of directory path -> session name
   saveMessages?: boolean; // Save messages to Honcho (default: true)
   messageUpload?: MessageUploadConfig; // Token-based upload limits (default: no limits)
   contextRefresh?: ContextRefreshConfig; // Context retrieval settings
   endpoint?: HonchoEndpointConfig; // SaaS vs local instance config
-  localContext?: LocalContextConfig; // Local clawd-context.md settings
+  localContext?: LocalContextConfig; // Local claude-context.md settings
 }
 
-const CONFIG_DIR = join(homedir(), ".honcho-clawd");
+const CONFIG_DIR = join(homedir(), ".honcho");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 export function getConfigDir(): string {
@@ -53,19 +59,19 @@ export function configExists(): boolean {
   return existsSync(CONFIG_FILE);
 }
 
-export function loadConfig(): HonchoCLAWDConfig | null {
+export function loadConfig(): HonchoCLAUDEConfig | null {
   if (!configExists()) {
     return null;
   }
   try {
     const content = readFileSync(CONFIG_FILE, "utf-8");
-    return JSON.parse(content) as HonchoCLAWDConfig;
+    return JSON.parse(content) as HonchoCLAUDEConfig;
   } catch {
     return null;
   }
 }
 
-export function saveConfig(config: HonchoCLAWDConfig): void {
+export function saveConfig(config: HonchoCLAUDEConfig): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
   }
@@ -126,7 +132,7 @@ export function getContextRefreshConfig(): ContextRefreshConfig {
   return {
     messageThreshold: config?.contextRefresh?.messageThreshold ?? 30, // Every 30 messages
     ttlSeconds: config?.contextRefresh?.ttlSeconds ?? 300, // 5 minutes
-    skipDialectic: config?.contextRefresh?.skipDialectic ?? true, // Skip by default to save $0.03/call
+    skipDialectic: config?.contextRefresh?.skipDialectic ?? false, // Dialectic enabled by default
   };
 }
 
@@ -157,44 +163,49 @@ export function truncateToTokens(text: string, maxTokens: number): string {
 
 export interface HonchoClientOptions {
   apiKey: string;
-  environment?: HonchoEnvironment;
-  baseURL?: string;
+  baseUrl: string;
+  workspaceId: string;
+}
+
+/**
+ * Get the base URL for Honcho API based on config.
+ * Priority: baseUrl > environment > "production" (default)
+ */
+export function getHonchoBaseUrl(config: HonchoCLAUDEConfig): string {
+  if (config.endpoint?.baseUrl) {
+    // Custom URL takes precedence - ensure it has /v3 suffix
+    const url = config.endpoint.baseUrl;
+    return url.endsWith("/v3") ? url : `${url}/v3`;
+  }
+  if (config.endpoint?.environment === "local") {
+    return HONCHO_BASE_URLS.local;
+  }
+  return HONCHO_BASE_URLS.production;
 }
 
 /**
  * Get Honcho client options based on config.
- * Priority: baseUrl > environment > "production" (default)
+ * New SDK requires baseUrl and workspaceId at construction time.
  */
-export function getHonchoClientOptions(config: HonchoCLAWDConfig): HonchoClientOptions {
-  const options: HonchoClientOptions = {
+export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClientOptions {
+  return {
     apiKey: config.apiKey,
+    baseUrl: getHonchoBaseUrl(config),
+    workspaceId: config.workspace,
   };
-
-  if (config.endpoint?.baseUrl) {
-    // Custom URL takes precedence
-    options.baseURL = config.endpoint.baseUrl;
-  } else if (config.endpoint?.environment) {
-    // Use configured environment
-    options.environment = config.endpoint.environment;
-  } else {
-    // Default to production (SaaS)
-    options.environment = "production";
-  }
-
-  return options;
 }
 
 /**
  * Get current endpoint display info
  */
-export function getEndpointInfo(config: HonchoCLAWDConfig): { type: string; url: string } {
+export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url: string } {
   if (config.endpoint?.baseUrl) {
     return { type: "custom", url: config.endpoint.baseUrl };
   }
   if (config.endpoint?.environment === "local") {
-    return { type: "local", url: "http://localhost:8000" };
+    return { type: "local", url: HONCHO_BASE_URLS.local };
   }
-  return { type: "production", url: "https://api.honcho.dev" };
+  return { type: "production", url: HONCHO_BASE_URLS.production };
 }
 
 /**

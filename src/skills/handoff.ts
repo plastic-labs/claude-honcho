@@ -6,22 +6,12 @@
  * "stuck" patterns and generate a concise, actionable summary.
  */
 
-import Honcho from "@honcho-ai/core";
+import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getHonchoClientOptions } from "../config.js";
 import { basename } from "path";
-import {
-  getCachedWorkspaceId,
-  setCachedWorkspaceId,
-  getCachedPeerId,
-  setCachedPeerId,
-  getCachedSessionId,
-  setCachedSessionId,
-  getClaudeInstanceId,
-} from "../cache.js";
+import { getClaudeInstanceId } from "../cache.js";
 import * as s from "../styles.js";
 import { execSync } from "child_process";
-
-const WORKSPACE_APP_TAG = "honcho-clawd";
 
 // How many messages to look at by default
 const DEFAULT_MESSAGE_COUNT = 50;
@@ -233,60 +223,32 @@ function summarizeActivities(messages: Message[], userPeerId: string): { userAct
 export async function generateHandoff(options: HandoffOptions = {}): Promise<string> {
   const config = loadConfig();
   if (!config) {
-    throw new Error("Not configured. Run: honcho-clawd init");
+    throw new Error("Not configured. Run: honcho init");
   }
 
   const cwd = process.cwd();
   const instanceId = getClaudeInstanceId();
   const messageCount = options.messageCount ?? DEFAULT_MESSAGE_COUNT;
 
-  const client = new Honcho(getHonchoClientOptions(config));
-
-  // Get or create workspace
-  let workspaceId = getCachedWorkspaceId(config.workspace);
-  if (!workspaceId) {
-    const workspace = await client.workspaces.getOrCreate({
-      id: config.workspace,
-      metadata: { app: WORKSPACE_APP_TAG },
-    });
-    workspaceId = workspace.id;
-    setCachedWorkspaceId(config.workspace, workspaceId);
-  }
-
-  // Get or create session
+  const honcho = new Honcho(getHonchoClientOptions(config));
   const sessionName = getSessionName(cwd);
-  let sessionId = getCachedSessionId(cwd);
-  if (!sessionId) {
-    const session = await client.workspaces.sessions.getOrCreate(workspaceId, {
-      id: sessionName,
-      metadata: { cwd },
-    });
-    sessionId = session.id;
-    setCachedSessionId(cwd, sessionName, sessionId);
-  }
 
-  // Get peer IDs
-  let userPeerId = getCachedPeerId(config.peerName);
-  if (!userPeerId) {
-    const peer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.peerName });
-    userPeerId = peer.id;
-    setCachedPeerId(config.peerName, peer.id);
-  }
+  // Get session and peer using new fluent API
+  const session = await honcho.session(sessionName);
+  const userPeer = await honcho.peer(config.peerName);
+  const userPeerId = userPeer.id;
 
-  // Fetch session messages (this is the key change - session-scoped, not global)
+  // Fetch session messages and context in parallel
   const [messagesResult, contextResult] = await Promise.allSettled([
     // Get raw messages from this session
-    client.workspaces.sessions.messages.list(workspaceId, sessionId, {
+    session.messages({
       reverse: true,  // Most recent first
-      // Filter by instance_id if available
-      filters: instanceId && options.instanceOnly !== false
-        ? { "metadata.instance_id": instanceId }
-        : undefined,
+      // Note: Filter by instance_id may need different approach in new SDK
     }),
-    // Get session context with limit_to_session for session-only representation
-    client.workspaces.sessions.getContext(workspaceId, sessionId, {
-      limit_to_session: true,
-      include_most_derived: true,
+    // Get session context
+    session.context({
+      limitToSession: true,
+      includeMostDerived: true,
       summary: true,
       tokens: 2000,  // Keep it concise
     }),
@@ -295,12 +257,20 @@ export async function generateHandoff(options: HandoffOptions = {}): Promise<str
   // Process messages - filter by count and length
   let messages: Message[] = [];
   if (messagesResult.status === "fulfilled") {
-    const page = messagesResult.value as any;
-    const allMessages = page.data || [];
+    const result = messagesResult.value as any;
+    // New SDK may return array directly or { data: [...] }
+    const allMessages = Array.isArray(result) ? result : (result.data || []);
 
     // Filter: skip very long messages (code dumps), take up to messageCount
+    // Also filter by instance_id if specified
     messages = allMessages
-      .filter((msg: Message) => msg.content.length <= MAX_MESSAGE_LENGTH)
+      .filter((msg: Message) => {
+        if (msg.content.length > MAX_MESSAGE_LENGTH) return false;
+        if (instanceId && options.instanceOnly !== false) {
+          return msg.metadata?.instance_id === instanceId;
+        }
+        return true;
+      })
       .slice(0, messageCount);  // Already sorted by most recent first
   }
 
@@ -416,7 +386,7 @@ export async function generateHandoff(options: HandoffOptions = {}): Promise<str
   }
 
   parts.push("---");
-  parts.push("*handoff by honcho-clawd*");
+  parts.push("*handoff by honcho*");
 
   return parts.join("\n");
 }
