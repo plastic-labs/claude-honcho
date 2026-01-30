@@ -1,4 +1,4 @@
-# honcho-clawd
+# honcho-claude-code-plugin
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bun](https://img.shields.io/badge/Bun-%23000000.svg?style=flat&logo=bun&logoColor=white)](https://bun.sh)
@@ -14,7 +14,7 @@ Give Claude Code long-term memory that survives context wipes, session restarts,
 - **Survives Interruptions**: Local message queue ensures no data loss on `ctrl+c` or crashes
 - **AI Self-Awareness**: Claude knows what it was working on, even after context is wiped
 - **Git State Tracking**: Detects branch switches, commits, and changes made outside Claude sessions
-- **Dual Peer System**: Separate memory for user (you) and AI (clawd)
+- **Dual Peer System**: Separate memory for user (you) and AI
 - **Semantic Search**: Relevant context is retrieved based on your current prompt
 - **Cost-Optimized**: Configurable refresh rates and caching to minimize API costs
 - **Ultra-Fast Hooks**: 98% latency reduction through caching, parallelization, and fire-and-forget patterns
@@ -57,8 +57,8 @@ Give Claude Code long-term memory that survives context wipes, session restarts,
 
 ```bash
 # Clone the repository
-git clone https://github.com/erosika/honcho-clawd.git
-cd honcho-clawd
+git clone https://github.com/plastic-labs/honcho-claude-code-plugin.git
+cd honcho-claude-code-plugin
 
 # Install dependencies
 bun install
@@ -73,7 +73,7 @@ bun link
 ### Install from npm (coming soon)
 
 ```bash
-bun install -g honcho-clawd
+bun install -g honcho-claude-code-plugin
 ```
 
 ---
@@ -83,20 +83,20 @@ bun install -g honcho-clawd
 ### 1. Initialize Configuration
 
 ```bash
-honcho-clawd init
+honcho init
 ```
 
 You'll be prompted for:
 - **Your name/peer ID**: How Honcho identifies you (e.g., "yourname")
 - **Workspace name**: Your Honcho workspace (e.g., "myworkspace")
-- **Claude's peer name**: AI identity in Honcho (default: "clawd")
+- **Claude's peer name**: AI identity in Honcho (default: "claude")
 - **Enable message saving**: Whether to save conversation history
 - **Honcho API key**: Get from https://app.honcho.dev
 
 ### 2. Install Hooks
 
 ```bash
-honcho-clawd install
+honcho install
 ```
 
 This adds hooks to `~/.claude/settings.json` that activate automatically.
@@ -117,25 +117,25 @@ claude
 ### The Honcho Memory System
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Claude Code                               │
-├─────────────────────────────────────────────────────────────────┤
-│  SessionStart     │  UserPrompt      │  PostToolUse  │ SessionEnd│
-│  ─────────────    │  ───────────     │  ────────────  │ ──────── │
-│  Load context     │  Queue message   │  Log tool use  │ Batch    │
-│  from Honcho +    │  locally (1ms)   │  locally (2ms) │ upload   │
-│  local clawd    │  Fire-and-forget │  Fire-and-     │ messages │
-│  summary          │  upload          │  forget upload │ Generate │
-│                   │  Cached context  │                │ summary  │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                        Claude Code                                 │
+├────────────────────────────────────────────────────────────────────┤
+│  SessionStart     │  UserPrompt      │  PostToolUse   │ SessionEnd │
+│  ─────────────    │  ───────────     │  ────────────  │  ────────  │
+│  Load context     │  Queue message   │  Log tool use  │  Batch     │
+│  from Honcho +    │  locally (1ms)   │  locally (2ms) │  upload    │
+│  local claude     │  Fire-and-forget │  Fire-and-     │  messages  │
+│  summary          │  upload          │  forget upload │  Generate  │
+│                   │  Cached context  │                │  summary   │
+└────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Honcho API                               │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  ┌─────────────┐ │
-│  │Workspace │  │ Session  │  │    Peers     │  │  Messages   │ │
-│  │(workspace)│──│(project) │──│ user/clawd │──│ (history)   │ │
-│  └──────────┘  └──────────┘  └──────────────┘  └─────────────┘ │
+│                         Honcho API                              │
+│  ┌───────────┐  ┌──────────┐  ┌──────────────┐  ┌─────────────┐ │
+│  │Workspace  │  │ Session  │  │    Peers     │  │  Messages   │ │
+│  │(workspace)│──│(project) │──│ user/claude  │──│ (history)   │ │
+│  └───────────┘  └──────────┘  └──────────────┘  └─────────────┘ │
 │                                     │                           │
 │                    ┌────────────────┴────────────────┐          │
 │                    │       Persistent Memory         │          │
@@ -149,12 +149,12 @@ claude
 
 ### Dual Peer System
 
-honcho-clawd creates two "peers" in Honcho:
+The plugin creates two "peers" in Honcho:
 
 | Peer | Represents | Observes | Purpose |
 |------|------------|----------|---------|
 | `user` (you) | The user | Self | Build knowledge about your preferences, projects, style |
-| `clawd` | Claude AI | You | Build knowledge about what Claude has done, AI self-awareness |
+| `claude` | Claude AI | You | Build knowledge about what Claude has done, AI self-awareness |
 
 This enables Claude to understand both what **you** know/want and what **it** has been working on.
 
@@ -164,14 +164,14 @@ This enables Claude to understand both what **you** know/want and what **it** ha
 
 ### Config File
 
-Located at `~/.honcho-clawd/config.json`:
+Located at `~/.honcho/config.json`:
 
 ```json
 {
   "peerName": "yourname",
   "apiKey": "hch-v2-...",
   "workspace": "myworkspace",
-  "claudePeer": "clawd",
+  "claudePeer": "claude",
   "saveMessages": true,
   "sessions": {
     "/path/to/project": "project-name"
@@ -196,7 +196,7 @@ Located at `~/.honcho-clawd/config.json`:
 | `peerName` | Your identity in Honcho | (required) |
 | `apiKey` | Honcho API key | (required) |
 | `workspace` | Honcho workspace name | `"claude_code"` |
-| `claudePeer` | AI identity in Honcho | `"clawd"` |
+| `claudePeer` | AI identity in Honcho | `"claude"` |
 | `saveMessages` | Save conversation history | `true` |
 | `sessions` | Directory → session mappings | `{}` |
 
@@ -229,7 +229,7 @@ Control how often context is fetched from Honcho:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `localContext.maxEntries` | Max entries in clawd-context.md | `50` |
+| `localContext.maxEntries` | Max entries in claude-context.md | `50` |
 
 ---
 
@@ -241,27 +241,27 @@ Switch between Honcho SaaS and local instances for development/testing.
 
 ```bash
 # Show current endpoint
-honcho-clawd endpoint
+honcho endpoint
 
 # Switch to SaaS (default)
-honcho-clawd endpoint saas
+honcho endpoint saas
 
 # Switch to local instance (localhost:8000)
-honcho-clawd endpoint local
+honcho endpoint local
 
 # Use custom URL
-honcho-clawd endpoint custom https://my-honcho.example.com
+honcho endpoint custom https://my-honcho.example.com
 
 # Test connection
-honcho-clawd endpoint test
+honcho endpoint test
 ```
 
 ### During Init
 
-Type `local` as the API key during `honcho-clawd init` to configure for a local instance:
+Type `local` as the API key during `honcho init` to configure for a local instance:
 
 ```bash
-$ honcho-clawd init
+$ honcho init
 Enter your Honcho API key: local
 Local mode enabled
 Enter local API key (or press enter for 'local'):
@@ -271,7 +271,7 @@ Enter local API key (or press enter for 'local'):
 
 ## Git State Tracking
 
-honcho-clawd automatically tracks git state to detect external changes.
+The plugin automatically tracks git state to detect external changes.
 
 ### What's Tracked
 
@@ -281,7 +281,7 @@ honcho-clawd automatically tracks git state to detect external changes.
 
 ### External Change Detection
 
-At each session start, honcho-clawd compares the current git state to the cached state from the last session. Detected changes include:
+At each session start, the plugin compares the current git state to the cached state from the last session. Detected changes include:
 
 | Change Type | Example |
 |-------------|---------|
@@ -296,7 +296,7 @@ Git state enhances the startup context:
 ```
 ## Honcho Memory System Active
 - User: yourname
-- AI: clawd
+- AI: claude
 - Workspace: myworkspace
 - Session: my-project
 - Directory: /path/to/project
@@ -315,71 +315,29 @@ Dialectic queries are also enhanced with git context for more relevant responses
 
 ## Claude Code Skills
 
-honcho-clawd includes slash commands you can use directly in Claude Code:
+This plugin includes slash commands you can use directly in Claude Code:
 
 ### Available Commands
 
 | Command | Description |
 |---------|-------------|
-| `/honcho-clawd-new [name]` | Create or connect to a Honcho session |
-| `/honcho-clawd-list` | List all Honcho sessions |
-| `/honcho-clawd-status` | Show current session and memory status |
-| `/honcho-clawd-switch <name>` | Switch to a different session |
-| `/honcho-clawd-clear` | Clear custom session (revert to default) |
+| `/honcho-new [name]` | Create or connect to a Honcho session |
+| `/honcho-list` | List all Honcho sessions |
+| `/honcho-status` | Show current session and memory status |
+| `/honcho-switch <name>` | Switch to a different session |
+| `/honcho-clear` | Clear custom session (revert to default) |
 
 ### Usage Example
 
 ```
-You: /honcho-clawd-status
+You: /honcho-status
 
 Claude: Current Honcho session status:
 - Workspace: myworkspace
 - Session: my-project
 - User Peer: yourname
-- AI Peer: clawd
+- AI Peer: claude
 - Message Saving: enabled
-```
-
----
-
-## Cost Optimization
-
-### Honcho Pricing (Current)
-
-| API Call | Cost | When Used |
-|----------|------|-----------|
-| `messages.create()` | $0.001/msg | Every user/assistant message |
-| `getContext()` | Free | Context retrieval |
-| `chat()` (dialectic) | $0.03/call | LLM reasoning queries |
-
-### Default Cost-Optimized Settings
-
-honcho-clawd is configured to minimize costs by default:
-
-1. **Dialectic calls (`chat()`) skipped in user-prompt** - Only called at session-start
-2. **5-minute context cache** - Reduces redundant `getContext()` calls
-3. **30-message refresh threshold** - Balances freshness vs. API calls
-
-### Estimated Costs per Session
-
-| Session Length | Messages | Estimated Cost |
-|----------------|----------|----------------|
-| Short (10 msgs) | ~10 | ~$0.07 |
-| Medium (30 msgs) | ~30 | ~$0.09 |
-| Long (100 msgs) | ~100 | ~$0.16 |
-
-### Further Cost Reduction
-
-To reduce costs further, edit `~/.honcho-clawd/config.json`:
-
-```json
-{
-  "contextRefresh": {
-    "messageThreshold": 100,    // Refresh less often
-    "ttlSeconds": 600,          // 10-minute cache
-    "skipDialectic": true       // Already default
-  }
-}
 ```
 
 ---
@@ -389,13 +347,13 @@ To reduce costs further, edit `~/.honcho-clawd/config.json`:
 ### File Structure
 
 ```
-~/.honcho-clawd/
+~/.honcho/
 ├── config.json           # User settings (API key, workspace, peer names, endpoint)
 ├── cache.json            # Cached Honcho IDs (workspace, session, peers)
 ├── context-cache.json    # Pre-warmed context with TTL tracking
 ├── git-state.json        # Git state per directory (for change detection)
 ├── message-queue.jsonl   # Local message queue (reliability layer)
-└── clawd-context.md      # AI self-summary (survives context wipes)
+└── claude-context.md     # AI self-summary (survives context wipes)
 ```
 
 ### Source Structure
@@ -450,14 +408,14 @@ Claude Code's context window can be wiped or compacted at any time. When this ha
 
 ### The Solution
 
-honcho-clawd maintains **clawd self-context** - a persistent record of Claude's work that survives context wipes.
+This plugin allows Claude to retain **self-context** - a persistent record of Claude's work that survives context wipes.
 
 ### How It Works
 
-1. **PostToolUse**: Every significant action (file writes, edits, commands) is logged to `~/.honcho-clawd/clawd-context.md`
+1. **PostToolUse**: Every significant action (file writes, edits, commands) is logged to `~/.honcho/claude-context.md`
 2. **SessionEnd**: A summary of Claude's work is generated and saved to Honcho
 3. **SessionStart**: Claude receives both:
-   - **Local context**: Instant read from `clawd-context.md`
+   - **Local context**: Instant read from `claude-context.md`
    - **Honcho context**: Observations and patterns from Honcho's memory system
 
 ### Example
@@ -465,7 +423,7 @@ honcho-clawd maintains **clawd self-context** - a persistent record of Claude's 
 After a context wipe, Claude still knows:
 
 ```markdown
-## Claudis Local Context (What I Was Working On)
+## Local Context (What I Was Working On)
 
 Last updated: 2026-01-05T08:41:00.000Z
 Session: my-project
@@ -500,10 +458,10 @@ Session: my-project
 ## CLI Reference
 
 ```
-honcho-clawd <command>
+honcho <command>
 
 Commands:
-  init        Configure honcho-clawd (name, API key, workspace)
+  init        Configure honcho (name, API key, workspace)
   install     Install hooks to ~/.claude/settings.json
   uninstall   Remove hooks from Claude settings
   update      Rebuild and reinstall (removes lockfile, builds, links)
@@ -544,29 +502,29 @@ Hook Commands (internal - called by Claude Code):
 
 1. Check hooks are installed:
    ```bash
-   honcho-clawd status
+   honcho status
    ```
 
-2. Verify `~/.claude/settings.json` contains honcho-clawd hooks
+2. Verify `~/.claude/settings.json` contains honcho hooks
 
 3. Check the hook binary is accessible:
    ```bash
-   which honcho-clawd
+   which honcho
    ```
 
 ### Slow Performance
 
 1. Clear stale caches:
    ```bash
-   rm ~/.honcho-clawd/cache.json
-   rm ~/.honcho-clawd/context-cache.json
+   rm ~/.honcho/cache.json
+   rm ~/.honcho/context-cache.json
    ```
 
 2. First request after cache clear will be slower (populating cache)
 
 ### No Context Loading
 
-1. Verify API key is valid in `~/.honcho-clawd/config.json`
+1. Verify API key is valid in `~/.honcho/config.json`
 2. Check Honcho dashboard for your workspace/session
 3. Ensure `saveMessages` is `true` in config
 
@@ -633,4 +591,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - [Honcho Documentation](https://docs.honcho.dev)
 - [Claude Code Documentation](https://docs.anthropic.com/claude-code)
-- [Report Issues](https://github.com/erosika/honcho-clawd/issues)
+- [Report Issues](https://github.com/plastic-labs/honcho-claude-code-plugin/issues)

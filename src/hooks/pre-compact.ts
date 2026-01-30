@@ -12,7 +12,7 @@ import {
 import { Spinner } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 
-const WORKSPACE_APP_TAG = "honcho-clawd";
+const WORKSPACE_APP_TAG = "honcho-plugin";
 
 interface HookInput {
   session_id?: string;
@@ -38,10 +38,10 @@ function formatMemoryCard(
   config: { peerName: string; claudePeer: string; workspace: string },
   sessionName: string,
   userContext: any,
-  clawdContext: any,
+  claudeContext: any,
   summaries: any,
   userDialectic: string | null,
-  clawdDialectic: string | null
+  claudeDialectic: string | null
 ): string {
   const parts: string[] = [];
 
@@ -82,14 +82,14 @@ ${facts}`);
 ${insights}`);
   }
 
-  // Clawd's self-context - what was I working on
-  if (clawdContext?.representation?.explicit?.length > 0) {
-    const clawdFacts = clawdContext.representation.explicit
+  // Claude's self-context - what was I working on
+  if (claudeContext?.representation?.explicit?.length > 0) {
+    const claudeFacts = claudeContext.representation.explicit
       .slice(0, 8)
       .map((e: any) => `- ${e.content || e}`)
       .join("\n");
     parts.push(`### ${config.claudePeer}'s Recent Work (PRESERVE)
-${clawdFacts}`);
+${claudeFacts}`);
   }
 
   // Session summary - what we were doing
@@ -104,9 +104,9 @@ ${summaries.short_summary.content}`);
 ${userDialectic}`);
   }
 
-  if (clawdDialectic) {
+  if (claudeDialectic) {
     parts.push(`### ${config.claudePeer}'s Self-Reflection (PRESERVE)
-${clawdDialectic}`);
+${claudeDialectic}`);
   }
 
   parts.push(`### End Memory Anchor
@@ -175,16 +175,16 @@ export async function handlePreCompact(): Promise<void> {
 
     // Get peer IDs (use cache)
     let userPeerId = getCachedPeerId(config.peerName);
-    let clawdPeerId = getCachedPeerId(config.claudePeer);
+    let claudePeerId = getCachedPeerId(config.claudePeer);
 
     if (!userPeerId) {
       const peer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.peerName });
       userPeerId = peer.id;
       setCachedPeerId(config.peerName, peer.id);
     }
-    if (!clawdPeerId) {
+    if (!claudePeerId) {
       const peer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
-      clawdPeerId = peer.id;
+      claudePeerId = peer.id;
       setCachedPeerId(config.claudePeer, peer.id);
     }
 
@@ -198,15 +198,15 @@ export async function handlePreCompact(): Promise<void> {
 
     // Fetch ALL context in parallel - this is the RIGHT time for expensive calls
     // because the context is about to be reset anyway
-    const [userContextResult, clawdContextResult, summariesResult, userChatResult, clawdChatResult] =
+    const [userContextResult, claudeContextResult, summariesResult, userChatResult, claudeChatResult] =
       await Promise.allSettled([
         // User's full context
         client.workspaces.peers.getContext(workspaceId, userPeerId, {
           max_observations: 30,
           include_most_derived: true,
         }),
-        // Clawd's self-context
-        client.workspaces.peers.getContext(workspaceId, clawdPeerId, {
+        // Claude's self-context
+        client.workspaces.peers.getContext(workspaceId, claudePeerId, {
           max_observations: 20,
           include_most_derived: true,
         }),
@@ -217,8 +217,8 @@ export async function handlePreCompact(): Promise<void> {
           query: `Summarize the most important things to remember about ${config.peerName}. Focus on their preferences, working style, current projects, and any critical context that should survive a conversation summary.`,
           session_id: sessionId,
         }),
-        // Fresh dialectic - clawd self-reflection
-        client.workspaces.peers.chat(workspaceId, clawdPeerId, {
+        // Fresh dialectic - claude self-reflection
+        client.workspaces.peers.chat(workspaceId, claudePeerId, {
           query: `What are the most important things ${config.claudePeer} was working on with ${config.peerName}? Summarize key context that should be preserved.`,
           session_id: sessionId,
         }),
@@ -226,15 +226,15 @@ export async function handlePreCompact(): Promise<void> {
 
     // Extract results
     const userContext = userContextResult.status === "fulfilled" ? userContextResult.value : null;
-    const clawdContext = clawdContextResult.status === "fulfilled" ? clawdContextResult.value : null;
+    const claudeContext = claudeContextResult.status === "fulfilled" ? claudeContextResult.value : null;
     const summaries = summariesResult.status === "fulfilled" ? summariesResult.value : null;
     const userDialectic =
       userChatResult.status === "fulfilled" && userChatResult.value?.content
         ? userChatResult.value.content
         : null;
-    const clawdDialectic =
-      clawdChatResult.status === "fulfilled" && clawdChatResult.value?.content
-        ? clawdChatResult.value.content
+    const claudeDialectic =
+      claudeChatResult.status === "fulfilled" && claudeChatResult.value?.content
+        ? claudeChatResult.value.content
         : null;
 
     // Format the memory card
@@ -242,10 +242,10 @@ export async function handlePreCompact(): Promise<void> {
       config,
       sessionName,
       userContext,
-      clawdContext,
+      claudeContext,
       summaries,
       userDialectic,
-      clawdDialectic
+      claudeDialectic
     );
 
     if (trigger === "auto") {
@@ -264,7 +264,7 @@ export async function handlePreCompact(): Promise<void> {
       spinner.fail("memory anchor failed");
     }
     // Don't block compaction on failure
-    console.error(`[honcho-clawd] Pre-compact warning: ${error}`);
+    console.error(`[honcho] Pre-compact warning: ${error}`);
     process.exit(0);
   }
 }

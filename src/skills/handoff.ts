@@ -21,7 +21,7 @@ import {
 import * as s from "../styles.js";
 import { execSync } from "child_process";
 
-const WORKSPACE_APP_TAG = "honcho-clawd";
+const WORKSPACE_APP_TAG = "honcho-plugin";
 
 // How many messages to look at by default
 const DEFAULT_MESSAGE_COUNT = 50;
@@ -233,7 +233,7 @@ function summarizeActivities(messages: Message[], userPeerId: string): { userAct
 export async function generateHandoff(options: HandoffOptions = {}): Promise<string> {
   const config = loadConfig();
   if (!config) {
-    throw new Error("Not configured. Run: honcho-clawd init");
+    throw new Error("Not configured. Run: honcho init");
   }
 
   const cwd = process.cwd();
@@ -416,7 +416,7 @@ export async function generateHandoff(options: HandoffOptions = {}): Promise<str
   }
 
   parts.push("---");
-  parts.push("*handoff by honcho-clawd*");
+  parts.push("*handoff by honcho*");
 
   return parts.join("\n");
 }

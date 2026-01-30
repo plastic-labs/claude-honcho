@@ -2,7 +2,7 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "name": "honcho-clawd",
+      "name": "honcho-claude-code-plugin",
       "dependencies": {
         "@honcho-ai/core": "^1.8.0",
       },

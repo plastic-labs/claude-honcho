@@ -11,15 +11,15 @@ import {
   setCachedSessionId,
   getQueuedMessages,
   markMessagesUploaded,
-  generateClawdSummary,
-  saveClawdLocalContext,
-  loadClawdLocalContext,
+  generateClaudeSummary,
+  saveClaudeLocalContext,
+  loadClaudeLocalContext,
   getClaudeInstanceId,
 } from "../cache.js";
 import { playCooldown } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 
-const WORKSPACE_APP_TAG = "honcho-clawd";
+const WORKSPACE_APP_TAG = "honcho-plugin";
 
 interface HookInput {
   session_id?: string;
@@ -247,16 +247,16 @@ export async function handleSessionEnd(): Promise<void> {
 
     // Ensure peers exist (use cache)
     let userPeerId = getCachedPeerId(config.peerName);
-    let clawdPeerId = getCachedPeerId(config.claudePeer);
+    let claudePeerId = getCachedPeerId(config.claudePeer);
 
     if (!userPeerId) {
       const peer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.peerName });
       userPeerId = peer.id;
       setCachedPeerId(config.peerName, peer.id);
     }
-    if (!clawdPeerId) {
+    if (!claudePeerId) {
       const peer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
-      clawdPeerId = peer.id;
+      claudePeerId = peer.id;
       setCachedPeerId(config.claudePeer, peer.id);
     }
 
@@ -310,7 +310,7 @@ export async function handleSessionEnd(): Promise<void> {
         ...other.slice(-15),       // Keep some context
       ].slice(-40);
 
-      // Upload assistant messages for clawd peer knowledge extraction
+      // Upload assistant messages for claude peer knowledge extraction
       // This is the KEY fix: capturing actual reasoning, not just tool calls
       if (assistantMessages.length > 0) {
         const meaningfulCount = assistantMessages.filter(m => m.isMeaningful).length;
@@ -334,10 +334,10 @@ export async function handleSessionEnd(): Promise<void> {
     }
 
     // =====================================================
-    // Step 3: Generate and save clawd self-summary
+    // Step 3: Generate and save claude self-summary
     // =====================================================
     const workItems = extractWorkItems(assistantMessages.map((m) => m.content));
-    const existingContext = loadClawdLocalContext();
+    const existingContext = loadClaudeLocalContext();
 
     // Preserve recent activity from existing context
     let recentActivity = "";
@@ -348,14 +348,14 @@ export async function handleSessionEnd(): Promise<void> {
       }
     }
 
-    const newSummary = generateClawdSummary(
+    const newSummary = generateClaudeSummary(
       sessionName,
       workItems,
       assistantMessages.map((m) => m.content)
     );
 
     // Append preserved activity
-    saveClawdLocalContext(newSummary + recentActivity);
+    saveClaudeLocalContext(newSummary + recentActivity);
 
     // =====================================================
     // Step 4: Log session end marker
@@ -375,11 +375,11 @@ export async function handleSessionEnd(): Promise<void> {
 
     const meaningfulCount = assistantMessages.filter(m => m.isMeaningful).length;
     logHook("session-end", `Session saved: ${assistantMessages.length} assistant msgs (${meaningfulCount} meaningful), ${queuedMessages.length} queued msgs`);
-    console.log(`[honcho-clawd] Session saved: ${assistantMessages.length} assistant messages (${meaningfulCount} with meaningful prose), ${queuedMessages.length} queued messages`);
+    console.log(`[honcho] Session saved: ${assistantMessages.length} assistant messages (${meaningfulCount} with meaningful prose), ${queuedMessages.length} queued messages`);
     process.exit(0);
   } catch (error) {
     logHook("session-end", `Error: ${error}`, { error: String(error) });
-    console.error(`[honcho-clawd] Warning: ${error}`);
+    console.error(`[honcho] Warning: ${error}`);
     process.exit(1);
   }
 }

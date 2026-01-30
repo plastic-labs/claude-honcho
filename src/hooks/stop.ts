@@ -157,13 +157,13 @@ export async function handleStop(): Promise<void> {
     // Get cached IDs
     let workspaceId = getCachedWorkspaceId(config.workspace);
     let sessionId = getCachedSessionId(cwd);
-    let clawdPeerId = getCachedPeerId(config.claudePeer);
+    let claudePeerId = getCachedPeerId(config.claudePeer);
 
     // If we don't have cached IDs, fetch them
-    if (!workspaceId || !sessionId || !clawdPeerId) {
+    if (!workspaceId || !sessionId || !claudePeerId) {
       const workspace = await client.workspaces.getOrCreate({
         id: config.workspace,
-        metadata: { app: "honcho-clawd" },
+        metadata: { app: "honcho-plugin" },
       });
       workspaceId = workspace.id;
       setCachedWorkspaceId(config.workspace, workspaceId);
@@ -175,9 +175,9 @@ export async function handleStop(): Promise<void> {
       sessionId = session.id;
       setCachedSessionId(cwd, sessionName, sessionId);
 
-      const clawdPeer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
-      clawdPeerId = clawdPeer.id;
-      setCachedPeerId(config.claudePeer, clawdPeerId);
+      const claudePeer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
+      claudePeerId = claudePeer.id;
+      setCachedPeerId(config.claudePeer, claudePeerId);
     }
 
     // Upload the assistant response

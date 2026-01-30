@@ -9,8 +9,8 @@ import {
   getCachedSessionId,
   setCachedSessionId,
   setCachedUserContext,
-  setCachedClawdContext,
-  loadClawdLocalContext,
+  setCachedClaudeContext,
+  loadClaudeLocalContext,
   resetMessageCount,
   setClaudeInstanceId,
   getCachedGitState,
@@ -24,7 +24,7 @@ import { displayHonchoStartup } from "../pixel.js";
 import { captureGitState, getRecentCommits, formatGitContext, isGitRepo, inferFeatureContext, formatFeatureContext } from "../git.js";
 import { logHook, logApiCall, logCache, logFlow, logAsync, setLogContext } from "../log.js";
 
-const WORKSPACE_APP_TAG = "honcho-clawd";
+const WORKSPACE_APP_TAG = "honcho-plugin";
 
 interface HookInput {
   session_id?: string;
@@ -85,7 +85,7 @@ function formatRepresentation(rep: any): string {
 export async function handleSessionStart(): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    console.error("[honcho-clawd] Not configured. Run: honcho-clawd init");
+    console.error("[honcho] Not configured. Run: honcho init");
     process.exit(1);
   }
 
@@ -195,12 +195,12 @@ export async function handleSessionStart(): Promise<void> {
 
     // Step 3: Get or create peers (use cache if available)
     let userPeerId = getCachedPeerId(config.peerName);
-    let clawdPeerId = getCachedPeerId(config.claudePeer);
+    let claudePeerId = getCachedPeerId(config.claudePeer);
 
     if (userPeerId) {
       logCache("hit", "peer", config.peerName);
     }
-    if (clawdPeerId) {
+    if (claudePeerId) {
       logCache("hit", "peer", config.claudePeer);
     }
 
@@ -215,11 +215,11 @@ export async function handleSessionStart(): Promise<void> {
         })
       );
     }
-    if (!clawdPeerId) {
+    if (!claudePeerId) {
       logCache("miss", "peer", config.claudePeer);
       peerPromises.push(
         client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer }).then((p) => {
-          clawdPeerId = p.id;
+          claudePeerId = p.id;
           setCachedPeerId(config.claudePeer, p.id);
           logCache("write", "peer", config.claudePeer);
         })
@@ -328,10 +328,10 @@ export async function handleSessionStart(): Promise<void> {
       contextParts.push(`## Git Activity Since Last Session\n${changeDescriptions}`);
     }
 
-    // Load local clawd context immediately (instant, no API call)
-    const localClawdContext = loadClawdLocalContext();
-    if (localClawdContext) {
-      contextParts.push(`## CLAWD Local Context (What I Was Working On)\n${localClawdContext.slice(0, 2000)}`);
+    // Load local claude context immediately (instant, no API call)
+    const localClaudeContext = loadClaudeLocalContext();
+    if (localClaudeContext) {
+      contextParts.push(`## CLAUDE Local Context (What I Was Working On)\n${localClaudeContext.slice(0, 2000)}`);
     }
 
     // Build context-aware dialectic queries
@@ -345,7 +345,7 @@ export async function handleSessionStart(): Promise<void> {
 
     // Parallel API calls for rich context
     const fetchStart = Date.now();
-    const [userContextResult, clawdContextResult, summariesResult, userChatResult, clawdChatResult] =
+    const [userContextResult, claudeContextResult, summariesResult, userChatResult, claudeChatResult] =
       await Promise.allSettled([
         // 1. Get user's context (SESSION-SCOPED for relevance)
         client.workspaces.peers.getContext(workspaceId, userPeerId!, {
@@ -353,8 +353,8 @@ export async function handleSessionStart(): Promise<void> {
           include_most_derived: true,
           session_name: sessionName,  // Scope to current project/session
         }),
-        // 2. Get clawd's context (self-awareness, also session-scoped)
-        client.workspaces.peers.getContext(workspaceId, clawdPeerId!, {
+        // 2. Get claude's context (self-awareness, also session-scoped)
+        client.workspaces.peers.getContext(workspaceId, claudePeerId!, {
           max_observations: 15,
           include_most_derived: true,
           session_name: sessionName,  // Scope to current project/session
@@ -366,8 +366,8 @@ export async function handleSessionStart(): Promise<void> {
           query: `Summarize what you know about ${config.peerName} in 2-3 sentences. Focus on their preferences, current projects, and working style.${branchContext}${changeContext}${featureHint}`,
           session_id: sessionId,
         }),
-        // 5. Dialectic: Ask about clawd (self-reflection, context-enhanced)
-        client.workspaces.peers.chat(workspaceId, clawdPeerId!, {
+        // 5. Dialectic: Ask about claude (self-reflection, context-enhanced)
+        client.workspaces.peers.chat(workspaceId, claudePeerId!, {
           query: `What has ${config.claudePeer} been working on recently?${branchContext}${featureHint} Summarize the AI assistant's recent activities and focus areas relevant to the current work context.`,
           session_id: sessionId,
         }),
@@ -377,10 +377,10 @@ export async function handleSessionStart(): Promise<void> {
     const fetchDuration = Date.now() - fetchStart;
     const asyncResults = [
       { name: "peers.getContext(user)", success: userContextResult.status === "fulfilled" },
-      { name: "peers.getContext(clawd)", success: clawdContextResult.status === "fulfilled" },
+      { name: "peers.getContext(claude)", success: claudeContextResult.status === "fulfilled" },
       { name: "sessions.summaries", success: summariesResult.status === "fulfilled" },
       { name: "peers.chat(user)", success: userChatResult.status === "fulfilled" },
-      { name: "peers.chat(clawd)", success: clawdChatResult.status === "fulfilled" },
+      { name: "peers.chat(claude)", success: claudeChatResult.status === "fulfilled" },
     ];
     const successCount = asyncResults.filter(r => r.success).length;
     logAsync("context-fetch", `Completed: ${successCount}/5 succeeded in ${fetchDuration}ms`, asyncResults);
@@ -418,12 +418,12 @@ export async function handleSessionStart(): Promise<void> {
     }
 
     // Section 2: Recent Work (CONSOLIDATED)
-    // Combines: clawd facts, session summary, self-reflection
+    // Combines: claude facts, session summary, self-reflection
     // Prioritizes concrete work items over vague summaries
-    if (clawdContextResult.status === "fulfilled" && clawdContextResult.value) {
-      const context = clawdContextResult.value;
-      setCachedClawdContext(context); // Cache
-      logCache("write", "clawdContext", `${context.representation?.explicit?.length || 0} facts`);
+    if (claudeContextResult.status === "fulfilled" && claudeContextResult.value) {
+      const context = claudeContextResult.value;
+      setCachedClaudeContext(context); // Cache
+      logCache("write", "claudeContext", `${context.representation?.explicit?.length || 0} facts`);
 
       if (context.representation) {
         const repText = formatRepresentation(context.representation);
@@ -446,17 +446,17 @@ export async function handleSessionStart(): Promise<void> {
     // These cost $0.03 each but often overlap with facts we already have
     const hasGoodUserFacts = (userContextResult.status === "fulfilled" &&
       (userContextResult.value?.representation?.explicit?.length || 0) >= 5);
-    const hasGoodClawdFacts = (clawdContextResult.status === "fulfilled" &&
-      (clawdContextResult.value?.representation?.explicit?.length || 0) >= 3);
+    const hasGoodClaudeFacts = (claudeContextResult.status === "fulfilled" &&
+      (claudeContextResult.value?.representation?.explicit?.length || 0) >= 3);
 
     // Only show AI Summary if we don't have enough facts
     if (!hasGoodUserFacts && userChatResult.status === "fulfilled" && userChatResult.value?.content) {
       contextParts.push(`## AI Summary of ${config.peerName}\n${userChatResult.value.content}`);
     }
 
-    // Only show AI Self-Reflection if we don't have enough clawd facts
-    if (!hasGoodClawdFacts && clawdChatResult.status === "fulfilled" && clawdChatResult.value?.content) {
-      contextParts.push(`## AI Self-Reflection (What ${config.claudePeer} Has Been Doing)\n${clawdChatResult.value.content}`);
+    // Only show AI Self-Reflection if we don't have enough claude facts
+    if (!hasGoodClaudeFacts && claudeChatResult.status === "fulfilled" && claudeChatResult.value?.content) {
+      contextParts.push(`## AI Self-Reflection (What ${config.claudePeer} Has Been Doing)\n${claudeChatResult.value.content}`);
     }
 
     // Stop spinner and display pixel art
@@ -473,7 +473,7 @@ export async function handleSessionStart(): Promise<void> {
   } catch (error) {
     logHook("session-start", `Error: ${error}`, { error: String(error) });
     spinner.fail("memory load failed");
-    console.error(`[honcho-clawd] ${error}`);
+    console.error(`[honcho] ${error}`);
     process.exit(1);
   }
 }

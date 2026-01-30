@@ -8,12 +8,12 @@ import {
   setCachedPeerId,
   getCachedSessionId,
   setCachedSessionId,
-  appendClawdWork,
+  appendClaudeWork,
   getClaudeInstanceId,
 } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 
-const WORKSPACE_APP_TAG = "honcho-clawd";
+const WORKSPACE_APP_TAG = "honcho-plugin";
 
 interface HookInput {
   tool_name?: string;
@@ -233,8 +233,8 @@ export async function handlePostToolUse(): Promise<void> {
   const summary = formatToolSummary(toolName, toolInput, toolResponse);
   logHook("post-tool-use", summary, { tool: toolName });
 
-  // INSTANT: Update local clawd context file (~2ms)
-  appendClawdWork(summary);
+  // INSTANT: Update local claude context file (~2ms)
+  appendClaudeWork(summary);
 
   // Upload to Honcho and wait for completion
   await logToHonchoAsync(config, cwd, summary).catch((e) => logHook("post-tool-use", `Upload failed: ${e}`, { error: String(e) }));
@@ -253,11 +253,11 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
   // Try to use cached IDs for speed
   let workspaceId = getCachedWorkspaceId(config.workspace);
   let sessionId = getCachedSessionId(cwd);
-  let clawdPeerId = getCachedPeerId(config.claudePeer);
+  let claudePeerId = getCachedPeerId(config.claudePeer);
   const sessionName = getSessionName(cwd);
 
   // If we don't have cached IDs, do full setup and cache results
-  if (!workspaceId || !sessionId || !clawdPeerId) {
+  if (!workspaceId || !sessionId || !claudePeerId) {
     const workspace = await client.workspaces.getOrCreate({
       id: config.workspace,
       metadata: { app: WORKSPACE_APP_TAG },
@@ -272,9 +272,9 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
     sessionId = session.id;
     setCachedSessionId(cwd, sessionName, sessionId);
 
-    const clawdPeer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
-    clawdPeerId = clawdPeer.id;
-    setCachedPeerId(config.claudePeer, clawdPeerId);
+    const claudePeer = await client.workspaces.peers.getOrCreate(workspaceId, { id: config.claudePeer });
+    claudePeerId = claudePeer.id;
+    setCachedPeerId(config.claudePeer, claudePeerId);
   }
 
   // Log the tool use with instance_id and session_affinity for project-scoped fact extraction

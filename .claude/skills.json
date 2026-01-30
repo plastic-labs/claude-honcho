@@ -1,34 +1,34 @@
 {
   "skills": [
     {
-      "name": "honcho-clawd-handoff",
+      "name": "honcho-handoff",
       "description": "Generate a research handoff summary of the current debugging session. Use when stuck in trial-and-error to hand off context to a deep research agent.",
-      "command": "honcho-clawd handoff"
+      "command": "honcho handoff"
     },
     {
-      "name": "honcho-clawd-list",
+      "name": "honcho-list",
       "description": "List all Honcho sessions for persistent memory",
-      "command": "honcho-clawd session list"
+      "command": "honcho session list"
     },
     {
-      "name": "honcho-clawd-status",
+      "name": "honcho-status",
       "description": "Show current Honcho session and memory status",
-      "command": "honcho-clawd status"
+      "command": "honcho status"
     },
     {
-      "name": "honcho-clawd-new",
+      "name": "honcho-new",
       "description": "Create or connect to a Honcho session for persistent memory",
-      "command": "honcho-clawd session new"
+      "command": "honcho session new"
     },
     {
-      "name": "honcho-clawd-clear",
+      "name": "honcho-clear",
       "description": "Clear custom Honcho session for current directory (revert to default)",
-      "command": "honcho-clawd session clear"
+      "command": "honcho session clear"
     },
     {
-      "name": "honcho-clawd-switch",
+      "name": "honcho-switch",
       "description": "Switch to a different Honcho session",
-      "command": "honcho-clawd session switch"
+      "command": "honcho session switch"
     }
   ]
 }

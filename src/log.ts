@@ -1,8 +1,8 @@
 /**
- * Activity logging for honcho-clawd
+ * Activity logging for honcho plugin
  *
  * Designed to be:
- * - Educational: Show how honcho-clawd architecture works
+ * - Educational: Show how honcho plugin architecture works
  * - Elegant: Visual hierarchy with consistent symbols
  * - Useful: Real-time debugging and demo capabilities
  */
@@ -12,7 +12,7 @@ import { join } from "path";
 import { existsSync, appendFileSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { symbols, arrows, box } from "./unicode.js";
 
-const CACHE_DIR = join(homedir(), ".honcho-clawd");
+const CACHE_DIR = join(homedir(), ".honcho");
 const LOG_FILE = join(CACHE_DIR, "activity.log");
 const MAX_LOG_SIZE = 100 * 1024; // 100KB max log size
 

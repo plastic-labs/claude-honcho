@@ -1,5 +1,5 @@
 /**
- * Shared color scheme and styling utilities for honcho-clawd CLI
+ * Shared color scheme and styling utilities for honcho CLI
  *
  * Design principles:
  * - No emojis, only tasteful Unicode symbols

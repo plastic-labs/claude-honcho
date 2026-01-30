@@ -15,7 +15,7 @@ export interface ContextRefreshConfig {
 }
 
 export interface LocalContextConfig {
-  maxEntries?: number; // Max entries in clawd-context.md (default: 50)
+  maxEntries?: number; // Max entries in claude-context.md (default: 50)
 }
 
 export type HonchoEnvironment = "production" | "local";
@@ -25,20 +25,20 @@ export interface HonchoEndpointConfig {
   baseUrl?: string; // Custom URL override (takes precedence over environment)
 }
 
-export interface HonchoCLAWDConfig {
+export interface HonchoCLAUDEConfig {
   peerName: string; // The user's peer name
   apiKey: string; // Honcho API key
   workspace: string; // Honcho workspace name
-  claudePeer: string; // Claude's peer name (default: "clawd")
+  claudePeer: string; // Claude's peer name (default: "claude")
   sessions?: Record<string, string>; // Map of directory path -> session name
   saveMessages?: boolean; // Save messages to Honcho (default: true)
   messageUpload?: MessageUploadConfig; // Token-based upload limits (default: no limits)
   contextRefresh?: ContextRefreshConfig; // Context retrieval settings
   endpoint?: HonchoEndpointConfig; // SaaS vs local instance config
-  localContext?: LocalContextConfig; // Local clawd-context.md settings
+  localContext?: LocalContextConfig; // Local claude-context.md settings
 }
 
-const CONFIG_DIR = join(homedir(), ".honcho-clawd");
+const CONFIG_DIR = join(homedir(), ".honcho");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 export function getConfigDir(): string {
@@ -53,19 +53,19 @@ export function configExists(): boolean {
   return existsSync(CONFIG_FILE);
 }
 
-export function loadConfig(): HonchoCLAWDConfig | null {
+export function loadConfig(): HonchoCLAUDEConfig | null {
   if (!configExists()) {
     return null;
   }
   try {
     const content = readFileSync(CONFIG_FILE, "utf-8");
-    return JSON.parse(content) as HonchoCLAWDConfig;
+    return JSON.parse(content) as HonchoCLAUDEConfig;
   } catch {
     return null;
   }
 }
 
-export function saveConfig(config: HonchoCLAWDConfig): void {
+export function saveConfig(config: HonchoCLAUDEConfig): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
   }
@@ -165,7 +165,7 @@ export interface HonchoClientOptions {
  * Get Honcho client options based on config.
  * Priority: baseUrl > environment > "production" (default)
  */
-export function getHonchoClientOptions(config: HonchoCLAWDConfig): HonchoClientOptions {
+export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClientOptions {
   const options: HonchoClientOptions = {
     apiKey: config.apiKey,
   };
@@ -187,7 +187,7 @@ export function getHonchoClientOptions(config: HonchoCLAWDConfig): HonchoClientO
 /**
  * Get current endpoint display info
  */
-export function getEndpointInfo(config: HonchoCLAWDConfig): { type: string; url: string } {
+export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url: string } {
   if (config.endpoint?.baseUrl) {
     return { type: "custom", url: config.endpoint.baseUrl };
   }

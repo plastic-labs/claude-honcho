@@ -45,7 +45,7 @@ function getCerebrasKey(): string | null {
     return process.env.CEREBRAS_API_KEY;
   }
 
-  // Check honcho-clawd config
+  // Check honcho plugin config
   const config = loadConfig();
   if (config?.cerebrasKey) {
     return config.cerebrasKey;

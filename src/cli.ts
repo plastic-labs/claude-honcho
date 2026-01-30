@@ -13,11 +13,11 @@ import {
   getEndpointInfo,
   setEndpoint,
   getHonchoClientOptions,
-  type HonchoCLAWDConfig,
+  type HonchoCLAUDEConfig,
   type HonchoEnvironment,
 } from "./config.js";
 import Honcho from "@honcho-ai/core";
-import { installHooks, uninstallHooks, checkHooksInstalled, verifyCommandAvailable, checkLegacyBinaries } from "./install.js";
+import { installHooks, uninstallHooks, checkHooksInstalled, verifyCommandAvailable } from "./install.js";
 import { handleSessionStart } from "./hooks/session-start.js";
 import { handleSessionEnd } from "./hooks/session-end.js";
 import { handlePostToolUse } from "./hooks/post-tool-use.js";
@@ -32,7 +32,7 @@ import { loadIdCache, clearAllCaches, getClaudeInstanceId, loadContextCache } fr
 // import { handleCerebras } from "./skills/cerebras.js";  // Disabled for now
 
 const VERSION = "0.1.0";
-const WORKSPACE_APP_TAG = "honcho-clawd"; // Used to identify honcho-clawd workspaces
+const WORKSPACE_APP_TAG = "honcho-plugin"; // Used to identify honcho-plugin workspaces
 
 function prompt(question: string): Promise<string> {
   const rl = createInterface({
@@ -50,7 +50,7 @@ function prompt(question: string): Promise<string> {
 
 async function init(): Promise<void> {
   console.log("");
-  console.log(s.header("honcho-clawd setup"));
+  console.log(s.header("honcho setup"));
   console.log("");
   console.log(s.dim("Configure persistent memory for Claude Code using Honcho."));
   console.log("");
@@ -97,7 +97,7 @@ async function init(): Promise<void> {
 
   console.log(`Connecting to Honcho ${isLocal ? "(local)" : "(SaaS)"}...`);
 
-  // Step 2: Workspace - Try to discover existing honcho-clawd workspaces first
+  // Step 2: Workspace - Try to discover existing honcho workspaces first
   console.log("");
   console.log(s.section("Step 2: Workspace"));
   console.log(s.dim("Workspaces group your sessions and peers together."));
@@ -107,7 +107,7 @@ async function init(): Promise<void> {
     // Try to list workspaces (may not be available in all API versions)
     const workspaces = await (client as any).workspaces.list();
     if (workspaces && Array.isArray(workspaces)) {
-      // Filter to only show honcho-clawd tagged workspaces
+      // Filter to only show honcho tagged workspaces
       for (const ws of workspaces) {
         const metadata = (ws as any).metadata || {};
         if (metadata.app === WORKSPACE_APP_TAG) {
@@ -126,7 +126,7 @@ async function init(): Promise<void> {
 
   let workspace: string;
   if (existingWorkspaces.length > 0) {
-    console.log(`\nExisting honcho-clawd workspaces found:`);
+    console.log(`\nExisting honcho workspaces found:`);
     existingWorkspaces.forEach((ws, i) => console.log(`  ${i + 1}. ${ws.name} (${ws.sessions} session${ws.sessions === 1 ? '' : 's'})`));
     console.log(`  ${existingWorkspaces.length + 1}. Create new workspace`);
 
@@ -149,7 +149,7 @@ async function init(): Promise<void> {
   let workspaceId: string;
   let isExistingWorkspace = false;
   try {
-    // Create workspace with honcho-clawd app tag in metadata
+    // Create workspace with honcho app tag in metadata
     const ws = await client.workspaces.getOrCreate({
       id: workspace,
       metadata: { app: WORKSPACE_APP_TAG },
@@ -199,7 +199,7 @@ async function init(): Promise<void> {
       // Try to list peers from the workspace
       const peers = await (client.workspaces as any).peers.list(workspaceId);
       if (peers && Array.isArray(peers)) {
-        existingPeers = peers.map((p: any) => p.id).filter((id: string) => !id.includes('clawd') && !id.includes('claude'));
+        existingPeers = peers.map((p: any) => p.id).filter((id: string) => !id.includes('claude'));
         if (existingPeers.length > 0) {
           console.log(`\nExisting peers in workspace "${workspace}":`);
           existingPeers.forEach((p, i) => console.log(`  ${i + 1}. ${p}`));
@@ -248,7 +248,7 @@ async function init(): Promise<void> {
   // Step 4: Claude's peer name
   console.log("");
   console.log(s.section("Step 4: Claude Configuration"));
-  const claudePeer = await prompt("Enter Claude's peer name (default: clawd): ") || "clawd";
+  const claudePeer = await prompt("Enter Claude's peer name (default: claude): ") || "claude";
 
   // Create Claude's peer
   try {
@@ -265,7 +265,7 @@ async function init(): Promise<void> {
   const saveMessages = saveMessagesInput.toLowerCase() !== "n";
 
   // Save config
-  const config: HonchoCLAWDConfig = {
+  const config: HonchoCLAUDEConfig = {
     peerName,
     apiKey,
     workspace,
@@ -304,13 +304,13 @@ async function init(): Promise<void> {
 
 function status(): void {
   console.log("");
-  console.log(s.header("honcho-clawd status"));
+  console.log(s.header("honcho status"));
   console.log("");
 
   const config = loadConfig();
   if (!config) {
     console.log(s.warn("Not configured"));
-    console.log(s.dim("Run: honcho-clawd init"));
+    console.log(s.dim("Run: honcho init"));
     return;
   }
 
@@ -341,21 +341,9 @@ function status(): void {
     }
   }
 
-  // Check for legacy binaries
-  const legacy = checkLegacyBinaries();
-  if (legacy.found.length > 0) {
-    console.log("");
-    console.log(s.warn("Legacy binaries found (may conflict with shell aliases):"));
-    for (const binary of legacy.found) {
-      console.log(`  ${s.dim(s.symbols.bullet)} ${binary}: ${s.path(legacy.paths[binary])}`);
-    }
-    console.log("");
-    console.log(s.dim(`  Remove with: rm ${legacy.found.map(b => legacy.paths[b]).join(" ")}`));
-  }
-
   if (!hooksInstalled) {
     console.log("");
-    console.log(s.dim("Run: honcho-clawd install"));
+    console.log(s.dim("Run: honcho install"));
   }
   console.log("");
 }
@@ -363,7 +351,7 @@ function status(): void {
 function install(): void {
   const config = loadConfig();
   if (!config) {
-    console.log(s.error("Not configured. Run: honcho-clawd init"));
+    console.log(s.error("Not configured. Run: honcho init"));
     process.exit(1);
   }
 
@@ -396,7 +384,7 @@ async function update(): Promise<void> {
   const packageDir = join(dirname(dirname(Bun.main)));
 
   console.log("");
-  console.log(s.header("honcho-clawd update"));
+  console.log(s.header("honcho update"));
   console.log("");
   console.log(`${s.label("Package")}: ${s.path(packageDir)}`);
   console.log("");
@@ -406,8 +394,8 @@ async function update(): Promise<void> {
     const packageJsonPath = join(packageDir, "package.json");
     if (!fsExistsSync(packageJsonPath)) {
       console.log(s.error("Could not find package.json"));
-      console.log(s.dim("Run this command from the honcho-clawd source directory,"));
-      console.log(s.dim("or use: cd <honcho-clawd-dir> && bun run update"));
+      console.log(s.dim("Run this command from the honcho source directory,"));
+      console.log(s.dim("or use: cd <honcho-dir> && bun run update"));
       process.exit(1);
     }
 
@@ -429,7 +417,7 @@ async function update(): Promise<void> {
 
     console.log("");
     console.log(s.success("Update complete!"));
-    console.log(s.dim("Run 'honcho-clawd status' to verify."));
+    console.log(s.dim("Run 'honcho status' to verify."));
   } catch (error) {
     console.log("");
     console.log(s.error(`Update failed: ${error}`));
@@ -467,7 +455,7 @@ async function handleHook(hookName: string): Promise<void> {
 async function sessionNew(name?: string): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    console.error("Not configured. Run: honcho-clawd init");
+    console.error("Not configured. Run: honcho init");
     process.exit(1);
   }
 
@@ -475,9 +463,10 @@ async function sessionNew(name?: string): Promise<void> {
   const { basename } = require("path");
 
   // Default to directory name if no name provided
-  let sessionName = name;
-  if (!sessionName) {
-    sessionName = basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+  const fallbackSessionName = basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+  const providedName = name?.trim();
+  const sessionName = providedName?.length ? providedName : fallbackSessionName;
+  if (!providedName?.length) {
     console.log(`Using directory name as session: ${sessionName}`);
   }
 
@@ -549,7 +538,7 @@ async function sessionNew(name?: string): Promise<void> {
 async function sessionList(): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    console.error("Not configured. Run: honcho-clawd init");
+    console.error("Not configured. Run: honcho init");
     process.exit(1);
   }
 
@@ -602,7 +591,7 @@ async function sessionList(): Promise<void> {
 function sessionCurrent(): void {
   const config = loadConfig();
   if (!config) {
-    console.error("Not configured. Run: honcho-clawd init");
+    console.error("Not configured. Run: honcho init");
     process.exit(1);
   }
 
@@ -619,7 +608,7 @@ function sessionCurrent(): void {
     const dirName = require("path").basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
     const defaultSession = dirName;
     console.log(`Session: ${defaultSession} (default)`);
-    console.log("\nTip: Use 'honcho-clawd session new <name>' to set a custom session name.");
+    console.log("\nTip: Use 'honcho session new <name>' to set a custom session name.");
   }
 
   console.log(`Workspace: ${config.workspace}`);
@@ -631,12 +620,12 @@ function sessionCurrent(): void {
 function sessionSwitch(name: string): void {
   const config = loadConfig();
   if (!config) {
-    console.error("Not configured. Run: honcho-clawd init");
+    console.error("Not configured. Run: honcho init");
     process.exit(1);
   }
 
   if (!name) {
-    console.error("Usage: honcho-clawd session switch <session-name>");
+    console.error("Usage: honcho session switch <session-name>");
     process.exit(1);
   }
 
@@ -674,7 +663,7 @@ function sessionClear(): void {
 async function workspaceList(): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    console.error("Not configured. Run: honcho-clawd init");
+    console.error("Not configured. Run: honcho init");
     process.exit(1);
   }
 
@@ -688,13 +677,13 @@ async function workspaceList(): Promise<void> {
 
     const workspaces = await (client as any).workspaces.list();
     if (workspaces && Array.isArray(workspaces)) {
-      const clawdWorkspaces = workspaces.filter((ws: any) =>
+      const claudeWorkspaces = workspaces.filter((ws: any) =>
         ws.metadata?.app === WORKSPACE_APP_TAG
       );
 
-      if (clawdWorkspaces.length > 0) {
-        console.log("\nAvailable honcho-clawd workspaces:");
-        for (const ws of clawdWorkspaces) {
+      if (claudeWorkspaces.length > 0) {
+        console.log("\nAvailable honcho workspaces:");
+        for (const ws of claudeWorkspaces) {
           const isCurrent = ws.id === config.workspace ? " (current)" : "";
           console.log(`  - ${ws.id}${isCurrent}`);
         }
@@ -720,12 +709,12 @@ async function workspaceList(): Promise<void> {
 async function workspaceSwitch(name: string): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    console.error("Not configured. Run: honcho-clawd init");
+    console.error("Not configured. Run: honcho init");
     process.exit(1);
   }
 
   if (!name) {
-    console.error("Usage: honcho-clawd workspace switch <workspace-name>");
+    console.error("Usage: honcho workspace switch <workspace-name>");
     process.exit(1);
   }
 
@@ -758,12 +747,12 @@ async function workspaceSwitch(name: string): Promise<void> {
 async function workspaceRename(newName: string): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    console.error("Not configured. Run: honcho-clawd init");
+    console.error("Not configured. Run: honcho init");
     process.exit(1);
   }
 
   if (!newName) {
-    console.error("Usage: honcho-clawd workspace rename <new-name>");
+    console.error("Usage: honcho workspace rename <new-name>");
     console.error("\nNote: Workspace IDs in Honcho are immutable.");
     console.error("This command creates a new workspace and updates your config.");
     console.error("Your existing workspace data remains in the old workspace.");
@@ -816,9 +805,9 @@ async function handleWorkspace(subcommand: string, arg?: string): Promise<void> 
     default:
       console.log(`
 Workspace Management Commands:
-  honcho-clawd workspace list             List all workspaces
-  honcho-clawd workspace switch <name>    Switch to a different workspace
-  honcho-clawd workspace rename <name>    Create new workspace and switch to it
+  honcho workspace list             List all workspaces
+  honcho workspace switch <name>    Switch to a different workspace
+  honcho workspace rename <name>    Create new workspace and switch to it
 `);
   }
 }
@@ -827,7 +816,7 @@ Workspace Management Commands:
 async function peerList(): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    console.error("Not configured. Run: honcho-clawd init");
+    console.error("Not configured. Run: honcho init");
     process.exit(1);
   }
 
@@ -845,8 +834,8 @@ async function peerList(): Promise<void> {
     const peers = await (client.workspaces as any).peers.list(workspace.id);
 
     if (peers && Array.isArray(peers)) {
-      const userPeers = peers.filter((p: any) => !p.id.includes('clawd') && !p.id.includes('claude'));
-      const aiPeers = peers.filter((p: any) => p.id.includes('clawd') || p.id.includes('claude'));
+      const userPeers = peers.filter((p: any) => !p.id.includes('claude'));
+      const aiPeers = peers.filter((p: any) => p.id.includes('claude'));
 
       console.log(`Workspace: ${config.workspace}`);
       console.log(`Current peer: ${config.peerName}`);
@@ -889,7 +878,7 @@ async function handlePeer(subcommand: string, _arg?: string): Promise<void> {
     default:
       console.log(`
 Peer Management Commands:
-  honcho-clawd peer list     List all peers in workspace
+  honcho peer list     List all peers in workspace
 `);
   }
 }
@@ -914,11 +903,11 @@ async function handleSession(subcommand: string, arg?: string): Promise<void> {
     default:
       console.log(`
 Session Management Commands:
-  honcho-clawd session new [name]     Create/connect session (defaults to dir name)
-  honcho-clawd session list           List all sessions
-  honcho-clawd session current        Show current session
-  honcho-clawd session switch <name>  Switch to existing session
-  honcho-clawd session clear          Remove custom session for current directory
+  honcho session new [name]     Create/connect session (defaults to dir name)
+  honcho session list           List all sessions
+  honcho session current        Show current session
+  honcho session switch <name>  Switch to existing session
+  honcho session clear          Remove custom session for current directory
 `);
   }
 }
@@ -938,7 +927,7 @@ function handleCache(subcommand: string): void {
       const instanceId = getClaudeInstanceId();
 
       console.log("");
-      console.log(s.header("Honcho-Clawd Cache"));
+      console.log(s.header("Honcho Cache"));
       console.log("");
 
       console.log(s.section("ID Cache"));
@@ -981,7 +970,7 @@ function handleCache(subcommand: string): void {
       }
 
       console.log("");
-      console.log(s.dim("Run 'honcho-clawd cache clear' to reset all caches"));
+      console.log(s.dim("Run 'honcho cache clear' to reset all caches"));
       break;
     }
     case "clear": {
@@ -993,8 +982,8 @@ function handleCache(subcommand: string): void {
     default:
       console.log(`
 Cache Commands:
-  honcho-clawd cache [show]   Show current cache state
-  honcho-clawd cache clear    Clear all cached IDs (forces re-fetch)
+  honcho cache [show]   Show current cache state
+  honcho cache clear    Clear all cached IDs (forces re-fetch)
 `);
   }
 }
@@ -1041,7 +1030,7 @@ async function handleTail(args: string[]): Promise<void> {
   const showSession = showAll; // Only show session tag when viewing all
 
   console.log("");
-  console.log(s.header("honcho-clawd activity"));
+  console.log(s.header("honcho activity"));
   if (showAll) {
     console.log(s.dim("all sessions"));
   }
@@ -1092,7 +1081,7 @@ async function handleTail(args: string[]): Promise<void> {
 async function handleEndpoint(subcommand: string, arg?: string): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    console.error(s.error("Not configured. Run: honcho-clawd init"));
+    console.error(s.error("Not configured. Run: honcho init"));
     process.exit(1);
   }
 
@@ -1126,7 +1115,7 @@ async function handleEndpoint(subcommand: string, arg?: string): Promise<void> {
 
     case "custom": {
       if (!arg) {
-        console.error(s.error("Usage: honcho-clawd endpoint custom <url>"));
+        console.error(s.error("Usage: honcho endpoint custom <url>"));
         process.exit(1);
       }
       // Validate URL format
@@ -1159,24 +1148,24 @@ async function handleEndpoint(subcommand: string, arg?: string): Promise<void> {
     default:
       console.log(`
 ${s.header("Endpoint Commands")}
-  honcho-clawd endpoint           Show current endpoint
-  honcho-clawd endpoint saas      Switch to SaaS (https://api.honcho.dev)
-  honcho-clawd endpoint local     Switch to local (http://localhost:8000)
-  honcho-clawd endpoint custom <url>  Use custom URL
-  honcho-clawd endpoint test      Test connection to current endpoint
+  honcho endpoint           Show current endpoint
+  honcho endpoint saas      Switch to SaaS (https://api.honcho.dev)
+  honcho endpoint local     Switch to local (http://localhost:8000)
+  honcho endpoint custom <url>  Use custom URL
+  honcho endpoint test      Test connection to current endpoint
 `);
   }
 }
 
 function showHelp(): void {
   console.log("");
-  console.log(`${s.colors.orange}honcho-clawd${s.colors.reset} ${s.dim(`v${VERSION}`)}`);
+  console.log(`${s.colors.orange}honcho${s.colors.reset} ${s.dim(`v${VERSION}`)}`);
   console.log(s.dim("Persistent memory for Claude Code sessions using Honcho"));
   console.log("");
-  console.log(`${s.label("Usage")}: honcho-clawd <command>`);
+  console.log(`${s.label("Usage")}: honcho <command>`);
   console.log("");
   console.log(s.section("Commands"));
-  console.log(`  ${s.highlight("init")}        Configure honcho-clawd (name, API key, workspace)`);
+  console.log(`  ${s.highlight("init")}        Configure honcho (name, API key, workspace)`);
   console.log(`  ${s.highlight("install")}     Install hooks to ~/.claude/settings.json`);
   console.log(`  ${s.highlight("uninstall")}   Remove hooks from Claude settings`);
   console.log(`  ${s.highlight("update")}      Rebuild and reinstall (removes lockfile, builds, links)`);
@@ -1261,7 +1250,7 @@ switch (command) {
   case "version":
   case "--version":
   case "-v":
-    console.log(`honcho-clawd v${VERSION}`);
+    console.log(`honcho v${VERSION}`);
     break;
   case "pixel":
     previewPixel();
@@ -1287,7 +1276,7 @@ switch (command) {
       showHelp();
     } else {
       console.error(`Unknown command: ${command}`);
-      console.log("Run: honcho-clawd help");
+      console.log("Run: honcho help");
       process.exit(1);
     }
 }

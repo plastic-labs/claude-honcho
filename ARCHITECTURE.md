@@ -1,6 +1,4 @@
-# honcho-clawd: Deep Architecture Analysis
-
-> **Purpose**: This document provides a comprehensive technical overview of honcho-clawd for LLMs and developers. It covers data flow, state management, API dependencies, identified issues, and testing strategy.
+> **Purpose**: This document provides a comprehensive technical overview of the Honcho Claude Code plugin for LLMs and developers. It covers data flow, state management, API dependencies, identified issues, and testing strategy.
 
 ---
 
@@ -22,7 +20,7 @@
 
 ## Overview
 
-**honcho-clawd** is a Claude Code plugin that provides persistent memory across sessions using the Honcho API. It works by:
+Honcho provides persistent memory across Claude Code sessions. It works by:
 
 1. Installing hooks into `~/.claude/settings.json`
 2. Intercepting Claude Code lifecycle events (session start/end, user prompts, tool usage)
@@ -49,7 +47,7 @@
 
 ## How We Use Honcho
 
-This section maps each honcho-clawd feature to the specific Honcho API endpoints that power it.
+This section maps each feature to the specific Honcho API endpoints that power it.
 
 ### Feature: Persistent User Memory
 
@@ -65,18 +63,18 @@ This section maps each honcho-clawd feature to the specific Honcho API endpoints
 User prompt → messages.create() → [Honcho extracts facts] → peers.getContext() → injected at startup
 ```
 
-### Feature: AI Self-Awareness (clawd context)
+### Feature: AI Self-Awareness
 
-**What it does**: Clawd remembers what it was working on, recent actions, patterns
+**What it does**: Claude remembers what it was working on, recent actions, patterns
 
 **Honcho endpoints used**:
-- `workspaces.peers.getOrCreate(workspace, {id: "clawd"})` - Create AI peer
-- `messages.create()` with `peer_id: clawd` - Feed AI actions (tool uses)
-- `peers.getContext(workspace, clawd)` - Retrieve AI's accumulated self-knowledge
+- `workspaces.peers.getOrCreate(workspace, {id: "claude"})` - Create AI peer
+- `messages.create()` with `peer_id: claude` - Feed AI actions (tool uses)
+- `peers.getContext(workspace, claude)` - Retrieve AI's accumulated self-knowledge
 
 **Data flow**:
 ```
-Tool use → messages.create("[Tool] Edited auth.ts") → peers.getContext(clawd) → "What CLAWD Was Working On"
+Tool use → messages.create("[Tool] Edited auth.ts") → peers.getContext(claude) → "What Claude Was Working On"
 ```
 
 ### Feature: Session Summaries
@@ -84,7 +82,7 @@ Tool use → messages.create("[Tool] Edited auth.ts") → peers.getContext(clawd
 **What it does**: "Last time in this project, you were working on X"
 
 **Honcho endpoints used**:
-- `workspaces.sessions.getOrCreate(workspace, {id: "honcho-clawd"})` - One session per project dir
+- `workspaces.sessions.getOrCreate(workspace, {id: "honcho-plugin"})` - One session per project dir
 - `sessions.summaries(workspace, session)` - Get short/long summaries
 
 **Data flow**:
@@ -114,8 +112,8 @@ Session start → peers.chat() → "eri is focused on billing components and pre
 **Configuration**:
 ```typescript
 {
-  "eri": { "observe": ["eri", "clawd"] },  // eri's context updated from both
-  "clawd": { "observe": ["eri"] }          // clawd only learns about eri
+  "eri": { "observe": ["eri", "claude"] },  // eri's context updated from both
+  "claude": { "observe": ["eri"] }          // claude only learns about eri
 }
 ```
 
@@ -129,7 +127,7 @@ Session start → peers.chat() → "eri is focused on billing components and pre
 
 **Data flow**:
 ```
-honcho-clawd handoff → messages.list() → local analysis (stuck patterns, topics) → markdown summary
+honcho handoff → messages.list() → local analysis (stuck patterns, topics) → markdown summary
 ```
 
 ### Feature: Instance Isolation
@@ -157,7 +155,7 @@ honcho-clawd handoff → messages.list() → local analysis (stuck patterns, top
 
 **Implementation**:
 - `src/git.ts` - Captures branch, commit SHA, dirty files using git commands
-- `~/.honcho-clawd/git-state.json` - Caches git state per directory
+- `~/.honcho/git-state.json` - Caches git state per directory
 - `detectGitChanges(previous, current)` - Detects branch switches, new commits, file changes
 
 **Data flow**:
@@ -177,11 +175,11 @@ Session start → captureGitState() → compare to cached state → detect chang
 **What it does**: Switch between Honcho SaaS and local instances
 
 **Commands**:
-- `honcho-clawd endpoint` - Show current endpoint
-- `honcho-clawd endpoint saas` - Switch to SaaS (api.honcho.dev)
-- `honcho-clawd endpoint local` - Switch to local (localhost:8000)
-- `honcho-clawd endpoint custom <url>` - Use custom URL
-- `honcho-clawd endpoint test` - Test connection
+- `honcho endpoint` - Show current endpoint
+- `honcho endpoint saas` - Switch to SaaS (api.honcho.dev)
+- `honcho endpoint local` - Switch to local (localhost:8000)
+- `honcho endpoint custom <url>` - Use custom URL
+- `honcho endpoint test` - Test connection
 
 **Configuration**:
 ```json
@@ -193,7 +191,7 @@ Session start → captureGitState() → compare to cached state → detect chang
 }
 ```
 
-**Init shortcut**: Type `local` as API key during `honcho-clawd init` to configure for local instance
+**Init shortcut**: Type `local` as API key during `honcho init` to configure for local instance
 
 ### Endpoint Cost Summary
 
@@ -217,16 +215,16 @@ You: $ claude
      ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │ Claude Code triggers SessionStart hook                             │
-│ → honcho-clawd hook session-start                                  │
+│ → honcho hook session-start                                        │
 └────────────────────────────────────────────────────────────────────┘
      │
      ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│ 1. Read local config (~/.honcho-clawd/config.json)                 │
+│ 1. Read local config (~/.honcho/config.json)                       │
 │ 2. Get/create workspace ID (cached or API call)                    │
 │ 3. Get/create session ID based on current directory                │
-│ 4. Get/create peer IDs (user + clawd)                              │
-│ 5. Configure observation: clawd observes user                      │
+│ 4. Get/create peer IDs (user + claude)                              │
+│ 5. Configure observation: claude observes user                      │
 └────────────────────────────────────────────────────────────────────┘
      │
      ▼
@@ -234,10 +232,10 @@ You: $ claude
 │ PARALLEL API CALLS (all at once for speed):                        │
 │                                                                    │
 │ • peers.getContext(user)   → Facts about you                       │
-│ • peers.getContext(clawd)  → AI's self-knowledge                   │
+│ • peers.getContext(claude)  → AI's self-knowledge                   │
 │ • sessions.summaries()     → What you worked on before             │
 │ • peers.chat(user)         → "What does eri care about?" ($0.03)   │
-│ • peers.chat(clawd)        → "What should I remember?" ($0.03)     │
+│ • peers.chat(claude)        → "What should I remember?" ($0.03)     │
 └────────────────────────────────────────────────────────────────────┘
      │
      ▼
@@ -256,7 +254,7 @@ You: "Fix the bug in auth.ts"
      ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │ Claude Code triggers UserPromptSubmit hook                         │
-│ → honcho-clawd hook user-prompt                                    │
+│ → honcho hook user-prompt                                          │
 └────────────────────────────────────────────────────────────────────┘
      │
      ▼
@@ -283,12 +281,12 @@ Claude: [Uses Edit tool on auth.ts]
      ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │ Claude Code triggers PostToolUse hook                              │
-│ → honcho-clawd hook post-tool-use                                  │
+│ → honcho hook post-tool-use                                        │
 └────────────────────────────────────────────────────────────────────┘
      │
      ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│ 1. Log action to clawd-context.md (local file, survives wipes)     │
+│ 1. Log action to claude-context.md (local file, survives wipes)     │
 │    "- [timestamp] Edited auth.ts: 'old...' -> 'new...'"            │
 │ 2. Fire-and-forget: upload to Honcho as AI action                  │
 └────────────────────────────────────────────────────────────────────┘
@@ -302,7 +300,7 @@ You: ctrl+c (or type /exit)
      ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │ Claude Code triggers SessionEnd hook                               │
-│ → honcho-clawd hook session-end                                    │
+│ → honcho hook session-end                                          │
 └────────────────────────────────────────────────────────────────────┘
      │
      ▼
@@ -310,7 +308,7 @@ You: ctrl+c (or type /exit)
 │ 1. Process any remaining queued messages                           │
 │ 2. Parse Claude's transcript for assistant messages                │
 │ 3. Upload assistant messages to Honcho                             │
-│ 4. Update clawd-context.md with session summary                    │
+│ 4. Update claude-context.md with session summary                    │
 └────────────────────────────────────────────────────────────────────┘
      │
      ▼
@@ -322,16 +320,16 @@ You: ctrl+c (or type /exit)
 
 ### Skills
 
-Skills are Claude Code slash commands that run honcho-clawd functionality:
+Skills are Claude Code slash commands that run Honcho functionality:
 
 | Skill | Command | What It Does |
 |-------|---------|--------------|
-| `/honcho-clawd-new` | `honcho-clawd session new` | Create/connect to named session |
-| `/honcho-clawd-list` | `honcho-clawd session list` | Show all sessions |
-| `/honcho-clawd-switch` | `honcho-clawd session switch` | Switch to different session |
-| `/honcho-clawd-status` | `honcho-clawd status` | Show current memory status |
-| `/honcho-clawd-clear` | `honcho-clawd session clear` | Reset to default session |
-| `/honcho-clawd-handoff` | `honcho-clawd handoff` | Generate debugging summary |
+| `/honcho-new` | `honcho session new` | Create/connect to named session |
+| `/honcho-list` | `honcho session list` | Show all sessions |
+| `/honcho-switch` | `honcho session switch` | Switch to different session |
+| `/honcho-status` | `honcho status` | Show current memory status |
+| `/honcho-clear` | `honcho session clear` | Reset to default session |
+| `/honcho-handoff` | `honcho handoff` | Generate debugging summary |
 
 **Note**: Skills are cached at session start. New skills won't appear until you start a fresh Claude session.
 
@@ -339,10 +337,10 @@ Skills are Claude Code slash commands that run honcho-clawd functionality:
 
 ## State Locations
 
-### Local Files (`~/.honcho-clawd/`)
+### Local Files (`~/.honcho/`)
 
 ```
-~/.honcho-clawd/
+~/.honcho/
 ├── config.json           # User settings (API key, workspace, peer names, endpoint)
 │   └── Properties: peerName, apiKey, workspace, claudePeer, sessions{}, saveMessages,
 │                   endpoint.{environment, baseUrl}, localContext.{maxEntries}
@@ -351,7 +349,7 @@ Skills are Claude Code slash commands that run honcho-clawd functionality:
 │   └── Properties: workspace.{name, id}, peers.{name: id}, sessions.{cwd: {id, name, updatedAt}}, claudeInstanceId
 │
 ├── context-cache.json    # Pre-fetched context with TTL tracking
-│   └── Properties: userContext.{data, fetchedAt}, clawdContext.{data, fetchedAt},
+│   └── Properties: userContext.{data, fetchedAt}, claudeContext.{data, fetchedAt},
 │                   summaries.{data, fetchedAt}, messageCount, lastRefreshMessageCount
 │
 ├── git-state.json        # Git state per directory (for change detection)
@@ -360,7 +358,7 @@ Skills are Claude Code slash commands that run honcho-clawd functionality:
 ├── message-queue.jsonl   # Local message queue for reliability (append-only)
 │   └── Format: {content, peerId, cwd, timestamp, uploaded, instanceId}[] (one JSON per line)
 │
-└── clawd-context.md    # AI self-summary (survives context wipes)
+└── claude-context.md    # AI self-summary (survives context wipes)
     └── Format: Markdown with "## Recent Activity" section, capped at N entries (configurable)
 ```
 
@@ -373,7 +371,7 @@ Workspace
 │   ├── Summaries (short + long)
 │   └── Peers config (observation settings)
 │
-└── Peers (user + clawd)
+└── Peers (user + claude)
     ├── Context (explicit facts + deductive insights)
     ├── Peer Cards (profile summary)
     └── Chat (dialectic queries - LLM-powered)
@@ -384,11 +382,11 @@ Workspace
 ```json
 {
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "command": "honcho-clawd hook session-start", "timeout": 30000 }] }],
-    "SessionEnd": [{ "hooks": [{ "command": "honcho-clawd hook session-end", "timeout": 30000 }] }],
-    "PostToolUse": [{ "matcher": "Write|Edit|Bash|Task", "hooks": [{ "command": "honcho-clawd hook post-tool-use", "timeout": 10000 }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "command": "honcho-clawd hook user-prompt", "timeout": 15000 }] }],
-    "PreCompact": [{ "matcher": "auto|manual", "hooks": [{ "command": "honcho-clawd hook pre-compact", "timeout": 20000 }] }]
+    "SessionStart": [{ "hooks": [{ "command": "honcho hook session-start", "timeout": 30000 }] }],
+    "SessionEnd": [{ "hooks": [{ "command": "honcho hook session-end", "timeout": 30000 }] }],
+    "PostToolUse": [{ "matcher": "Write|Edit|Bash|Task", "hooks": [{ "command": "honcho hook post-tool-use", "timeout": 10000 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "command": "honcho hook user-prompt", "timeout": 15000 }] }],
+    "PreCompact": [{ "matcher": "auto|manual", "hooks": [{ "command": "honcho hook pre-compact", "timeout": 20000 }] }]
   }
 }
 ```
@@ -417,20 +415,20 @@ Workspace
 [9] getCachedSessionId()            → Read cache.json
     ├─► HIT: use cached ID + sessions.update(metadata) FIRE-AND-FORGET
     └─► MISS: await sessions.getOrCreate(metadata) → Write cache.json
-[10] getCachedPeerId(user/clawd)    → Read cache.json
+[10] getCachedPeerId(user/claude)    → Read cache.json
     └─► MISS: await Promise.all(peers.getOrCreate) → Write cache.json
 [11] sessions.peers.set()           → FIRE-AND-FORGET (no await)
 [12] Upload git changes as observations → FIRE-AND-FORGET (if changes detected)
 [13] setSessionForPath()            → Write config.json (if new session)
-[14] loadClawdLocalContext()        → Read clawd-context.md (INSTANT)
+[14] loadClaudeLocalContext()        → Read claude-context.md (INSTANT)
 [15] Promise.allSettled([5 API calls]) → PARALLEL (with git-aware queries):
     ├─► peers.getContext(user)
-    ├─► peers.getContext(clawd)
+    ├─► peers.getContext(claude)
     ├─► sessions.summaries()
     ├─► peers.chat(user, {query: "...on branch X..."})    # $0.03
-    └─► peers.chat(clawd, {query: "...on branch X..."})   # $0.03
+    └─► peers.chat(claude, {query: "...on branch X..."})   # $0.03
 [16] setCachedUserContext()         → Write context-cache.json
-[17] setCachedClawdContext()        → Write context-cache.json
+[17] setCachedClaudeContext()        → Write context-cache.json
 [18] displayHonchoStartup()         → Show pixel art banner
 [19] console.log(context)           → Output to Claude (includes git state + changes)
 [20] process.exit(0)
@@ -473,7 +471,7 @@ Workspace
 [3] shouldLogTool()                 → Filter significant tools (skip ls, pwd, cat, etc.)
     └─► FALSE: process.exit(0)
 [4] formatToolSummary()             → Pure string formatting
-[5] appendClawdWork()               → Read+Write clawd-context.md (capped 50 entries)
+[5] appendClaudeWork()               → Read+Write claude-context.md (capped 50 entries)
 [6] await logToHonchoAsync()        → Upload to Honcho with instance_id
 [7] process.exit(0)
 ```
@@ -496,9 +494,9 @@ Workspace
 [9] Filter assistant messages from transcript (last 30)
 [10] await messages.create(assistant) → Upload assistant messages (with instance_id)
 [11] extractWorkItems()             → Regex parse assistant messages
-[12] loadClawdLocalContext()        → Read clawd-context.md
-[13] generateClawdSummary()         → Pure function
-[14] saveClawdLocalContext()        → Write clawd-context.md (preserves recent activity)
+[12] loadClaudeLocalContext()        → Read claude-context.md
+[13] generateClaudeSummary()         → Pure function
+[14] saveClaudeLocalContext()        → Write claude-context.md (preserves recent activity)
 [15] await messages.create([marker]) → Log session end marker
 [16] process.exit(0)
 ```
@@ -516,10 +514,10 @@ Workspace
 [4] Get/create workspace, session, peers → cache.json + API calls
 [5] Promise.allSettled([5 API calls]) → PARALLEL (worth the cost at compaction):
     ├─► peers.getContext(user)      → Full user context
-    ├─► peers.getContext(clawd)     → Full AI context
+    ├─► peers.getContext(claude)     → Full AI context
     ├─► sessions.summaries()        → Session summaries
     ├─► peers.chat(user)            → Fresh dialectic about user ($0.03)
-    └─► peers.chat(clawd)           → Fresh dialectic about AI ($0.03)
+    └─► peers.chat(claude)           → Fresh dialectic about AI ($0.03)
 [6] formatMemoryCard()              → Build "HONCHO MEMORY ANCHOR" block
 [7] spinner.stop()                  → Show "memory anchored"
 [8] console.log(memoryCard)         → Output anchor block (marked with PRESERVE tags)
@@ -589,10 +587,10 @@ workspaces.sessions.messages.create(workspaceId, sessionId, {messages})
 | `git-state.json` | session-start | READ+WRITE | Yes | Low |
 | `message-queue.jsonl` | user-prompt | APPEND | Yes | **MEDIUM** |
 | `message-queue.jsonl` | session-end | READ+CLEAR | Yes | **MEDIUM** |
-| `clawd-context.md` | session-start | READ | Yes | Low |
-| `clawd-context.md` | post-tool-use | READ+WRITE | Yes | **HIGH** |
-| `clawd-context.md` | session-end | READ+WRITE | Yes | Low |
-| `clawd-context.md` | pre-compact | NONE | - | - |
+| `claude-context.md` | session-start | READ | Yes | Low |
+| `claude-context.md` | post-tool-use | READ+WRITE | Yes | **HIGH** |
+| `claude-context.md` | session-end | READ+WRITE | Yes | Low |
+| `claude-context.md` | pre-compact | NONE | - | - |
 
 ---
 
@@ -679,7 +677,7 @@ If any line is corrupt JSON, entire `map()` throws. Queue is lost.
 
 ---
 
-#### 6. clawd-context.md Rotation Logic Fragile
+#### 6. claude-context.md Rotation Logic Fragile
 
 **Location**: `cache.ts:273-278`
 
@@ -747,7 +745,7 @@ Very rough estimate. Code and non-English have different ratios.
 | Module | Functions |
 |--------|-----------|
 | `config.ts` | `estimateTokens()`, `truncateToTokens()` |
-| `cache.ts` | `generateClaudisSummary()` |
+| `cache.ts` | `generateClaudeSummary()` |
 | `hooks/session-start.ts` | `getSessionName()`, `formatRepresentation()` |
 | `hooks/session-end.ts` | `parseTranscript()`, `extractWorkItems()` |
 | `hooks/post-tool-use.ts` | `shouldLogTool()`, `formatToolSummary()` |
@@ -769,7 +767,7 @@ Very rough estimate. Code and non-English have different ratios.
 ## Test Suite Structure
 
 ```typescript
-describe('honcho-clawd', () => {
+describe('honcho', () => {
   
   describe('Unit: Pure Functions', () => {
     test('estimateTokens() approximates correctly')
@@ -779,7 +777,7 @@ describe('honcho-clawd', () => {
     test('shouldLogTool() filters trivial commands')
     test('shouldSkipContextRetrieval() matches patterns')
     test('extractWorkItems() finds action patterns')
-    test('generateClaudisSummary() creates valid markdown')
+    test('generateClaudeSummary() creates valid markdown')
   })
 
   describe('Unit: Cache Operations (mocked fs)', () => {
@@ -790,7 +788,7 @@ describe('honcho-clawd', () => {
     test('queueMessage() appends JSONL correctly')
     test('getQueuedMessages() filters uploaded messages')
     test('getQueuedMessages() handles corrupt lines gracefully')
-    test('appendClaudisWork() caps at 50 entries')
+    test('appendClaudeWork() caps at 50 entries')
   })
 
   describe('Integration: Hook Data Flow (mocked Honcho)', () => {
@@ -801,11 +799,11 @@ describe('honcho-clawd', () => {
     test('user-prompt uses cache when fresh')
     test('user-prompt fetches fresh when stale')
     test('user-prompt skips context for trivial prompts')
-    test('post-tool-use appends to clawd-context.md')
+    test('post-tool-use appends to claude-context.md')
     test('post-tool-use skips trivial bash commands')
     test('session-end clears message queue')
     test('session-end saves assistant messages')
-    test('session-end generates clawd summary')
+    test('session-end generates claude summary')
   })
 
   describe('Integration: Error Handling', () => {
@@ -883,28 +881,11 @@ export const mockConfig = (overrides = {}) => ({
   peerName: 'test-user',
   apiKey: 'test-key',
   workspace: 'test-workspace',
-  claudePeer: 'clawd',
+  claudePeer: 'claude',
   saveMessages: true,
   ...overrides,
 });
 ```
-
----
-
-## Recommended Fixes
-
-| Issue | Severity | Status | Recommended Fix |
-|-------|----------|--------|-----------------|
-| Cache race conditions | 🔴 Critical | Open | Use file locking (`proper-lockfile`) or atomic writes (write to temp, then rename) |
-| Queue not re-uploaded | 🔴 Critical | ✅ Fixed | ~~Actually process queue in session-end~~ Now uploads queued messages |
-| Fire-and-forget silent | 🔴 Critical | ✅ Fixed | ~~Add failure counter~~ Now awaits uploads before exit |
-| Stale cache IDs | 🟡 Medium | Open | Add TTL to ID cache (e.g., 24 hours) |
-| JSONL parsing throws | 🟡 Medium | Open | Wrap each line parse in try/catch, log corrupt lines |
-| Context file fragile | 🟡 Medium | Open | Use structured JSON instead of markdown parsing |
-| Session name collision | 🟡 Medium | Open | Include parent directory hash in session name |
-| Transcript path trust | 🟡 Medium | Open | Validate path is under Claude's data directory |
-
----
 
 ## Manual Testing Commands
 
@@ -922,14 +903,14 @@ echo '{"tool_name": "Write", "tool_input": {"file_path": "test.txt"}, "cwd": "/t
 echo '{"cwd": "/tmp/test", "reason": "user_exit"}' | bun run dev hook session-end
 
 # Clear all caches for fresh testing
-rm ~/.honcho-clawd/cache.json
-rm ~/.honcho-clawd/context-cache.json
-rm ~/.honcho-clawd/message-queue.jsonl
+rm ~/.honcho/cache.json
+rm ~/.honcho/context-cache.json
+rm ~/.honcho/message-queue.jsonl
 
 # View current cache state
-cat ~/.honcho-clawd/cache.json | jq
-cat ~/.honcho-clawd/context-cache.json | jq
-cat ~/.honcho-clawd/message-queue.jsonl
+cat ~/.honcho/cache.json | jq
+cat ~/.honcho/context-cache.json | jq
+cat ~/.honcho/message-queue.jsonl
 
 # Check hook installation
 cat ~/.claude/settings.json | jq '.hooks'
@@ -945,7 +926,7 @@ cat ~/.claude/settings.json | jq '.hooks'
 
 3. **Message reliability pattern**: Queue locally first (instant, survives crashes), start async upload, await before exit, reconcile on session-end.
 
-4. **Dual peer model**: User peer observes self (builds knowledge about user), clawd peer observes user (builds AI self-awareness).
+4. **Dual peer model**: User peer observes self (builds knowledge about user), claude peer observes user (builds AI self-awareness).
 
 5. **Cost optimization**: `getContext()` is free, `chat()` costs $0.03. Only use `chat()` at session-start and pre-compact, use cached/free APIs during session.
 
