@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getHonchoClientOptions } from "../config.js";
+import { loadConfig, getSessionForPath, getHonchoClientOptions, isPluginEnabled } from "../config.js";
 import { basename } from "path";
 import { Spinner } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -111,6 +111,11 @@ export async function handlePreCompact(): Promise<void> {
   const config = loadConfig();
   if (!config) {
     // No config, nothing to inject
+    process.exit(0);
+  }
+
+  // Early exit if plugin is disabled
+  if (!isPluginEnabled()) {
     process.exit(0);
   }
 

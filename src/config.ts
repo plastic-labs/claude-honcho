@@ -42,6 +42,7 @@ export interface HonchoCLAUDEConfig {
   contextRefresh?: ContextRefreshConfig; // Context retrieval settings
   endpoint?: HonchoEndpointConfig; // SaaS vs local instance config
   localContext?: LocalContextConfig; // Local claude-context.md settings
+  enabled?: boolean; // Temporarily disable plugin (default: true)
 }
 
 const CONFIG_DIR = join(homedir(), ".honcho");
@@ -141,6 +142,19 @@ export function getLocalContextConfig(): LocalContextConfig {
   return {
     maxEntries: config?.localContext?.maxEntries ?? 50, // Default 50 entries
   };
+}
+
+// Plugin enable/disable
+export function isPluginEnabled(): boolean {
+  const config = loadConfig();
+  return config?.enabled !== false; // default: true
+}
+
+export function setPluginEnabled(enabled: boolean): void {
+  const config = loadConfig();
+  if (!config) return;
+  config.enabled = enabled;
+  saveConfig(config);
 }
 
 // Simple token estimation (chars / 4)
