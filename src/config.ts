@@ -60,16 +60,87 @@ export function configExists(): boolean {
   return existsSync(CONFIG_FILE);
 }
 
+/**
+ * Load config from file, with environment variable fallbacks.
+ * This allows the plugin to work without running `honcho init` first
+ * if the user sets HONCHO_API_KEY and other env vars.
+ */
 export function loadConfig(): HonchoCLAUDEConfig | null {
-  if (!configExists()) {
+  // Try file-based config first
+  if (configExists()) {
+    try {
+      const content = readFileSync(CONFIG_FILE, "utf-8");
+      const fileConfig = JSON.parse(content) as HonchoCLAUDEConfig;
+
+      // Merge with env vars (env vars take precedence for API key)
+      return mergeWithEnvVars(fileConfig);
+    } catch {
+      // Fall through to env-only config
+    }
+  }
+
+  // No file config - try environment variables only
+  return loadConfigFromEnv();
+}
+
+/**
+ * Load config purely from environment variables.
+ * Returns null if required vars (HONCHO_API_KEY) are not set.
+ */
+export function loadConfigFromEnv(): HonchoCLAUDEConfig | null {
+  const apiKey = process.env.HONCHO_API_KEY;
+  if (!apiKey) {
     return null;
   }
-  try {
-    const content = readFileSync(CONFIG_FILE, "utf-8");
-    return JSON.parse(content) as HonchoCLAUDEConfig;
-  } catch {
-    return null;
+
+  const peerName = process.env.HONCHO_PEER_NAME || process.env.USER || "user";
+  const workspace = process.env.HONCHO_WORKSPACE || "claude_code";
+  const claudePeer = process.env.HONCHO_CLAUDE_PEER || "claude";
+  const endpoint = process.env.HONCHO_ENDPOINT;
+
+  const config: HonchoCLAUDEConfig = {
+    apiKey,
+    peerName,
+    workspace,
+    claudePeer,
+    saveMessages: process.env.HONCHO_SAVE_MESSAGES !== "false",
+    enabled: process.env.HONCHO_ENABLED !== "false",
+  };
+
+  // Handle endpoint configuration
+  if (endpoint) {
+    if (endpoint === "local") {
+      config.endpoint = { environment: "local" };
+    } else if (endpoint.startsWith("http")) {
+      config.endpoint = { baseUrl: endpoint };
+    }
   }
+
+  return config;
+}
+
+/**
+ * Merge file-based config with environment variable overrides.
+ * Env vars take precedence for sensitive values like API key.
+ */
+function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
+  // API key from env takes precedence (allows secure injection)
+  if (process.env.HONCHO_API_KEY) {
+    config.apiKey = process.env.HONCHO_API_KEY;
+  }
+
+  // Other env overrides
+  if (process.env.HONCHO_WORKSPACE) {
+    config.workspace = process.env.HONCHO_WORKSPACE;
+  }
+  if (process.env.HONCHO_PEER_NAME) {
+    config.peerName = process.env.HONCHO_PEER_NAME;
+  }
+  if (process.env.HONCHO_ENABLED === "false") {
+    config.enabled = false;
+  }
+
+  return config;
 }
 
 export function saveConfig(config: HonchoCLAUDEConfig): void {
