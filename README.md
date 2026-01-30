@@ -1,618 +1,276 @@
-# honcho-claude-code-plugin
+# Honcho Memory for Claude Code
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Bun](https://img.shields.io/badge/Bun-%23000000.svg?style=flat&logo=bun&logoColor=white)](https://bun.sh)
 [![Honcho](https://img.shields.io/badge/Honcho-Memory%20API-blue)](https://honcho.dev)
 
-**Persistent memory for Claude Code sessions using [Honcho](https://honcho.dev) by Plastic Labs.**
+**Persistent memory for Claude Code using [Honcho](https://honcho.dev) by Plastic Labs.**
 
-Give Claude Code long-term memory that survives context wipes, session restarts, and even `ctrl+c` interruptions. Built on Honcho's memory framework for rich, semantic understanding.
-
-## Features
-
-- **Persistent Memory**: User messages and AI responses are saved to Honcho, building long-term context
-- **Survives Interruptions**: Local message queue ensures no data loss on `ctrl+c` or crashes
-- **AI Self-Awareness**: Claude knows what it was working on, even after context is wiped
-- **Git State Tracking**: Detects branch switches, commits, and changes made outside Claude sessions
-- **Dual Peer System**: Separate memory for user (you) and AI
-- **Semantic Search**: Relevant context is retrieved based on your current prompt
-- **Cost-Optimized**: Configurable refresh rates and caching to minimize API costs
-- **Ultra-Fast Hooks**: 98% latency reduction through caching, parallelization, and fire-and-forget patterns
-- **Per-Directory Sessions**: Each project directory maintains its own conversation history
-- **SaaS/Local Switching**: Easily switch between Honcho SaaS and local instances
-- **Claude Code Skills**: Built-in slash commands for session management
-- **Temporary Disable**: Quickly disable/enable Honcho when you want a vanilla Claude experience
+Give Claude Code long-term memory that survives context wipes, session restarts, and even `ctrl+c`. Claude remembers what you're working on, your preferences, and what it was doing — across all your projects.
 
 ---
 
-## Table of Contents
+## Quick Start (5 minutes)
 
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [How It Works](#how-it-works)
-- [Configuration](#configuration)
-- [Endpoint Switching](#endpoint-switching)
-- [Temporarily Disabling Honcho](#temporarily-disabling-honcho)
-- [Git State Tracking](#git-state-tracking)
-- [Claude Code Skills](#claude-code-skills)
-- [Cost Optimization](#cost-optimization)
-- [Architecture](#architecture)
-- [Performance](#performance)
-- [AI Self-Awareness](#ai-self-awareness)
-- [Reliability](#reliability)
-- [CLI Reference](#cli-reference)
-- [Troubleshooting](#troubleshooting)
-- [Development](#development)
-- [Credits](#credits)
+### Step 1: Get Your Honcho API Key
 
----
+1. Go to **[app.honcho.dev](https://app.honcho.dev)**
+2. Sign up or log in
+3. Copy your API key (starts with `hch-`)
 
-## Installation
+### Step 2: Set Environment Variables
 
-### Prerequisites
-
-- [Bun](https://bun.sh) runtime (v1.0+)
-- [Claude Code](https://claude.ai/code) CLI
-- [Honcho](https://honcho.dev) account and API key
-
-### Install from Source
+Add these to your shell config (`~/.zshrc`, `~/.bashrc`, or `~/.profile`):
 
 ```bash
-# Clone the repository
+# Required
+export HONCHO_API_KEY="hch-your-api-key-here"
+
+# Optional (defaults shown)
+export HONCHO_PEER_NAME="$USER"           # Your name/identity
+export HONCHO_WORKSPACE="claude_code"     # Workspace name
+```
+
+Then reload your shell:
+
+```bash
+source ~/.zshrc  # or ~/.bashrc
+```
+
+### Step 3: Install the Plugin
+
+Open Claude Code and run:
+
+```
+/plugin marketplace add plastic-labs/honcho-claude-code-plugin
+```
+
+Then install:
+
+```
+/plugin install honcho@honcho-memory
+```
+
+### Step 4: Restart Claude Code
+
+```bash
+# Exit Claude Code (ctrl+c or /exit)
+# Start it again
+claude
+```
+
+**That's it!** You should see the Honcho pixel art and memory loading on startup.
+
+---
+
+## What You Get
+
+- **Persistent Memory** — Claude remembers your preferences, projects, and context across sessions
+- **Survives Context Wipes** — Even when Claude's context window resets, memory persists
+- **Git Awareness** — Detects branch switches, commits, and changes made outside Claude
+- **Per-Project Sessions** — Each directory has its own conversation history
+- **AI Self-Awareness** — Claude knows what it was working on, even after restarts
+
+---
+
+## Environment Variables Reference
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HONCHO_API_KEY` | **Yes** | — | Your Honcho API key from [app.honcho.dev](https://app.honcho.dev) |
+| `HONCHO_PEER_NAME` | No | `$USER` | Your identity in the memory system |
+| `HONCHO_WORKSPACE` | No | `claude_code` | Workspace name (groups your sessions) |
+| `HONCHO_CLAUDE_PEER` | No | `claude` | How the AI is identified |
+| `HONCHO_ENDPOINT` | No | `production` | `production`, `local`, or a custom URL |
+| `HONCHO_ENABLED` | No | `true` | Set to `false` to disable |
+| `HONCHO_SAVE_MESSAGES` | No | `true` | Set to `false` to stop saving messages |
+
+### Example Full Configuration
+
+```bash
+# ~/.zshrc or ~/.bashrc
+
+# Honcho Memory for Claude Code
+export HONCHO_API_KEY="hch-v2-abc123..."
+export HONCHO_PEER_NAME="alice"
+export HONCHO_WORKSPACE="my-projects"
+```
+
+---
+
+## Verifying It Works
+
+After installation, start Claude Code. You should see:
+
+```
+    ██  ██░░        Honcho Memory
+  ░░████████████░░    persistent context
+░░██████████████░░
+░░████░░  ██░░░░
+░░████░░  ██░░░░
+░░██████░░░░██░░
+  ░░████████  ░░
+    ░░░░░░
+
+[claude/Honcho Memory Loaded]
+
+## Honcho Memory System Active
+- User: alice
+- AI: claude
+- Workspace: my-projects
+- Session: my-project-name
+...
+```
+
+If you don't see this, check:
+1. `echo $HONCHO_API_KEY` — is it set?
+2. Restart your terminal after editing shell config
+3. Restart Claude Code after installing the plugin
+
+---
+
+## Skills (Slash Commands)
+
+The plugin adds these commands to Claude Code:
+
+| Command | Description |
+|---------|-------------|
+| `/honcho-status` | Show current memory status and configuration |
+| `/honcho-setup` | Interactive setup (alternative to env vars) |
+| `/honcho-handoff` | Generate a debugging summary for handoff |
+
+---
+
+## Troubleshooting
+
+### "Not configured" or no memory loading
+
+1. **Check your API key is set:**
+   ```bash
+   echo $HONCHO_API_KEY
+   ```
+   If empty, add it to your shell config and `source` it.
+
+2. **Check the plugin is installed:**
+   ```
+   /plugin
+   ```
+   Go to "Installed" tab — you should see `honcho@honcho-memory`.
+
+3. **Restart Claude Code** after making changes.
+
+### Memory not persisting between sessions
+
+Make sure `HONCHO_SAVE_MESSAGES` is not set to `false`.
+
+### Using a local Honcho instance
+
+```bash
+export HONCHO_ENDPOINT="local"  # Uses localhost:8000
+# or
+export HONCHO_ENDPOINT="http://your-server:8000/v3"
+```
+
+---
+
+## Alternative: CLI Installation
+
+If you prefer using the CLI instead of the plugin system:
+
+```bash
+# Clone and install
 git clone https://github.com/plastic-labs/honcho-claude-code-plugin.git
 cd honcho-claude-code-plugin
+bun install && bun link
 
-# Install dependencies
-bun install
-
-# Build
-bun run build
-
-# Install globally
-bun link
-```
-
-### Install from npm (coming soon)
-
-```bash
-bun install -g honcho-claude-code-plugin
-```
-
----
-
-## Quick Start
-
-### 1. Initialize Configuration
-
-```bash
+# Configure interactively
 honcho init
-```
 
-You'll be prompted for:
-- **Your name/peer ID**: How Honcho identifies you (e.g., "yourname")
-- **Workspace name**: Your Honcho workspace (e.g., "myworkspace")
-- **Claude's peer name**: AI identity in Honcho (default: "claude")
-- **Enable message saving**: Whether to save conversation history
-- **Honcho API key**: Get from https://app.honcho.dev
-
-### 2. Install Hooks
-
-```bash
+# Install hooks to Claude Code
 honcho install
 ```
 
-This adds hooks to `~/.claude/settings.json` that activate automatically.
-
-### 3. Use Claude Code
+The CLI provides additional commands:
 
 ```bash
-# Start Claude Code in any directory
-claude
-
-# Your conversations are automatically saved and context is retrieved!
+honcho status              # Show status
+honcho enable/disable      # Toggle memory on/off
+honcho session new <name>  # Create named session
+honcho session switch <n>  # Switch sessions
+honcho endpoint local      # Switch to local Honcho
+honcho tail                # Watch activity log
+honcho handoff             # Generate handoff summary
 ```
 
 ---
 
 ## How It Works
 
-### The Honcho Memory System
-
 ```
-┌────────────────────────────────────────────────────────────────────┐
-│                        Claude Code                                 │
-├────────────────────────────────────────────────────────────────────┤
-│  SessionStart     │  UserPrompt      │  PostToolUse   │ SessionEnd │
-│  ─────────────    │  ───────────     │  ────────────  │  ────────  │
-│  Load context     │  Queue message   │  Log tool use  │  Batch     │
-│  from Honcho +    │  locally (1ms)   │  locally (2ms) │  upload    │
-│  local claude     │  Fire-and-forget │  Fire-and-     │  messages  │
-│  summary          │  upload          │  forget upload │  Generate  │
-│                   │  Cached context  │                │  summary   │
-└────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        Claude Code                               │
+├─────────────────────────────────────────────────────────────────┤
+│  SessionStart   │  UserPrompt     │  PostToolUse   │ SessionEnd │
+│  ───────────    │  ───────────    │  ────────────  │ ────────── │
+│  Load context   │  Save message   │  Log activity  │ Upload all │
+│  from Honcho    │  to Honcho      │  to Honcho     │ + summary  │
+└─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Honcho API                              │
-│  ┌───────────┐  ┌──────────┐  ┌──────────────┐  ┌─────────────┐ │
-│  │Workspace  │  │ Session  │  │    Peers     │  │  Messages   │ │
-│  │(workspace)│──│(project) │──│ user/claude  │──│ (history)   │ │
-│  └───────────┘  └──────────┘  └──────────────┘  └─────────────┘ │
-│                                     │                           │
-│                    ┌────────────────┴────────────────┐          │
-│                    │       Persistent Memory         │          │
-│                    │  • Explicit Facts               │          │
-│                    │  • Deductive Insights           │          │
-│                    │  • Peer Cards (profiles)        │          │
-│                    │  • Semantic Search              │          │
-│                    └─────────────────────────────────┘          │
+│                         Honcho API                               │
+│                                                                  │
+│   Your messages and Claude's work → Persistent Memory →          │
+│   Retrieved as context at session start                         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Dual Peer System
-
-The plugin creates two "peers" in Honcho:
-
-| Peer | Represents | Observes | Purpose |
-|------|------------|----------|---------|
-| `user` (you) | The user | Self | Build knowledge about your preferences, projects, style |
-| `claude` | Claude AI | You | Build knowledge about what Claude has done, AI self-awareness |
-
-This enables Claude to understand both what **you** know/want and what **it** has been working on.
+The plugin hooks into Claude Code's lifecycle events:
+- **SessionStart**: Loads your context and history from Honcho
+- **UserPrompt**: Saves your messages and retrieves relevant context
+- **PostToolUse**: Logs Claude's actions (file edits, commands, etc.)
+- **SessionEnd**: Uploads any remaining messages and generates a summary
 
 ---
 
-## Configuration
+## Configuration File (Advanced)
 
-### Config File
-
-Located at `~/.honcho/config.json`:
+If you prefer a config file over environment variables, create `~/.honcho/config.json`:
 
 ```json
 {
-  "peerName": "yourname",
   "apiKey": "hch-v2-...",
-  "workspace": "myworkspace",
+  "peerName": "yourname",
+  "workspace": "claude_code",
   "claudePeer": "claude",
   "saveMessages": true,
-  "sessions": {
-    "/path/to/project": "project-name"
-  },
-  "contextRefresh": {
-    "messageThreshold": 30,
-    "ttlSeconds": 300,
-    "skipDialectic": true
-  },
-  "messageUpload": {
-    "maxUserTokens": null,
-    "maxAssistantTokens": null,
-    "summarizeAssistant": false
-  }
+  "enabled": true
 }
 ```
 
-### Core Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `peerName` | Your identity in Honcho | (required) |
-| `apiKey` | Honcho API key | (required) |
-| `workspace` | Honcho workspace name | `"claude_code"` |
-| `claudePeer` | AI identity in Honcho | `"claude"` |
-| `saveMessages` | Save conversation history | `true` |
-| `sessions` | Directory → session mappings | `{}` |
-| `enabled` | Enable/disable the plugin | `true` |
-
-### Context Refresh Options
-
-Control how often context is fetched from Honcho:
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `contextRefresh.messageThreshold` | Refresh every N messages | `30` |
-| `contextRefresh.ttlSeconds` | Cache TTL in seconds | `300` (5 min) |
-| `contextRefresh.skipDialectic` | Skip expensive `chat()` calls | `true` |
-
-### Message Upload Options (for token-based pricing)
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `messageUpload.maxUserTokens` | Truncate user messages | `null` (no limit) |
-| `messageUpload.maxAssistantTokens` | Truncate assistant messages | `null` (no limit) |
-| `messageUpload.summarizeAssistant` | Summarize instead of full text | `false` |
-
-### Endpoint Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `endpoint.environment` | `"production"` (SaaS) or `"local"` | `"production"` |
-| `endpoint.baseUrl` | Custom URL (overrides environment) | `null` |
-
-### Local Context Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `localContext.maxEntries` | Max entries in claude-context.md | `50` |
+Environment variables take precedence over the config file.
 
 ---
 
-## Endpoint Switching
-
-Switch between Honcho SaaS and local instances for development/testing.
-
-### Commands
-
-```bash
-# Show current endpoint
-honcho endpoint
-
-# Switch to SaaS (default)
-honcho endpoint saas
-
-# Switch to local instance (localhost:8000)
-honcho endpoint local
-
-# Use custom URL
-honcho endpoint custom https://my-honcho.example.com
-
-# Test connection
-honcho endpoint test
-```
-
-### During Init
-
-Type `local` as the API key during `honcho init` to configure for a local instance:
-
-```bash
-$ honcho init
-Enter your Honcho API key: local
-Local mode enabled
-Enter local API key (or press enter for 'local'):
-```
-
----
-
-## Temporarily Disabling Honcho
-
-Sometimes you want to use Claude Code without the memory system - for quick throwaway tasks, testing, or just a vanilla experience.
-
-```bash
-# Disable honcho (hooks will exit silently)
-honcho disable
-
-# Re-enable when ready
-honcho enable
-
-# Check current status
-honcho status
-```
-
-When disabled, all hooks exit immediately with no API calls, no context loading, and no message saving. Your config and data remain intact - it just pauses the plugin until you re-enable it.
-
----
-
-## Git State Tracking
-
-The plugin automatically tracks git state to detect external changes.
-
-### What's Tracked
-
-- **Branch**: Current branch name
-- **Commit**: HEAD SHA and message
-- **Dirty Files**: Uncommitted changes
-
-### External Change Detection
-
-At each session start, the plugin compares the current git state to the cached state from the last session. Detected changes include:
-
-| Change Type | Example |
-|-------------|---------|
-| Branch switch | `Branch switched from 'main' to 'feature-x'` |
-| New commits | `New commit: abc123 - feat: add feature` |
-| Uncommitted changes | `Uncommitted changes detected: file1.ts, file2.ts` |
-
-### Context Enhancement
-
-Git state enhances the startup context:
+## Uninstalling
 
 ```
-## Honcho Memory System Active
-- User: yourname
-- AI: claude
-- Workspace: myworkspace
-- Session: my-project
-- Directory: /path/to/project
-- Git Branch: feature-x
-- Git HEAD: abc123
-- Working Tree: 3 uncommitted changes
-
-## Git Activity Since Last Session
-- Branch switched from 'main' to 'feature-x'
-- New commit: abc123 - feat: add feature
+/plugin uninstall honcho@honcho-memory
+/plugin marketplace remove honcho-memory
 ```
 
-Dialectic queries are also enhanced with git context for more relevant responses.
-
----
-
-## Claude Code Skills
-
-This plugin includes slash commands you can use directly in Claude Code:
-
-### Available Commands
-
-| Command | Description |
-|---------|-------------|
-| `/honcho-new [name]` | Create or connect to a Honcho session |
-| `/honcho-list` | List all Honcho sessions |
-| `/honcho-status` | Show current session and memory status |
-| `/honcho-switch <name>` | Switch to a different session |
-| `/honcho-clear` | Clear custom session (revert to default) |
-
-### Usage Example
-
-```
-You: /honcho-status
-
-Claude: Current Honcho session status:
-- Workspace: myworkspace
-- Session: my-project
-- User Peer: yourname
-- AI Peer: claude
-- Message Saving: enabled
-```
-
----
-
-## Architecture
-
-### File Structure
-
-```
-~/.honcho/
-├── config.json           # User settings (API key, workspace, peer names, endpoint)
-├── cache.json            # Cached Honcho IDs (workspace, session, peers)
-├── context-cache.json    # Pre-warmed context with TTL tracking
-├── git-state.json        # Git state per directory (for change detection)
-├── message-queue.jsonl   # Local message queue (reliability layer)
-└── claude-context.md     # AI self-summary (survives context wipes)
-```
-
-### Source Structure
-
-```
-src/
-├── cli.ts              # Main CLI entry point
-├── config.ts           # Config management, endpoint switching, helpers
-├── cache.ts            # Caching layer (IDs, context, message queue, git state)
-├── git.ts              # Git state capture and change detection
-├── install.ts          # Hook installation to Claude settings
-├── spinner.ts          # Loading animation
-├── skills/
-│   └── handoff.ts      # Research handoff summary generation
-└── hooks/
-    ├── session-start.ts    # Load context from Honcho + local + git state
-    ├── session-end.ts      # Save messages + generate summary
-    ├── post-tool-use.ts    # Log tool usage + update local context
-    ├── user-prompt.ts      # Queue message + retrieve context
-    └── pre-compact.ts      # Re-inject context before compaction
-```
-
----
-
-## Performance
-
-### Hook Latencies
-
-| Hook | Latency | What It Does |
-|------|---------|--------------|
-| SessionStart | ~400ms | Load all context (parallel API calls) |
-| UserPromptSubmit | ~10-20ms | Queue locally, fire-and-forget upload |
-| PostToolUse | ~5ms | Log locally, fire-and-forget upload |
-| SessionEnd | ~500ms | Batch upload, generate summary |
-
-### Optimization Techniques
-
-1. **Local Message Queue**: Messages written to file instantly (~1ms), uploaded asynchronously
-2. **ID Caching**: Workspace, session, peer IDs cached to skip redundant API calls
-3. **Context Caching**: Retrieved context cached with configurable TTL
-4. **Parallel API Calls**: All context fetches happen in parallel with `Promise.allSettled`
-5. **Fire-and-Forget**: Non-critical uploads don't block the user
-6. **Conditional Execution**: Trivial prompts ("yes", "ok") skip heavy context retrieval
-
----
-
-## AI Self-Awareness
-
-### The Problem
-
-Claude Code's context window can be wiped or compacted at any time. When this happens, Claude forgets what it was working on.
-
-### The Solution
-
-This plugin allows Claude to retain **self-context** - a persistent record of Claude's work that survives context wipes.
-
-### How It Works
-
-1. **PostToolUse**: Every significant action (file writes, edits, commands) is logged to `~/.honcho/claude-context.md`
-2. **SessionEnd**: A summary of Claude's work is generated and saved to Honcho
-3. **SessionStart**: Claude receives both:
-   - **Local context**: Instant read from `claude-context.md`
-   - **Honcho context**: Observations and patterns from Honcho's memory system
-
-### Example
-
-After a context wipe, Claude still knows:
-
-```markdown
-## Local Context (What I Was Working On)
-
-Last updated: 2026-01-05T08:41:00.000Z
-Session: my-project
-
-## Recent Activity
-- [2026-01-05T08:30:00.000Z] Edited src/hooks/user-prompt.ts
-- [2026-01-05T08:35:00.000Z] Ran: bun run build (success)
-- [2026-01-05T08:40:00.000Z] Created/wrote file: README.md
-```
-
----
-
-## Reliability
-
-### Message Persistence Layers
-
-1. **Instant Local Write**: Every user message immediately written to `message-queue.jsonl`
-2. **Background Upload**: Messages asynchronously uploaded to Honcho
-3. **Batch Reconciliation**: Any missed uploads processed on session end
-
-### Failure Scenarios
-
-| Scenario | Data Loss? | Recovery |
-|----------|------------|----------|
-| `ctrl+c` exit | No | Local queue preserved, uploaded next session |
-| Network failure | No | Local queue + retry on reconnection |
-| Claude context wipe | No | Context restored from Honcho + local files |
-| Honcho API down | Partial | Local queue preserves user messages |
-
----
-
-## CLI Reference
-
-```
-honcho <command>
-
-Commands:
-  init        Configure honcho (name, API key, workspace)
-  install     Install hooks to ~/.claude/settings.json
-  uninstall   Remove hooks from Claude settings
-  update      Rebuild and reinstall (removes lockfile, builds, links)
-  status      Show current configuration and hook status
-  enable      Enable honcho memory
-  disable     Temporarily disable honcho (use Claude without memory)
-  help        Show help message
-
-Session Commands:
-  session new [name]     Create/connect Honcho session (defaults to dir name)
-  session list           List all sessions
-  session current        Show current session info
-  session switch <name>  Switch to existing session
-  session clear          Remove custom session mapping
-
-Endpoint Commands:
-  endpoint               Show current endpoint (SaaS/local)
-  endpoint saas          Switch to SaaS (api.honcho.dev)
-  endpoint local         Switch to local (localhost:8000)
-  endpoint custom <url>  Use custom URL
-  endpoint test          Test connection
-
-Skills:
-  handoff                Generate research handoff summary
-  handoff --all          Include all instances (not just current)
-
-Hook Commands (internal - called by Claude Code):
-  hook session-start    Handle SessionStart event
-  hook session-end      Handle SessionEnd event
-  hook post-tool-use    Handle PostToolUse event
-  hook user-prompt      Handle UserPromptSubmit event
-  hook pre-compact      Handle PreCompact event
-```
-
----
-
-## Troubleshooting
-
-### Hooks Not Working
-
-1. Check hooks are installed:
-   ```bash
-   honcho status
-   ```
-
-2. Verify `~/.claude/settings.json` contains honcho hooks
-
-3. Check the hook binary is accessible:
-   ```bash
-   which honcho
-   ```
-
-### Slow Performance
-
-1. Clear stale caches:
-   ```bash
-   rm ~/.honcho/cache.json
-   rm ~/.honcho/context-cache.json
-   ```
-
-2. First request after cache clear will be slower (populating cache)
-
-### No Context Loading
-
-1. Verify API key is valid in `~/.honcho/config.json`
-2. Check Honcho dashboard for your workspace/session
-3. Ensure `saveMessages` is `true` in config
-
-### High Costs
-
-1. Increase `contextRefresh.messageThreshold` to refresh less often
-2. Increase `contextRefresh.ttlSeconds` for longer cache
-3. Ensure `contextRefresh.skipDialectic` is `true`
-
----
-
-## Development
-
-### Build from Source
-
-```bash
-# Install dependencies
-bun install
-
-# Run in development mode
-bun run dev <command>
-
-# Build for production
-bun run build
-
-# The built CLI is at dist/cli.js
-```
-
-### Testing Hooks Locally
-
-```bash
-# Test session-start
-echo '{"cwd": "/tmp/test"}' | bun run dev hook session-start
-
-# Test user-prompt
-echo '{"prompt": "test", "cwd": "/tmp/test"}' | bun run dev hook user-prompt
-```
-
-### Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run `bun run build` to verify
-5. Submit a pull request
-
----
-
-## Credits
-
-- [Honcho](https://honcho.dev) by [Plastic Labs](https://plasticlabs.ai) - The persistent memory API
-- [Claude Code](https://claude.ai/code) by [Anthropic](https://anthropic.com) - The AI coding assistant
-- Built with [Bun](https://bun.sh) - The fast JavaScript runtime
-
----
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
+Or remove the environment variables from your shell config.
 
 ---
 
 ## Links
 
-- [Honcho Documentation](https://docs.honcho.dev)
-- [Claude Code Documentation](https://docs.anthropic.com/claude-code)
-- [Report Issues](https://github.com/plastic-labs/honcho-claude-code-plugin/issues)
+- **Honcho**: [honcho.dev](https://honcho.dev) — The memory API
+- **Documentation**: [docs.honcho.dev](https://docs.honcho.dev)
+- **Issues**: [GitHub Issues](https://github.com/plastic-labs/honcho-claude-code-plugin/issues)
+- **Plastic Labs**: [plasticlabs.ai](https://plasticlabs.ai)
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE)
