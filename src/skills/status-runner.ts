@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Runner script for the honcho-status skill.
+ * Runner script for the status skill.
  * Shows current Honcho memory status and configuration.
  */
 import {
@@ -22,7 +22,7 @@ function status(): void {
   const config = loadConfig();
   if (!config) {
     console.log(s.warn("Not configured"));
-    console.log(s.dim("Run: /honcho-setup or set HONCHO_API_KEY environment variable"));
+    console.log(s.dim("Set HONCHO_API_KEY environment variable"));
     return;
   }
 
