@@ -1,27 +1,28 @@
 {
-  "name": "honcho-memory",
+  "name": "honcho",
   "owner": {
     "name": "Plastic Labs",
     "email": "hello@plasticlabs.ai"
   },
   "metadata": {
-    "description": "Persistent memory for Claude Code using Honcho",
+    "description": "Honcho plugins for Claude Code - memory, development tools, and more",
     "version": "0.1.0"
   },
   "plugins": [
     {
-      "name": "honcho",
-      "source": "./",
-      "description": "Persistent memory for Claude Code sessions using Honcho by Plastic Labs",
+      "name": "code",
+      "source": "./plugins/code",
+      "description": "Persistent memory for Claude Code sessions using Honcho",
       "version": "0.1.0",
-      "author": {
-        "name": "Plastic Labs",
-        "email": "hello@plasticlabs.ai"
-      },
-      "homepage": "https://honcho.dev",
-      "repository": "https://github.com/plastic-labs/honcho-claude-code-plugin",
-      "license": "MIT",
-      "keywords": ["memory", "context", "ai", "honcho", "persistence"],
+      "keywords": ["memory", "context", "persistence"],
+      "strict": false
+    },
+    {
+      "name": "dev",
+      "source": "./plugins/dev",
+      "description": "Skills for building AI applications with the Honcho SDK",
+      "version": "0.1.0",
+      "keywords": ["sdk", "development", "migration"],
       "strict": false
     }
   ]
