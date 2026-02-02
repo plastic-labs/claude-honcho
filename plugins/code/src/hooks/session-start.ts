@@ -15,6 +15,7 @@ import { Spinner } from "../spinner.js";
 import { displayHonchoStartup } from "../pixel.js";
 import { captureGitState, getRecentCommits, isGitRepo, inferFeatureContext } from "../git.js";
 import { logHook, logApiCall, logCache, logFlow, logAsync, setLogContext } from "../log.js";
+import { readStdin } from "../stdin.js";
 
 
 interface HookInput {
@@ -87,7 +88,7 @@ export async function handleSessionStart(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = await readStdin();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -390,3 +391,6 @@ export async function handleSessionStart(): Promise<void> {
     process.exit(1);
   }
 }
+
+// Execute when run directly
+await handleSessionStart();

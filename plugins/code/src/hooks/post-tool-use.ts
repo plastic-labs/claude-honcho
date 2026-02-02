@@ -3,6 +3,7 @@ import { loadConfig, getSessionForPath, getHonchoClientOptions, isPluginEnabled 
 import { basename } from "path";
 import { appendClaudeWork, getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { readStdin } from "../stdin.js";
 
 
 interface HookInput {
@@ -205,7 +206,7 @@ export async function handlePostToolUse(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = await readStdin();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -263,3 +264,6 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
     }),
   ]);
 }
+
+// Execute when run directly
+await handlePostToolUse();

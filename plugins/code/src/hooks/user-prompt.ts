@@ -12,6 +12,7 @@ import {
   getClaudeInstanceId,
 } from "../cache.js";
 import { logHook, logApiCall, logCache, setLogContext } from "../log.js";
+import { readStdin } from "../stdin.js";
 
 interface HookInput {
   prompt?: string;
@@ -100,7 +101,7 @@ export async function handleUserPrompt(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = await readStdin();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -303,3 +304,6 @@ function outputContext(peerName: string, contextParts: string[]): void {
   };
   console.log(JSON.stringify(output));
 }
+
+// Execute when run directly
+await handleUserPrompt();

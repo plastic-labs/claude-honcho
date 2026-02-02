@@ -3,6 +3,7 @@ import { loadConfig, getSessionForPath, getHonchoClientOptions, isPluginEnabled 
 import { basename } from "path";
 import { Spinner } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { readStdin } from "../stdin.js";
 
 
 interface HookInput {
@@ -121,7 +122,7 @@ export async function handlePreCompact(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = await readStdin();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -232,3 +233,6 @@ export async function handlePreCompact(): Promise<void> {
     process.exit(0);
   }
 }
+
+// Execute when run directly
+await handlePreCompact();

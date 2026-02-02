@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 /**
  * Runner script for the status skill.
  * Shows current Honcho memory status and configuration.

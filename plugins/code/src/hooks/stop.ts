@@ -4,6 +4,7 @@ import { basename } from "path";
 import { existsSync, readFileSync } from "fs";
 import { getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { readStdin } from "../stdin.js";
 
 interface HookInput {
   session_id?: string;
@@ -117,7 +118,7 @@ export async function handleStop(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = await readStdin();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -176,3 +177,6 @@ export async function handleStop(): Promise<void> {
 
   process.exit(0);
 }
+
+// Execute when run directly
+await handleStop();

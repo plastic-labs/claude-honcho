@@ -22,5 +22,5 @@ Run `/honcho:status` to see the current state of the Honcho memory system.
 ## Implementation
 
 ```bash
-bun run ${CLAUDE_PLUGIN_ROOT}/src/skills/status-runner.ts
+node ${CLAUDE_PLUGIN_ROOT}/dist/skills/status-runner.js
 ```

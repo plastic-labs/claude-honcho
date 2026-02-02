@@ -12,6 +12,7 @@ import {
 } from "../cache.js";
 import { playCooldown } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { readStdin } from "../stdin.js";
 
 
 interface HookInput {
@@ -197,7 +198,7 @@ export async function handleSessionEnd(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = await readStdin();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -344,3 +345,6 @@ export async function handleSessionEnd(): Promise<void> {
     process.exit(1);
   }
 }
+
+// Execute when run directly
+await handleSessionEnd();

@@ -1,8 +1,9 @@
 # Dependencies
 node_modules/
 
-# Build output
+# Build output (but not plugin dist - those are needed for distribution)
 dist/
+!plugins/*/dist/
 
 # Bun
 bun.lockb
@@ -57,7 +58,6 @@ temp/
 # Optional npm cache
 .npm/
 
-# Package manager locks (we use bun.lock)
-package-lock.json
+# Package manager locks (allow both npm and bun)
 yarn.lock
 pnpm-lock.yaml
