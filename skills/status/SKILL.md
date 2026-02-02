@@ -17,7 +17,7 @@ Display the current Honcho memory system status, including configuration, sessio
 
 ## Usage
 
-Run `/honcho-status` to see the current state of the Honcho memory system.
+Run `/honcho:status` to see the current state of the Honcho memory system.
 
 ## Implementation
 

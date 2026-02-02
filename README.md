@@ -99,7 +99,7 @@ export HONCHO_WORKSPACE="my-projects"
 
 ## Verifying It Works
 
-After installation, start Claude Code. Just ask Claude if Honcho context is available, or run `/honcho:honcho-status`.
+After installation, start Claude Code. Just ask Claude if Honcho context is available, or run `/honcho:status`.
 
 ---
 
@@ -107,7 +107,7 @@ After installation, start Claude Code. Just ask Claude if Honcho context is avai
 
 | Command | Description |
 |---------|-------------|
-| `/honcho-status` | Show current memory status and configuration |
+| `/honcho:status` | Show current memory status and configuration |
 
 ---
 
