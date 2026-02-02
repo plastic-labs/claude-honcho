@@ -130,13 +130,9 @@ If you don't see this, check:
 
 ## Skills (Slash Commands)
 
-The plugin adds these commands to Claude Code:
-
 | Command | Description |
 |---------|-------------|
 | `/honcho-status` | Show current memory status and configuration |
-| `/honcho-setup` | Interactive setup (alternative to env vars) |
-| `/honcho-handoff` | Generate a debugging summary for handoff |
 
 ---
 
@@ -184,7 +180,7 @@ Then restart Claude Code. Set back to `true` (or remove the line) to re-enable.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Claude Code                               │
+│                        Claude Code                              │
 ├─────────────────────────────────────────────────────────────────┤
 │  SessionStart   │  UserPrompt     │  PostToolUse   │ SessionEnd │
 │  ───────────    │  ───────────    │  ────────────  │ ────────── │
@@ -194,9 +190,9 @@ Then restart Claude Code. Set back to `true` (or remove the line) to re-enable.
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Honcho API                               │
-│                                                                  │
-│   Your messages and Claude's work → Persistent Memory →          │
+│                         Honcho API                              │
+│                                                                 │
+│   Your messages and Claude's work → Persistent Memory →         │
 │   Retrieved as context at session start                         │
 └─────────────────────────────────────────────────────────────────┘
 ```
