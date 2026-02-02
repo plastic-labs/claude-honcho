@@ -99,32 +99,7 @@ export HONCHO_WORKSPACE="my-projects"
 
 ## Verifying It Works
 
-After installation, start Claude Code. You should see:
-
-```
-    ██  ██░░        Honcho Memory
-  ░░████████████░░    persistent context
-░░██████████████░░
-░░████░░  ██░░░░
-░░████░░  ██░░░░
-░░██████░░░░██░░
-  ░░████████  ░░
-    ░░░░░░
-
-[claude/Honcho Memory Loaded]
-
-## Honcho Memory System Active
-- User: alice
-- AI: claude
-- Workspace: my-projects
-- Session: my-project-name
-...
-```
-
-If you don't see this, check:
-1. `echo $HONCHO_API_KEY` — is it set?
-2. Restart your terminal after editing shell config
-3. Restart Claude Code after installing the plugin
+After installation, start Claude Code. Just ask Claude if Honcho context is available, or run `/honcho:honcho-status`.
 
 ---
 
