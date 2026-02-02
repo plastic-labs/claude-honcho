@@ -1,5 +1,4 @@
 ---
-name: migrate-py
 description: Migrates Honcho Python SDK code from v1.6.0 to v2.0.0. Use when upgrading honcho package, fixing breaking changes after upgrade, or when errors mention AsyncHoncho, observations, Representation class, .core property, or get_config methods.
 user-invocable: true
 ---

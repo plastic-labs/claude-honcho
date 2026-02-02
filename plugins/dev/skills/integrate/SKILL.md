@@ -1,5 +1,4 @@
 ---
-name: integrate
 description: Integrate Honcho memory and social cognition into existing Python or TypeScript codebases. Use when adding Honcho SDK, setting up peers, configuring sessions, or implementing the dialectic chat endpoint for AI agents.
 allowed-tools: Read, Glob, Grep, Bash(uv:*), Bash(bun:*), Bash(npm:*), Edit, Write, WebFetch, AskUserQuestion
 user-invocable: true
