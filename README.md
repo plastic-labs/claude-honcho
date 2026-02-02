@@ -9,6 +9,16 @@ Give Claude Code long-term memory that survives context wipes, session restarts,
 
 ---
 
+## Prerequisites
+
+**Bun** is required to run this plugin. Install it with:
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+---
+
 ## Quick Start (5 minutes)
 
 ### Step 1: Get Your Honcho API Key
