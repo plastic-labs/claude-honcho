@@ -104,9 +104,9 @@ The honcho plugin provides these tools via MCP:
 
 | Tool | Description |
 |------|-------------|
-| `honcho_search` | Semantic search across session messages |
-| `honcho_chat` | Query Honcho's knowledge about the user |
-| `honcho_create_conclusion` | Save insights about the user to memory |
+| `search` | Semantic search across session messages |
+| `chat` | Query Honcho's knowledge about the user |
+| `create_conclusion` | Save insights about the user to memory |
 
 ## Skills
 

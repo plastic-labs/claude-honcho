@@ -43,7 +43,7 @@ export async function runMcpServer(): Promise<void> {
     return {
       tools: [
         {
-          name: "honcho_search",
+          name: "search",
           description: "Search across messages in the current Honcho session using semantic search",
           inputSchema: {
             type: "object",
@@ -54,7 +54,7 @@ export async function runMcpServer(): Promise<void> {
               },
               limit: {
                 type: "number",
-                description: "Max results (1-100)",
+                description: "Max results (1-50)",
                 default: 10,
               },
             },
@@ -62,7 +62,7 @@ export async function runMcpServer(): Promise<void> {
           },
         },
         {
-          name: "honcho_chat",
+          name: "chat",
           description: "Query Honcho's knowledge about the user using dialectic reasoning",
           inputSchema: {
             type: "object",
@@ -76,7 +76,7 @@ export async function runMcpServer(): Promise<void> {
           },
         },
         {
-          name: "honcho_create_conclusion",
+          name: "create_conclusion",
           description: "Save a key insight or biographical detail about the user to Honcho's memory",
           inputSchema: {
             type: "object",
@@ -103,7 +103,7 @@ export async function runMcpServer(): Promise<void> {
       const session = await honcho.session(sessionName);
 
       switch (name) {
-        case "honcho_search": {
+        case "search": {
           const query = args?.query as string;
           const limit = (args?.limit as number) ?? 10;
 
@@ -111,7 +111,7 @@ export async function runMcpServer(): Promise<void> {
 
           const results = messages.map((msg: any) => ({
             content: msg.content,
-            role: msg.metadata?.role || "unknown",
+            peerId: msg.peer,
             createdAt: msg.createdAt || msg.created_at,
           }));
 
@@ -125,7 +125,7 @@ export async function runMcpServer(): Promise<void> {
           };
         }
 
-        case "honcho_chat": {
+        case "chat": {
           const query = args?.query as string;
           const userPeer = await honcho.peer(config.peerName);
 
@@ -144,7 +144,7 @@ export async function runMcpServer(): Promise<void> {
           };
         }
 
-        case "honcho_create_conclusion": {
+        case "create_conclusion": {
           const content = args?.content as string;
           const userPeer = await honcho.peer(config.peerName);
 
