@@ -7,9 +7,9 @@ A plugin marketplace for Claude Code, powered by [Honcho](https://honcho.dev) fr
 
 ## Plugins
 
-| Plugin | Description |
-|--------|-------------|
-| **[honcho](#honcho-plugin)** | Persistent memory for Claude Code sessions |
+| Plugin                               | Description                                     |
+| ------------------------------------ | ----------------------------------------------- |
+| **[honcho](#honcho-plugin)**         | Persistent memory for Claude Code sessions      |
 | **[honcho-dev](#honcho-dev-plugin)** | Skills for building AI apps with the Honcho SDK |
 
 ---
@@ -99,7 +99,6 @@ Claude will interview you about your personal preferences in order to kickstart 
 of you. What it learns will be saved in Honcho and remembered forever. The interview is specific
 to the peer name you chose in your environment: it will carry across different projects!
 
-
 ## What You Get
 
 - **Persistent Memory** — Claude remembers your preferences, projects, and context across sessions
@@ -113,30 +112,30 @@ to the peer name you chose in your environment: it will carry across different p
 
 The honcho plugin provides these tools via MCP:
 
-| Tool | Description |
-|------|-------------|
-| `search` | Semantic search across session messages |
-| `chat` | Query Honcho's knowledge about the user |
-| `create_conclusion` | Save insights about the user to memory |
+| Tool                | Description                             |
+| ------------------- | --------------------------------------- |
+| `search`            | Semantic search across session messages |
+| `chat`              | Query Honcho's knowledge about the user |
+| `create_conclusion` | Save insights about the user to memory  |
 
 ## Skills
 
-| Command | Description |
-|---------|-------------|
-| `/honcho:status` | Show current memory status and configuration |
+| Command             | Description                                                 |
+| ------------------- | ----------------------------------------------------------- |
+| `/honcho:status`    | Show current memory status and configuration                |
 | `/honcho:interview` | Interview to capture stable, cross-project user preferences |
 
 ## Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `HONCHO_API_KEY` | **Yes** | — | Your Honcho API key from [app.honcho.dev](https://app.honcho.dev) |
-| `HONCHO_PEER_NAME` | No | `$USER` | Your identity in the memory system |
-| `HONCHO_WORKSPACE` | No | `claude_code` | Workspace name (groups your sessions) |
-| `HONCHO_CLAUDE_PEER` | No | `claude` | How the AI is identified |
-| `HONCHO_ENDPOINT` | No | `production` | `production`, `local`, or a custom URL |
-| `HONCHO_ENABLED` | No | `true` | Set to `false` to disable |
-| `HONCHO_SAVE_MESSAGES` | No | `true` | Set to `false` to stop saving messages |
+| Variable               | Required | Default       | Description                                                       |
+| ---------------------- | -------- | ------------- | ----------------------------------------------------------------- |
+| `HONCHO_API_KEY`       | **Yes**  | —             | Your Honcho API key from [app.honcho.dev](https://app.honcho.dev) |
+| `HONCHO_PEER_NAME`     | No       | `$USER`       | Your identity in the memory system                                |
+| `HONCHO_WORKSPACE`     | No       | `claude_code` | Workspace name (groups your sessions)                             |
+| `HONCHO_CLAUDE_PEER`   | No       | `claude`      | How the AI is identified                                          |
+| `HONCHO_ENDPOINT`      | No       | `production`  | `production`, `local`, or a custom URL                            |
+| `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
+| `HONCHO_SAVE_MESSAGES` | No       | `true`        | Set to `false` to stop saving messages                            |
 
 ### Example Configuration
 
@@ -180,15 +179,19 @@ The plugin hooks into Claude Code's lifecycle events:
 ### "Not configured" or no memory loading
 
 1. **Check your API key is set:**
+
    ```bash
    echo $HONCHO_API_KEY
    ```
+
    If empty, add it to your shell config and `source` it.
 
 2. **Check the plugin is installed:**
+
    ```
    /plugin
    ```
+
    You should see `honcho@honcho` in the list.
 
 3. **Restart Claude Code** after making changes.
@@ -223,10 +226,10 @@ This plugin provides skills to help you integrate Honcho into your projects and 
 
 ## Skills
 
-| Command | Description |
-|---------|-------------|
-| `/honcho-dev:integrate` | Add Honcho to your project |
-| `/honcho-dev:migrate-py` | Migrate Python code to the latest Honcho SDK |
+| Command                  | Description                                      |
+| ------------------------ | ------------------------------------------------ |
+| `/honcho-dev:integrate`  | Add Honcho to your project                       |
+| `/honcho-dev:migrate-py` | Migrate Python code to the latest Honcho SDK     |
 | `/honcho-dev:migrate-ts` | Migrate TypeScript code to the latest Honcho SDK |
 
 ## Installation
@@ -249,24 +252,18 @@ Then remove the environment variables from your shell config if desired.
 
 ---
 
-## Links
-
-- **Honcho**: [honcho.dev](https://honcho.dev) — The memory API
-- **Documentation**: [docs.honcho.dev](https://docs.honcho.dev)
-- **Issues**: [GitHub Issues](https://github.com/plastic-labs/claude-honcho/issues)
-- **Plastic Labs**: [plasticlabs.ai](https://plasticlabs.ai)
-
----
-
 ## License
 
 MIT — see [LICENSE](LICENSE)
 
 ---
 
-## Community
+## Links
 
-- GitHub Issues: [Open an Issue](https://github.com/plastic-labs/claude-honcho/issues)
-- Discord: [Join the Community](https://discord.gg/plasticlabs)
-- X (Twitter): [@honchodotdev](https://x.com/honchodotdev)
-- Blog: [Read about Honcho and Agents](https://blog.plasticlabs.ai)
+- **Issues**: [GitHub Issues](https://github.com/plastic-labs/honcho/issues)
+- **Discord**: [Join the Community](https://discord.gg/plasticlabs)
+- **X (Twitter)**: [@honchodotdev](https://x.com/honchodotdev)
+- **Plastic Labs**: [plasticlabs.ai](https://plasticlabs.ai)
+- **Honcho**: [honcho.dev](https://honcho.dev) — The memory API
+- **Documentation**: [docs.honcho.dev](https://docs.honcho.dev)
+- **Blog**: [Read about Honcho, Agents, and Memory](https://blog.plasticlabs.ai)
