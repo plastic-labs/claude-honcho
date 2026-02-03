@@ -29,6 +29,8 @@ Then install the plugin(s) you want:
 /plugin install honcho-dev@honcho
 ```
 
+You'll need to restart Claude Code for the plugins to take effect. Follow the instructions below for setting up each plugin.
+
 ---
 
 # `honcho` Plugin
@@ -256,5 +258,5 @@ MIT — see [LICENSE](LICENSE)
 
 - GitHub Issues: [Open an Issue](https://github.com/plastic-labs/honcho-claude-code-plugin/issues)
 - Discord: [Join the Community](https://discord.gg/plasticlabs)
-- X (Twitter): [@honaborern](https://x.com/honaborern)
+- X (Twitter): [@honchodotdev](https://x.com/honchodotdev)
 - Blog: [Read about Honcho and Agents](https://blog.plasticlabs.ai)
