@@ -2,7 +2,7 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "name": "honcho-claude-code-plugin",
+      "name": "claude-honcho",
       "dependencies": {
         "@honcho-ai/sdk": "^2.0.0",
         "@modelcontextprotocol/sdk": "^1.0.0",
