@@ -51,7 +51,7 @@ source ~/.zshrc  # or ~/.bashrc
 Open Claude Code and run:
 
 ```
-/plugin marketplace add plastic-labs/honcho-claude-code-plugin
+/plugin marketplace add plastic-labs/claude-honcho
 ```
 
 Then install:
@@ -84,15 +84,15 @@ claude
 
 ## Environment Variables Reference
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `HONCHO_API_KEY` | **Yes** | — | Your Honcho API key from [app.honcho.dev](https://app.honcho.dev) |
-| `HONCHO_PEER_NAME` | No | `$USER` | Your identity in the memory system |
-| `HONCHO_WORKSPACE` | No | `claude_code` | Workspace name (groups your sessions) |
-| `HONCHO_CLAUDE_PEER` | No | `claude` | How the AI is identified |
-| `HONCHO_ENDPOINT` | No | `production` | `production`, `local`, or a custom URL |
-| `HONCHO_ENABLED` | No | `true` | Set to `false` to disable |
-| `HONCHO_SAVE_MESSAGES` | No | `true` | Set to `false` to stop saving messages |
+| Variable               | Required | Default       | Description                                                       |
+| ---------------------- | -------- | ------------- | ----------------------------------------------------------------- |
+| `HONCHO_API_KEY`       | **Yes**  | —             | Your Honcho API key from [app.honcho.dev](https://app.honcho.dev) |
+| `HONCHO_PEER_NAME`     | No       | `$USER`       | Your identity in the memory system                                |
+| `HONCHO_WORKSPACE`     | No       | `claude_code` | Workspace name (groups your sessions)                             |
+| `HONCHO_CLAUDE_PEER`   | No       | `claude`      | How the AI is identified                                          |
+| `HONCHO_ENDPOINT`      | No       | `production`  | `production`, `local`, or a custom URL                            |
+| `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
+| `HONCHO_SAVE_MESSAGES` | No       | `true`        | Set to `false` to stop saving messages                            |
 
 ### Example Full Configuration
 
@@ -115,8 +115,8 @@ After installation, start Claude Code. Just ask Claude if Honcho context is avai
 
 ## Skills (Slash Commands)
 
-| Command | Description |
-|---------|-------------|
+| Command          | Description                                  |
+| ---------------- | -------------------------------------------- |
 | `/honcho:status` | Show current memory status and configuration |
 
 ---
@@ -126,15 +126,19 @@ After installation, start Claude Code. Just ask Claude if Honcho context is avai
 ### "Not configured" or no memory loading
 
 1. **Check your API key is set:**
+
    ```bash
    echo $HONCHO_API_KEY
    ```
+
    If empty, add it to your shell config and `source` it.
 
 2. **Check the plugin is installed:**
+
    ```
    /plugin
    ```
+
    Go to "Installed" tab — you should see `honcho@honcho-memory`.
 
 3. **Restart Claude Code** after making changes.
@@ -183,6 +187,7 @@ Then restart Claude Code. Set back to `true` (or remove the line) to re-enable.
 ```
 
 The plugin hooks into Claude Code's lifecycle events:
+
 - **SessionStart**: Loads your context and history from Honcho
 - **UserPrompt**: Saves your messages and retrieves relevant context
 - **PostToolUse**: Logs Claude's actions (file edits, commands, etc.)
@@ -213,3 +218,12 @@ Then remove the environment variables from your shell config if desired.
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
+---
+
+## Community
+
+- GitHub Issues: [Open an Issue](https://github.com/plastic-labs/honcho/issues)
+- Discord: [Join the Community](https://discord.gg/honcho)
+- X (Twitter): [Follow @honchodotdev](https://x.com/honchodotdev)
+- Blog: [Read about Honcho and Agents](https://blog.plasticlabs.ai)
