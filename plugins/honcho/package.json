@@ -1,5 +1,5 @@
 {
-  "name": "honcho-claude-code-plugin",
+  "name": "claude-honcho",
   "version": "0.1.0",
   "description": "Persistent memory for Claude Code sessions using Honcho by Plastic Labs",
   "type": "module",
@@ -15,7 +15,8 @@
   "author": "Plastic Labs",
   "license": "MIT",
   "dependencies": {
-    "@honcho-ai/sdk": "^2.0.0"
+    "@honcho-ai/sdk": "^2.0.0",
+    "@modelcontextprotocol/sdk": "^1.0.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

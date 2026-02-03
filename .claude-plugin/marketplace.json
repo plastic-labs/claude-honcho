@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "honcho",
-      "source": "./plugins/code",
+      "source": "./plugins/honcho",
       "description": "Persistent memory for Claude Code sessions using Honcho",
       "version": "0.1.0",
       "keywords": ["memory", "context", "persistence"],
@@ -19,7 +19,7 @@
     },
     {
       "name": "honcho-dev",
-      "source": "./plugins/dev",
+      "source": "./plugins/honcho-dev",
       "description": "Skills for building AI applications with the Honcho SDK",
       "version": "0.1.0",
       "keywords": ["sdk", "development", "migration"],
