@@ -7,7 +7,7 @@
     "email": "hello@plasticlabs.ai"
   },
   "homepage": "https://honcho.dev",
-  "repository": "https://github.com/plastic-labs/honcho-claude-code-plugin",
+  "repository": "https://github.com/plastic-labs/claude-honcho",
   "license": "MIT",
   "keywords": ["memory", "context", "ai", "honcho", "persistence"],
   "skills": "./skills/"

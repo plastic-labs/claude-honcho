@@ -19,7 +19,7 @@ A plugin marketplace for Claude Code, powered by [Honcho](https://honcho.dev) fr
 Add the marketplace to Claude Code:
 
 ```
-/plugin marketplace add plastic-labs/honcho-claude-code-plugin
+/plugin marketplace add plastic-labs/claude-honcho
 ```
 
 Then install the plugin(s) you want:
@@ -77,7 +77,7 @@ source ~/.zshrc  # or ~/.bashrc
 ### Step 3: Install the Plugin
 
 ```
-/plugin marketplace add plastic-labs/honcho-claude-code-plugin
+/plugin marketplace add plastic-labs/claude-honcho
 /plugin install honcho@honcho
 ```
 
@@ -85,11 +85,20 @@ source ~/.zshrc  # or ~/.bashrc
 
 ```bash
 # Exit Claude Code (ctrl+c or /exit)
-# Start it again
+# Start it again -- you should see the Honcho pixel art and memory loading on startup.
 claude
 ```
 
-**That's it!** You should see the Honcho pixel art and memory loading on startup.
+### Step 5: (Optional) Kick off your conversation with an interview
+
+```
+/honcho:interview
+```
+
+Claude will interview you about your personal preferences in order to kickstart a representation
+of you. What it learns will be saved in Honcho and remembered forever. The interview is specific
+to the peer name you chose in your environment: it will carry across different projects!
+
 
 ## What You Get
 
@@ -115,6 +124,7 @@ The honcho plugin provides these tools via MCP:
 | Command | Description |
 |---------|-------------|
 | `/honcho:status` | Show current memory status and configuration |
+| `/honcho:interview` | Interview to capture stable, cross-project user preferences |
 
 ## Environment Variables
 
@@ -243,7 +253,7 @@ Then remove the environment variables from your shell config if desired.
 
 - **Honcho**: [honcho.dev](https://honcho.dev) — The memory API
 - **Documentation**: [docs.honcho.dev](https://docs.honcho.dev)
-- **Issues**: [GitHub Issues](https://github.com/plastic-labs/honcho-claude-code-plugin/issues)
+- **Issues**: [GitHub Issues](https://github.com/plastic-labs/claude-honcho/issues)
 - **Plastic Labs**: [plasticlabs.ai](https://plasticlabs.ai)
 
 ---
@@ -256,7 +266,7 @@ MIT — see [LICENSE](LICENSE)
 
 ## Community
 
-- GitHub Issues: [Open an Issue](https://github.com/plastic-labs/honcho-claude-code-plugin/issues)
+- GitHub Issues: [Open an Issue](https://github.com/plastic-labs/claude-honcho/issues)
 - Discord: [Join the Community](https://discord.gg/plasticlabs)
 - X (Twitter): [@honchodotdev](https://x.com/honchodotdev)
 - Blog: [Read about Honcho and Agents](https://blog.plasticlabs.ai)
