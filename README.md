@@ -1,13 +1,41 @@
-# Honcho Memory for Claude Code
+# Honcho Plugins for Claude Code
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Honcho](https://img.shields.io/badge/Honcho-Memory%20API-blue)](https://honcho.dev)
 
-**Persistent memory for Claude Code using [Honcho](https://honcho.dev) by Plastic Labs.**
+A plugin marketplace for Claude Code, powered by [Honcho](https://honcho.dev) from Plastic Labs.
 
-Give Claude Code long-term memory that survives context wipes, session restarts, and even `ctrl+c`. Claude remembers what you're working on, your preferences, and what it was doing — across all your projects.
+## Plugins
+
+| Plugin | Description |
+|--------|-------------|
+| **[honcho](#honcho-plugin)** | Persistent memory for Claude Code sessions |
+| **[honcho-dev](#honcho-dev-plugin)** | Skills for building AI apps with the Honcho SDK |
 
 ---
+
+## Installation
+
+Add the marketplace to Claude Code:
+
+```
+/plugin marketplace add plastic-labs/honcho-claude-code-plugin
+```
+
+Then install the plugin(s) you want:
+
+```
+/plugin install honcho@honcho
+/plugin install honcho-dev@honcho
+```
+
+---
+
+# `honcho` Plugin
+
+**Persistent memory for Claude Code using [Honcho](https://honcho.dev).**
+
+Give Claude Code long-term memory that survives context wipes, session restarts, and even `ctrl+c`. Claude remembers what you're working on, your preferences, and what it was doing — across all your projects.
 
 ## Prerequisites
 
@@ -17,9 +45,7 @@ Give Claude Code long-term memory that survives context wipes, session restarts,
 curl -fsSL https://bun.sh/install | bash
 ```
 
----
-
-## Quick Start (5 minutes)
+## Quick Start
 
 ### Step 1: Get Your Honcho API Key
 
@@ -48,16 +74,9 @@ source ~/.zshrc  # or ~/.bashrc
 
 ### Step 3: Install the Plugin
 
-Open Claude Code and run:
-
 ```
-/plugin marketplace add plastic-labs/claude-honcho
-```
-
-Then install:
-
-```
-/plugin install honcho@honcho-memory
+/plugin marketplace add plastic-labs/honcho-claude-code-plugin
+/plugin install honcho@honcho
 ```
 
 ### Step 4: Restart Claude Code
@@ -70,8 +89,6 @@ claude
 
 **That's it!** You should see the Honcho pixel art and memory loading on startup.
 
----
-
 ## What You Get
 
 - **Persistent Memory** — Claude remembers your preferences, projects, and context across sessions
@@ -79,91 +96,44 @@ claude
 - **Git Awareness** — Detects branch switches, commits, and changes made outside Claude
 - **Per-Project Sessions** — Each directory has its own conversation history
 - **AI Self-Awareness** — Claude knows what it was working on, even after restarts
+- **MCP Tools** — Search memory, query knowledge about you, and save insights
 
----
+## MCP Tools
 
-## Environment Variables Reference
+The honcho plugin provides these tools via MCP:
 
-| Variable               | Required | Default       | Description                                                       |
-| ---------------------- | -------- | ------------- | ----------------------------------------------------------------- |
-| `HONCHO_API_KEY`       | **Yes**  | —             | Your Honcho API key from [app.honcho.dev](https://app.honcho.dev) |
-| `HONCHO_PEER_NAME`     | No       | `$USER`       | Your identity in the memory system                                |
-| `HONCHO_WORKSPACE`     | No       | `claude_code` | Workspace name (groups your sessions)                             |
-| `HONCHO_CLAUDE_PEER`   | No       | `claude`      | How the AI is identified                                          |
-| `HONCHO_ENDPOINT`      | No       | `production`  | `production`, `local`, or a custom URL                            |
-| `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
-| `HONCHO_SAVE_MESSAGES` | No       | `true`        | Set to `false` to stop saving messages                            |
+| Tool | Description |
+|------|-------------|
+| `honcho_search` | Semantic search across session messages |
+| `honcho_chat` | Query Honcho's knowledge about the user |
+| `honcho_create_conclusion` | Save insights about the user to memory |
 
-### Example Full Configuration
+## Skills
+
+| Command | Description |
+|---------|-------------|
+| `/honcho:status` | Show current memory status and configuration |
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HONCHO_API_KEY` | **Yes** | — | Your Honcho API key from [app.honcho.dev](https://app.honcho.dev) |
+| `HONCHO_PEER_NAME` | No | `$USER` | Your identity in the memory system |
+| `HONCHO_WORKSPACE` | No | `claude_code` | Workspace name (groups your sessions) |
+| `HONCHO_CLAUDE_PEER` | No | `claude` | How the AI is identified |
+| `HONCHO_ENDPOINT` | No | `production` | `production`, `local`, or a custom URL |
+| `HONCHO_ENABLED` | No | `true` | Set to `false` to disable |
+| `HONCHO_SAVE_MESSAGES` | No | `true` | Set to `false` to stop saving messages |
+
+### Example Configuration
 
 ```bash
 # ~/.zshrc or ~/.bashrc
-
-# Honcho Memory for Claude Code
 export HONCHO_API_KEY="hch-v2-abc123..."
 export HONCHO_PEER_NAME="alice"
 export HONCHO_WORKSPACE="my-projects"
 ```
-
----
-
-## Verifying It Works
-
-After installation, start Claude Code. Just ask Claude if Honcho context is available, or run `/honcho:status`.
-
----
-
-## Skills (Slash Commands)
-
-| Command          | Description                                  |
-| ---------------- | -------------------------------------------- |
-| `/honcho:status` | Show current memory status and configuration |
-
----
-
-## Troubleshooting
-
-### "Not configured" or no memory loading
-
-1. **Check your API key is set:**
-
-   ```bash
-   echo $HONCHO_API_KEY
-   ```
-
-   If empty, add it to your shell config and `source` it.
-
-2. **Check the plugin is installed:**
-
-   ```
-   /plugin
-   ```
-
-   Go to "Installed" tab — you should see `honcho@honcho-memory`.
-
-3. **Restart Claude Code** after making changes.
-
-### Memory not persisting between sessions
-
-Make sure `HONCHO_SAVE_MESSAGES` is not set to `false`.
-
-### Using a local Honcho instance
-
-```bash
-export HONCHO_ENDPOINT="local"  # Uses localhost:8000
-# or
-export HONCHO_ENDPOINT="http://your-server:8000/v3"
-```
-
-### Temporarily disabling memory
-
-```bash
-export HONCHO_ENABLED="false"
-```
-
-Then restart Claude Code. Set back to `true` (or remove the line) to re-enable.
-
----
 
 ## How It Works
 
@@ -193,13 +163,74 @@ The plugin hooks into Claude Code's lifecycle events:
 - **PostToolUse**: Logs Claude's actions (file edits, commands, etc.)
 - **SessionEnd**: Uploads any remaining messages and generates a summary
 
+## Troubleshooting
+
+### "Not configured" or no memory loading
+
+1. **Check your API key is set:**
+   ```bash
+   echo $HONCHO_API_KEY
+   ```
+   If empty, add it to your shell config and `source` it.
+
+2. **Check the plugin is installed:**
+   ```
+   /plugin
+   ```
+   You should see `honcho@honcho` in the list.
+
+3. **Restart Claude Code** after making changes.
+
+### Memory not persisting between sessions
+
+Make sure `HONCHO_SAVE_MESSAGES` is not set to `false`.
+
+### Using a local Honcho instance
+
+```bash
+export HONCHO_ENDPOINT="local"  # Uses localhost:8000
+# or
+export HONCHO_ENDPOINT="http://your-server:8000/v3"
+```
+
+### Temporarily disabling memory
+
+```bash
+export HONCHO_ENABLED="false"
+```
+
+Then restart Claude Code. Set back to `true` (or remove the line) to re-enable.
+
+---
+
+# `honcho-dev` Plugin
+
+**Skills for building AI applications with the Honcho SDK.**
+
+This plugin provides skills to help you integrate Honcho into your projects and migrate between SDK versions.
+
+## Skills
+
+| Command | Description |
+|---------|-------------|
+| `/honcho-dev:integrate` | Add Honcho to your project |
+| `/honcho-dev:migrate-py` | Migrate Python code to the latest Honcho SDK |
+| `/honcho-dev:migrate-ts` | Migrate TypeScript code to the latest Honcho SDK |
+
+## Installation
+
+```
+/plugin install honcho-dev@honcho
+```
+
 ---
 
 ## Uninstalling
 
 ```
-/plugin uninstall honcho@honcho-memory
-/plugin marketplace remove honcho-memory
+/plugin uninstall honcho@honcho
+/plugin uninstall honcho-dev@honcho
+/plugin marketplace remove honcho
 ```
 
 Then remove the environment variables from your shell config if desired.
@@ -223,7 +254,7 @@ MIT — see [LICENSE](LICENSE)
 
 ## Community
 
-- GitHub Issues: [Open an Issue](https://github.com/plastic-labs/honcho/issues)
-- Discord: [Join the Community](https://discord.gg/honcho)
-- X (Twitter): [Follow @honchodotdev](https://x.com/honchodotdev)
+- GitHub Issues: [Open an Issue](https://github.com/plastic-labs/honcho-claude-code-plugin/issues)
+- Discord: [Join the Community](https://discord.gg/plasticlabs)
+- X (Twitter): [@honaborern](https://x.com/honaborern)
 - Blog: [Read about Honcho and Agents](https://blog.plasticlabs.ai)
