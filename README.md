@@ -1,4 +1,5 @@
 # Honcho Plugins for Claude Code
+[![Honcho Banner](./assets/honcho_clawd.png)](https://honcho.dev)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Honcho](https://img.shields.io/badge/Honcho-Memory%20API-blue)](https://honcho.dev)
