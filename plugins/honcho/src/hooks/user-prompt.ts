@@ -10,6 +10,7 @@ import {
   shouldRefreshKnowledgeGraph,
   markKnowledgeGraphRefreshed,
   getClaudeInstanceId,
+  chunkContent,
 } from "../cache.js";
 import { logHook, logApiCall, logCache, setLogContext } from "../log.js";
 
@@ -190,16 +191,18 @@ async function uploadMessageAsync(config: any, cwd: string, prompt: string): Pro
   const session = await honcho.session(sessionName);
   const userPeer = await honcho.peer(config.peerName);
 
-  // Include instance_id and session_affinity in metadata
+  // Chunk large messages to stay under API size limits
   const instanceId = getClaudeInstanceId();
-  await session.addMessages([
-    userPeer.message(prompt, {
+  const chunks = chunkContent(prompt);
+  const messages = chunks.map(chunk =>
+    userPeer.message(chunk, {
       metadata: {
         instance_id: instanceId || undefined,
         session_affinity: sessionName,
       }
-    }),
-  ]);
+    })
+  );
+  await session.addMessages(messages);
 }
 
 function formatCachedContext(context: any, peerName: string): string[] {
