@@ -26,7 +26,7 @@ export async function runMcpServer(): Promise<void> {
   const server = new Server(
     {
       name: "honcho",
-      version: "0.1.0",
+      version: "0.1.1",
     },
     {
       capabilities: {
