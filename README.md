@@ -128,11 +128,15 @@ The honcho plugin provides these tools via MCP:
 
 ## Environment Variables
 
-| Tool | Description |
-|------|-------------|
-| `search` | Semantic search across session messages |
-| `chat` | Query Honcho's knowledge about the user |
-| `create_conclusion` | Save insights about the user to memory |
+| Variable               | Required | Default       | Description                                                       |
+| ---------------------- | -------- | ------------- | ----------------------------------------------------------------- |
+| `HONCHO_API_KEY`       | **Yes**  | —             | Your Honcho API key from [app.honcho.dev](https://app.honcho.dev) |
+| `HONCHO_PEER_NAME`     | No       | `$USER`       | Your identity in the memory system                                |
+| `HONCHO_WORKSPACE`     | No       | `claude_code` | Workspace name (groups your sessions)                             |
+| `HONCHO_CLAUDE_PEER`   | No       | `claude`      | How the AI is identified                                          |
+| `HONCHO_ENDPOINT`      | No       | `production`  | `production`, `local`, or a custom URL                            |
+| `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
+| `HONCHO_SAVE_MESSAGES` | No       | `true`        | Set to `false` to stop saving messages                            |
 
 ### Example Configuration
 
@@ -176,12 +180,15 @@ The plugin hooks into Claude Code's lifecycle events:
 ### "Not configured" or no memory loading
 
 1. **Check your API key is set:**
+
    ```bash
    echo $HONCHO_API_KEY
    ```
+
    If empty, add it to your shell config and `source` it.
 
 2. **Check the plugin is installed:**
+
    ```
    /plugin
    ```
