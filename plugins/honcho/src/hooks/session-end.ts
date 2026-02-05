@@ -9,6 +9,7 @@ import {
   saveClaudeLocalContext,
   loadClaudeLocalContext,
   getClaudeInstanceId,
+  chunkContent,
 } from "../cache.js";
 import { playCooldown } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -237,18 +238,20 @@ export async function handleSessionEnd(): Promise<void> {
     const queuedMessages = getQueuedMessages(cwd);  // Filter by current session's cwd
     logHook("session-end", `Processing ${queuedMessages.length} queued messages`);
     if (queuedMessages.length > 0) {
-      // Skip oversized messages (likely pastes/dumps, not useful observations)
-      const validMessages = queuedMessages.filter((msg) => msg.content.length < 5000);
-      if (validMessages.length > 0) {
-        logApiCall("session.addMessages", "POST", `${validMessages.length} queued user messages`);
-        const userMessages = validMessages.map((msg) =>
-          userPeer.message(msg.content, {
+      // Chunk oversized messages instead of dropping them
+      const userMessages = queuedMessages.flatMap((msg) => {
+        const chunks = chunkContent(msg.content);
+        return chunks.map(chunk =>
+          userPeer.message(chunk, {
             metadata: {
               instance_id: msg.instanceId || undefined,
               session_affinity: sessionName,
             },
           })
         );
+      });
+      if (userMessages.length > 0) {
+        logApiCall("session.addMessages", "POST", `${queuedMessages.length} queued user messages (${userMessages.length} after chunking)`);
         await session.addMessages(userMessages);
       }
       markMessagesUploaded(cwd);  // Only clear this session's messages
@@ -278,19 +281,22 @@ export async function handleSessionEnd(): Promise<void> {
       // This is the KEY fix: capturing actual reasoning, not just tool calls
       if (assistantMessages.length > 0) {
         const meaningfulCount = assistantMessages.filter(m => m.isMeaningful).length;
-        logApiCall("session.addMessages", "POST", `${assistantMessages.length} assistant msgs (${meaningfulCount} meaningful)`);
 
-        const messagesToSend = assistantMessages.map((msg) =>
-          claudePeer.message(msg.content, {
-            metadata: {
-              instance_id: instanceId || undefined,
-              type: msg.isMeaningful ? 'assistant_prose' : 'assistant_brief',
-              meaningful: msg.isMeaningful || false,
-              session_affinity: sessionName,
-            },
-          })
-        );
+        const messagesToSend = assistantMessages.flatMap((msg) => {
+          const chunks = chunkContent(msg.content);
+          return chunks.map(chunk =>
+            claudePeer.message(chunk, {
+              metadata: {
+                instance_id: instanceId || undefined,
+                type: msg.isMeaningful ? 'assistant_prose' : 'assistant_brief',
+                meaningful: msg.isMeaningful || false,
+                session_affinity: sessionName,
+              },
+            })
+          );
+        });
 
+        logApiCall("session.addMessages", "POST", `${assistantMessages.length} assistant msgs (${meaningfulCount} meaningful, ${messagesToSend.length} after chunking)`);
         await session.addMessages(messagesToSend);
       }
     }

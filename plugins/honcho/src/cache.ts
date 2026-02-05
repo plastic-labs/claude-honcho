@@ -475,6 +475,48 @@ export function detectGitChanges(previous: GitState | null, current: GitState): 
 }
 
 // ============================================
+// Message Chunking - split large messages for API limits
+// ============================================
+
+const MAX_MESSAGE_SIZE = 24000;
+
+export function chunkContent(content: string, maxSize: number = MAX_MESSAGE_SIZE): string[] {
+  if (content.length <= maxSize) {
+    return [content];
+  }
+
+  const chunks: string[] = [];
+  let remaining = content;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxSize) {
+      chunks.push(remaining);
+      break;
+    }
+
+    // Try to split at a newline boundary
+    let splitIndex = remaining.lastIndexOf('\n', maxSize);
+    if (splitIndex <= 0 || splitIndex < maxSize * 0.25) {
+      // No good newline boundary, split at space
+      splitIndex = remaining.lastIndexOf(' ', maxSize);
+    }
+    if (splitIndex <= 0 || splitIndex < maxSize * 0.25) {
+      // No good boundary, hard split
+      splitIndex = maxSize;
+    }
+
+    chunks.push(remaining.slice(0, splitIndex));
+    remaining = remaining.slice(splitIndex).trimStart();
+  }
+
+  if (chunks.length > 1) {
+    return chunks.map((chunk, i) => `[Part ${i + 1}/${chunks.length}] ${chunk}`);
+  }
+
+  return chunks;
+}
+
+// ============================================
 // Utility: Clear all caches (for debugging)
 // ============================================
 
