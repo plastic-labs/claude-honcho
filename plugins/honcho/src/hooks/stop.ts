@@ -4,6 +4,7 @@ import { basename } from "path";
 import { existsSync, readFileSync } from "fs";
 import { getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { visStopMessage } from "../visual.js";
 
 interface HookInput {
   session_id?: string;
@@ -143,6 +144,7 @@ export async function handleStop(): Promise<void> {
 
   if (!lastMessage || !isMeaningfulContent(lastMessage)) {
     logHook("stop", `Skipping (no meaningful content)`);
+    // Don't show systemMessage for skips — too noisy since this fires every turn
     process.exit(0);
   }
 
@@ -170,6 +172,7 @@ export async function handleStop(): Promise<void> {
     ]);
 
     logHook("stop", `Assistant response saved`);
+    visStopMessage("out", `saved response (${lastMessage.length} chars)`);
   } catch (error) {
     logHook("stop", `Upload failed: ${error}`, { error: String(error) });
   }

@@ -13,6 +13,7 @@ import {
   chunkContent,
 } from "../cache.js";
 import { logHook, logApiCall, logCache, setLogContext } from "../log.js";
+import { visContextLine, visSkipMessage, addSystemMessage, verboseApiResult, verboseList } from "../visual.js";
 
 interface HookInput {
   prompt?: string;
@@ -65,20 +66,6 @@ function shouldSkipContextRetrieval(prompt: string): boolean {
   return SKIP_CONTEXT_PATTERNS.some((p) => p.test(prompt.trim()));
 }
 
-/**
- * Sort facts by recency (most recent first)
- * Falls back to original order if no timestamps available
- */
-function sortByRecency<T extends { created_at?: string; metadata?: { created_at?: string } }>(items: T[]): T[] {
-  return [...items].sort((a, b) => {
-    const aTime = a.created_at || a.metadata?.created_at || '';
-    const bTime = b.created_at || b.metadata?.created_at || '';
-    if (!aTime && !bTime) return 0;
-    if (!aTime) return 1;
-    if (!bTime) return -1;
-    return new Date(bTime).getTime() - new Date(aTime).getTime();
-  });
-}
 
 function getSessionName(cwd: string): string {
   const configuredSession = getSessionForPath(cwd);
@@ -140,6 +127,7 @@ export async function handleUserPrompt(): Promise<void> {
   // For trivial prompts, skip heavy context retrieval but still upload
   if (shouldSkipContextRetrieval(prompt)) {
     logHook("user-prompt", "Skipping context (trivial prompt)");
+    visSkipMessage("user-prompt", "trivial prompt");
     if (uploadPromise) await uploadPromise.catch((e) => logHook("user-prompt", `Upload failed: ${e}`, { error: String(e) }));
     process.exit(0);
   }
@@ -152,9 +140,24 @@ export async function handleUserPrompt(): Promise<void> {
   if (cachedContext && !cacheIsStale && !forceRefresh) {
     // Use cached context - instant response
     logCache("hit", "userContext", "using cached");
+
+    // Verbose output (Ctrl+O) — show what's in the cache
+    const cachedRep = cachedContext?.representation;
+    verboseApiResult("session.context() → representation (cached)", cachedRep);
+    verboseList("session.context() → peerCard (cached)", cachedContext?.peerCard);
+
     const contextParts = formatCachedContext(cachedContext, config.peerName);
     if (contextParts.length > 0) {
-      outputContext(config.peerName, contextParts);
+      const rep = cachedContext?.representation;
+      const factCount = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
+      const visMsg = visContextLine("user-prompt", {
+        facts: factCount,
+        insights: 0,
+        cached: true,
+      }) || "[honcho] user-prompt \u2190 context injected (cached)";
+      outputContext(config.peerName, contextParts, visMsg);
+    } else {
+      outputSystemOnly("[honcho] user-prompt \u2022 no cached context available");
     }
     if (uploadPromise) await uploadPromise.catch((e) => logHook("user-prompt", `Upload failed: ${e}`, { error: String(e) }));
     process.exit(0);
@@ -165,16 +168,23 @@ export async function handleUserPrompt(): Promise<void> {
   // 2. Message threshold reached (every 10 messages)
   logCache("miss", "userContext", forceRefresh ? "threshold refresh" : "stale cache");
   try {
-    const contextParts = await fetchFreshContext(config, cwd, prompt);
+    const { parts: contextParts, factCount } = await fetchFreshContext(config, cwd, prompt);
     if (contextParts.length > 0) {
-      outputContext(config.peerName, contextParts);
+      const visMsg = visContextLine("user-prompt", {
+        facts: factCount,
+        insights: 0,
+        cached: false,
+      }) || "[honcho] user-prompt \u2190 fresh context injected";
+      outputContext(config.peerName, contextParts, visMsg);
+    } else {
+      outputSystemOnly("[honcho] user-prompt \u2022 no matching context found");
     }
     // Mark that we refreshed the knowledge graph
     if (forceRefresh) {
       markKnowledgeGraphRefreshed();
     }
   } catch {
-    // Context fetch failed, continue without
+    outputSystemOnly("[honcho] user-prompt \u2717 context fetch failed");
   }
 
   // Ensure upload completes before exit
@@ -207,35 +217,28 @@ async function uploadMessageAsync(config: any, cwd: string, prompt: string): Pro
 
 function formatCachedContext(context: any, peerName: string): string[] {
   const parts: string[] = [];
+  const rep = context?.representation;
 
-  if (context?.representation?.explicit?.length) {
-    // Sort by recency - recent facts are more relevant
-    const sorted = sortByRecency(context.representation.explicit);
-    const explicit = sorted
-      .slice(0, 5)
-      .map((e: any) => e.content || e)
-      .join("; ");
-    parts.push(`Relevant facts: ${explicit}`);
+  if (typeof rep === "string" && rep.trim()) {
+    const lines = rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
+    const summary = lines.slice(0, 5).map((l: string) => l.replace(/^\[.*?\]\s*/, "").replace(/^- /, "")).join("; ");
+    if (summary) parts.push(`Relevant facts: ${summary}`);
   }
 
-  if (context?.representation?.deductive?.length) {
-    // Sort by recency
-    const sorted = sortByRecency(context.representation.deductive);
-    const deductive = sorted
-      .slice(0, 3)
-      .map((d: any) => d.conclusion)
-      .join("; ");
-    parts.push(`Insights: ${deductive}`);
-  }
-
-  if (context?.peer_card?.length) {
-    parts.push(`Profile: ${context.peer_card.join("; ")}`);
+  const peerCard = context?.peerCard;
+  if (peerCard?.length) {
+    parts.push(`Profile: ${peerCard.join("; ")}`);
   }
 
   return parts;
 }
 
-async function fetchFreshContext(config: any, cwd: string, prompt: string): Promise<string[]> {
+interface FreshContextResult {
+  parts: string[];
+  factCount: number;
+}
+
+async function fetchFreshContext(config: any, cwd: string, prompt: string): Promise<FreshContextResult> {
   const honcho = new Honcho(getHonchoClientOptions(config));
   const sessionName = getSessionName(cwd);
 
@@ -243,6 +246,7 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
   const session = await honcho.session(sessionName);
 
   const contextParts: string[] = [];
+  let factCount = 0;
 
   // Only use context() here - it's free and returns pre-computed knowledge
   // Skip chat() - only use at session-start
@@ -265,44 +269,42 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
 
   if (contextResult) {
     setCachedUserContext(contextResult); // Update cache
-    logCache("write", "userContext", `${(contextResult as any).representation?.explicit?.length || 0} facts`);
-
     const rep = (contextResult as any).representation;
-    if (rep?.explicit?.length) {
-      // Sort by recency - recent facts are more relevant
-      const sorted = sortByRecency(rep.explicit);
-      const explicit = sorted
-        .slice(0, 5)
-        .map((e: any) => e.content || e)
-        .join("; ");
-      contextParts.push(`Relevant facts: ${explicit}`);
+
+    // Verbose output (Ctrl+O) — show raw API response
+    verboseApiResult("session.context() → representation", rep);
+    verboseList("session.context() → peerCard", (contextResult as any).peerCard);
+
+    if (typeof rep === "string" && rep.trim()) {
+      const lines = rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
+      factCount = lines.length;
+      const summary = lines.slice(0, 5).map((l: string) => l.replace(/^\[.*?\]\s*/, "").replace(/^- /, "")).join("; ");
+      if (summary) contextParts.push(`Relevant facts: ${summary}`);
+      logCache("write", "userContext", `${factCount} facts`);
     }
 
-    if (rep?.deductive?.length) {
-      // Sort by recency
-      const sorted = sortByRecency(rep.deductive);
-      const deductive = sorted
-        .slice(0, 3)
-        .map((d: any) => d.conclusion)
-        .join("; ");
-      contextParts.push(`Insights: ${deductive}`);
-    }
-
-    const peerCard = (contextResult as any).peerCard || (contextResult as any).peer_card;
+    const peerCard = (contextResult as any).peerCard;
     if (peerCard?.length) {
       contextParts.push(`Profile: ${peerCard.join("; ")}`);
     }
   }
 
-  return contextParts;
+  return { parts: contextParts, factCount };
 }
 
-function outputContext(peerName: string, contextParts: string[]): void {
-  const output = {
+function outputSystemOnly(message: string): void {
+  console.log(JSON.stringify({ systemMessage: message }));
+}
+
+function outputContext(peerName: string, contextParts: string[], systemMsg?: string): void {
+  let output: any = {
     hookSpecificOutput: {
       hookEventName: "UserPromptSubmit",
       additionalContext: `[Honcho Memory for ${peerName}]: ${contextParts.join(" | ")}`,
     },
   };
+  if (systemMsg) {
+    output = addSystemMessage(output, systemMsg);
+  }
   console.log(JSON.stringify(output));
 }

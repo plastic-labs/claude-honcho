@@ -3,6 +3,7 @@ import { loadConfig, getSessionForPath, getHonchoClientOptions, isPluginEnabled 
 import { basename } from "path";
 import { Spinner } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { verboseApiResult, verboseList } from "../visual.js";
 
 
 interface HookInput {
@@ -48,45 +49,29 @@ These facts MUST be preserved in the summary.
 - Session: ${sessionName}`);
 
   // User profile - critical to preserve
-  if (userContext?.peer_card?.length > 0) {
+  const userPeerCard = userContext?.peerCard;
+  if (userPeerCard?.length > 0) {
     parts.push(`### ${config.peerName}'s Profile (PRESERVE)
-${userContext.peer_card.join("\n")}`);
+${userPeerCard.join("\n")}`);
   }
 
-  // Key user facts - explicit knowledge
-  if (userContext?.representation?.explicit?.length > 0) {
-    const facts = userContext.representation.explicit
-      .slice(0, 10)
-      .map((e: any) => `- ${e.content || e}`)
-      .join("\n");
-    parts.push(`### Key Facts About ${config.peerName} (PRESERVE)
-${facts}`);
-  }
-
-  // User preferences from deductive reasoning
-  if (userContext?.representation?.deductive?.length > 0) {
-    const insights = userContext.representation.deductive
-      .slice(0, 5)
-      .map((d: any) => `- ${d.conclusion}`)
-      .join("\n");
-    parts.push(`### ${config.peerName}'s Preferences & Patterns (PRESERVE)
-${insights}`);
+  // Key user facts
+  const userRep = userContext?.representation;
+  if (typeof userRep === "string" && userRep.trim()) {
+    parts.push(`### Key Facts About ${config.peerName} (PRESERVE)\n${userRep}`);
   }
 
   // Claude's self-context - what was I working on
-  if (claudeContext?.representation?.explicit?.length > 0) {
-    const claudeFacts = claudeContext.representation.explicit
-      .slice(0, 8)
-      .map((e: any) => `- ${e.content || e}`)
-      .join("\n");
-    parts.push(`### ${config.claudePeer}'s Recent Work (PRESERVE)
-${claudeFacts}`);
+  const claudeRep = claudeContext?.representation;
+  if (typeof claudeRep === "string" && claudeRep.trim()) {
+    parts.push(`### ${config.claudePeer}'s Recent Work (PRESERVE)\n${claudeRep}`);
   }
 
   // Session summary - what we were doing
-  if (summaries?.short_summary?.content) {
+  const shortSummary = summaries?.shortSummary;
+  if (shortSummary?.content) {
     parts.push(`### Session Context (PRESERVE)
-${summaries.short_summary.content}`);
+${shortSummary.content}`);
   }
 
   // Fresh dialectic insights - expensive but worth it at compaction time
@@ -192,6 +177,11 @@ export async function handlePreCompact(): Promise<void> {
     const userContext = userContextResult.status === "fulfilled" ? userContextResult.value : null;
     const claudeContext = claudeContextResult.status === "fulfilled" ? claudeContextResult.value : null;
     const summaries = summariesResult.status === "fulfilled" ? summariesResult.value : null;
+
+    // Verbose output (Ctrl+O)
+    verboseApiResult("pre-compact peer.context(user)", (userContext as any)?.representation);
+    verboseApiResult("pre-compact peer.context(claude)", (claudeContext as any)?.representation);
+    verboseList("pre-compact peerCard", (userContext as any)?.peerCard);
     const userDialectic =
       userChatResult.status === "fulfilled"
         ? userChatResult.value
@@ -218,8 +208,7 @@ export async function handlePreCompact(): Promise<void> {
 
     logHook("pre-compact", `Memory anchored (${memoryCard.length} chars)`);
 
-    // Output the memory card - this gets included in pre-compaction context
-    // and will be preserved in the summary
+    // Output memory card to stdout
     console.log(`[${config.claudePeer}/Honcho Memory Anchor]\n\n${memoryCard}`);
     process.exit(0);
   } catch (error) {

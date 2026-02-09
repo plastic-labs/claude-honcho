@@ -3,6 +3,7 @@ import { loadConfig, getSessionForPath, getHonchoClientOptions, isPluginEnabled 
 import { basename } from "path";
 import { appendClaudeWork, getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { visCapture } from "../visual.js";
 
 
 interface HookInput {
@@ -227,6 +228,7 @@ export async function handlePostToolUse(): Promise<void> {
 
   const summary = formatToolSummary(toolName, toolInput, toolResponse);
   logHook("post-tool-use", summary, { tool: toolName });
+  visCapture(summary);
 
   // INSTANT: Update local claude context file (~2ms)
   appendClaudeWork(summary);

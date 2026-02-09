@@ -342,7 +342,6 @@ export async function handleSessionEnd(): Promise<void> {
 
     const meaningfulCount = assistantMessages.filter(m => m.isMeaningful).length;
     logHook("session-end", `Session saved: ${assistantMessages.length} assistant msgs (${meaningfulCount} meaningful), ${queuedMessages.length} queued msgs`);
-    console.log(`[honcho] Session saved: ${assistantMessages.length} assistant messages (${meaningfulCount} with meaningful prose), ${queuedMessages.length} queued messages`);
     process.exit(0);
   } catch (error) {
     logHook("session-end", `Error: ${error}`, { error: String(error) });
