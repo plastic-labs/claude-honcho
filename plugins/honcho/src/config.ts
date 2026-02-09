@@ -47,6 +47,7 @@ export interface HonchoCLAUDEConfig {
   endpoint?: HonchoEndpointConfig; // SaaS vs local instance config
   localContext?: LocalContextConfig; // Local claude-context.md settings
   enabled?: boolean; // Temporarily disable plugin (default: true)
+  logging?: boolean; // Enable file logging to ~/.honcho/ (default: true)
 }
 
 const CONFIG_DIR = join(homedir(), ".honcho");
@@ -109,6 +110,7 @@ export function loadConfigFromEnv(): HonchoCLAUDEConfig | null {
     claudePeer,
     saveMessages: process.env.HONCHO_SAVE_MESSAGES !== "false",
     enabled: process.env.HONCHO_ENABLED !== "false",
+    logging: process.env.HONCHO_LOGGING !== "false",
   };
 
   // Handle endpoint configuration
@@ -142,6 +144,9 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   }
   if (process.env.HONCHO_ENABLED === "false") {
     config.enabled = false;
+  }
+  if (process.env.HONCHO_LOGGING === "false") {
+    config.logging = false;
   }
 
   return config;
@@ -232,6 +237,12 @@ export function getLocalContextConfig(): LocalContextConfig {
   return {
     maxEntries: config?.localContext?.maxEntries ?? 50, // Default 50 entries
   };
+}
+
+// File logging enable/disable
+export function isLoggingEnabled(): boolean {
+  const config = loadConfig();
+  return config?.logging !== false; // default: true
 }
 
 // Plugin enable/disable

@@ -137,6 +137,7 @@ The honcho plugin provides these tools via MCP:
 | `HONCHO_ENDPOINT`      | No       | `production`  | `production`, `local`, or a custom URL                            |
 | `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
 | `HONCHO_SAVE_MESSAGES` | No       | `true`        | Set to `false` to stop saving messages                            |
+| `HONCHO_LOGGING`       | No       | `true`        | Set to `false` to disable file logging to `~/.honcho/`            |
 
 ### Example Configuration
 
