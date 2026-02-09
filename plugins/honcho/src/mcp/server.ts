@@ -5,16 +5,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getHonchoClientOptions, getSessionForPath } from "../config.js";
-import { basename } from "path";
-
-function getSessionName(cwd: string): string {
-  const configuredSession = getSessionForPath(cwd);
-  if (configuredSession) {
-    return configuredSession;
-  }
-  return basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-}
+import { loadConfig, getHonchoClientOptions, getSessionName } from "../config.js";
 
 export async function runMcpServer(): Promise<void> {
   const config = loadConfig();

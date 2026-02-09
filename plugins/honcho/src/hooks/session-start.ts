@@ -1,6 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getHonchoClientOptions, isPluginEnabled } from "../config.js";
-import { basename } from "path";
+import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
 import {
   setCachedUserContext,
   setCachedClaudeContext,
@@ -23,14 +22,6 @@ interface HookInput {
   transcript_path?: string;
   cwd?: string;
   source?: string;
-}
-
-function getSessionName(cwd: string): string {
-  const configuredSession = getSessionForPath(cwd);
-  if (configuredSession) {
-    return configuredSession;
-  }
-  return basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
 function formatRepresentation(rep: any): string {

@@ -1,7 +1,6 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getHonchoClientOptions, isPluginEnabled } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
 import { existsSync, readFileSync } from "fs";
-import { basename } from "path";
 import {
   getQueuedMessages,
   markMessagesUploaded,
@@ -31,14 +30,6 @@ interface TranscriptEntry {
   // Alternative format sometimes seen
   role?: string;
   content?: string | Array<{ type: string; text?: string }>;
-}
-
-function getSessionName(cwd: string): string {
-  const configuredSession = getSessionForPath(cwd);
-  if (configuredSession) {
-    return configuredSession;
-  }
-  return basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
 /**

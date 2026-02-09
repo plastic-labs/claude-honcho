@@ -1,6 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getHonchoClientOptions, isPluginEnabled } from "../config.js";
-import { basename } from "path";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
 import { existsSync, readFileSync } from "fs";
 import { getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -21,14 +20,6 @@ interface TranscriptEntry {
     content: string | Array<{ type: string; text?: string; name?: string; input?: any }>;
   };
   content?: string | Array<{ type: string; text?: string }>;
-}
-
-function getSessionName(cwd: string): string {
-  const configuredSession = getSessionForPath(cwd);
-  if (configuredSession) {
-    return configuredSession;
-  }
-  return basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
 /**

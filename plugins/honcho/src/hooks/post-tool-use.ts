@@ -1,6 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getHonchoClientOptions, isPluginEnabled } from "../config.js";
-import { basename } from "path";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
 import { appendClaudeWork, getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visCapture } from "../visual.js";
@@ -11,14 +10,6 @@ interface HookInput {
   tool_input?: Record<string, any>;
   tool_response?: Record<string, any>;
   cwd?: string;
-}
-
-function getSessionName(cwd: string): string {
-  const configuredSession = getSessionForPath(cwd);
-  if (configuredSession) {
-    return configuredSession;
-  }
-  return basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
 function shouldLogTool(toolName: string, toolInput: Record<string, any>): boolean {
