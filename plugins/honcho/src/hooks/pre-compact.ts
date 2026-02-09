@@ -31,7 +31,7 @@ function formatMemoryCard(
   // Header - identity anchor
   parts.push(`## HONCHO MEMORY ANCHOR (Pre-Compaction Injection)
 This context is being injected because the conversation is about to be summarized.
-These facts MUST be preserved in the summary.
+These conclusions MUST be preserved in the summary.
 
 ### Session Identity
 - User: ${config.peerName}
@@ -46,10 +46,10 @@ These facts MUST be preserved in the summary.
 ${userPeerCard.join("\n")}`);
   }
 
-  // Key user facts
+  // Key user conclusions
   const userRep = userContext?.representation;
   if (typeof userRep === "string" && userRep.trim()) {
-    parts.push(`### Key Facts About ${config.peerName} (PRESERVE)\n${userRep}`);
+    parts.push(`### Key Conclusions About ${config.peerName} (PRESERVE)\n${userRep}`);
   }
 
   // Claude's self-context - what was I working on
@@ -78,7 +78,7 @@ ${claudeDialectic}`);
 
   parts.push(`### End Memory Anchor
 The above context represents persistent memory from Honcho.
-When summarizing this conversation, ensure these facts are preserved.`);
+When summarizing this conversation, ensure these conclusions are preserved.`);
 
   return parts.join("\n\n");
 }

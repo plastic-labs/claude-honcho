@@ -285,15 +285,15 @@ export async function handleSessionStart(): Promise<void> {
     // Reduced from 6+ overlapping sections to 2-3 focused sections
     // (as recommended in FEEDBACK-FROM-CLAUDE.md)
 
-    // Section 1: User Profile + Key Facts (CONSOLIDATED)
+    // Section 1: User Profile + Conclusions (CONSOLIDATED)
     // Combines: peerCard and representation
-    // Skips redundant "AI Summary" dialectic if we have good facts
+    // Skips redundant "AI Summary" dialectic if we have good conclusions
     if (userContextResult.status === "fulfilled" && userContextResult.value) {
       const context = userContextResult.value as any;
       setCachedUserContext(context); // Cache for user-prompt hook
       const rep = context.representation;
-      const repFactCount = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
-      logCache("write", "userContext", `${repFactCount} facts`);
+      const repConclusionCount = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
+      logCache("write", "userContext", `${repConclusionCount} conclusions`);
 
       const userSection: string[] = [];
 
@@ -302,7 +302,7 @@ export async function handleSessionStart(): Promise<void> {
         userSection.push(peerCard.join("\n"));
       }
 
-      // Add key facts (session-scoped, so should be relevant)
+      // Add conclusions (session-scoped, so should be relevant)
       if (rep) {
         const repText = formatRepresentation(rep);
         if (repText) {
@@ -316,14 +316,14 @@ export async function handleSessionStart(): Promise<void> {
     }
 
     // Section 2: Recent Work (CONSOLIDATED)
-    // Combines: claude facts, session summary, self-reflection
+    // Combines: claude conclusions, session summary, self-reflection
     // Prioritizes concrete work items over vague summaries
     if (claudeContextResult.status === "fulfilled" && claudeContextResult.value) {
       const context = claudeContextResult.value as any;
       setCachedClaudeContext(context); // Cache
       const rep = context.representation;
-      const claudeRepFactCount = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
-      logCache("write", "claudeContext", `${claudeRepFactCount} facts`);
+      const claudeRepConclusionCount = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
+      logCache("write", "claudeContext", `${claudeRepConclusionCount} conclusions`);
 
       if (rep) {
         const repText = formatRepresentation(rep);
@@ -340,7 +340,7 @@ export async function handleSessionStart(): Promise<void> {
       if (shortSummary?.content) {
         contextParts.push(`## Recent Session Summary\n${shortSummary.content}`);
       }
-      // Skip long_summary - it overlaps with facts and adds too many tokens
+      // Skip long_summary - it overlaps with conclusions and adds too many tokens
     }
 
     // AI dialectic summaries - always include when available

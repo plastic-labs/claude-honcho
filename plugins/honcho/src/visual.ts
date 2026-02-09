@@ -53,14 +53,14 @@ export function visMessage(direction: HookDirection, hookName: string, message: 
  * Used by user-prompt hook (which outputs JSON systemMessage — works)
  */
 export function visContextLine(hookName: string, opts: {
-  facts?: number;
+  conclusions?: number;
   insights?: number;
   cached?: boolean;
   cacheAge?: number;
   sections?: number;
 }): string {
   const parts: string[] = [];
-  if (opts.facts) parts.push(`${opts.facts} facts`);
+  if (opts.conclusions) parts.push(`${opts.conclusions} conclusions`);
   if (opts.insights) parts.push(`${opts.insights} insights`);
   if (opts.sections) parts.push(`${opts.sections} sections`);
 

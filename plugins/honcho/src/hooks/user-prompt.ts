@@ -142,9 +142,9 @@ export async function handleUserPrompt(): Promise<void> {
     const contextParts = formatCachedContext(cachedContext, config.peerName);
     if (contextParts.length > 0) {
       const rep = cachedContext?.representation;
-      const factCount = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
+      const conclusionCount = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
       const visMsg = visContextLine("user-prompt", {
-        facts: factCount,
+        conclusions: conclusionCount,
         insights: 0,
         cached: true,
       }) || "[honcho] user-prompt \u2190 context injected (cached)";
@@ -161,10 +161,10 @@ export async function handleUserPrompt(): Promise<void> {
   // 2. Message threshold reached (every 10 messages)
   logCache("miss", "userContext", forceRefresh ? "threshold refresh" : "stale cache");
   try {
-    const { parts: contextParts, factCount } = await fetchFreshContext(config, cwd, prompt);
+    const { parts: contextParts, conclusionCount } = await fetchFreshContext(config, cwd, prompt);
     if (contextParts.length > 0) {
       const visMsg = visContextLine("user-prompt", {
-        facts: factCount,
+        conclusions: conclusionCount,
         insights: 0,
         cached: false,
       }) || "[honcho] user-prompt \u2190 fresh context injected";
@@ -215,7 +215,7 @@ function formatCachedContext(context: any, peerName: string): string[] {
   if (typeof rep === "string" && rep.trim()) {
     const lines = rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
     const summary = lines.slice(0, 5).map((l: string) => l.replace(/^\[.*?\]\s*/, "").replace(/^- /, "")).join("; ");
-    if (summary) parts.push(`Relevant facts: ${summary}`);
+    if (summary) parts.push(`Relevant conclusions: ${summary}`);
   }
 
   const peerCard = context?.peerCard;
@@ -228,7 +228,7 @@ function formatCachedContext(context: any, peerName: string): string[] {
 
 interface FreshContextResult {
   parts: string[];
-  factCount: number;
+  conclusionCount: number;
 }
 
 async function fetchFreshContext(config: any, cwd: string, prompt: string): Promise<FreshContextResult> {
@@ -239,7 +239,7 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
   const session = await honcho.session(sessionName);
 
   const contextParts: string[] = [];
-  let factCount = 0;
+  let conclusionCount = 0;
 
   // Only use context() here - it's free and returns pre-computed knowledge
   // Skip chat() - only use at session-start
@@ -271,10 +271,10 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
 
     if (typeof rep === "string" && rep.trim()) {
       const lines = rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
-      factCount = lines.length;
+      conclusionCount = lines.length;
       const summary = lines.slice(0, 5).map((l: string) => l.replace(/^\[.*?\]\s*/, "").replace(/^- /, "")).join("; ");
-      if (summary) contextParts.push(`Relevant facts: ${summary}`);
-      logCache("write", "userContext", `${factCount} facts`);
+      if (summary) contextParts.push(`Relevant conclusions: ${summary}`);
+      logCache("write", "userContext", `${conclusionCount} conclusions`);
     }
 
     const peerCard = (contextResult as any).peerCard;
@@ -283,7 +283,7 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
     }
   }
 
-  return { parts: contextParts, factCount };
+  return { parts: contextParts, conclusionCount };
 }
 
 function outputSystemOnly(message: string): void {
