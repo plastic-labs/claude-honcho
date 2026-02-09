@@ -263,8 +263,10 @@ export async function handleSessionStart(): Promise<void> {
     const successCount = asyncResults.filter(r => r.success).length;
     logAsync("context-fetch", `Completed: ${successCount}/5 succeeded in ${fetchDuration}ms`, asyncResults);
 
-    // ========== VERBOSE OUTPUT (Ctrl+O) ==========
-    // Show raw API response data for debugging/inspection
+    // ========== VERBOSE OUTPUT (file-based) ==========
+    // Written to ~/.honcho/verbose.log — NOT shown in Ctrl+O.
+    // SessionStart stdout is always visible to Claude, so we can't
+    // use stdout for debug data. View with: tail -f ~/.honcho/verbose.log
     if (userContextResult.status === "fulfilled" && userContextResult.value) {
       const ctx = userContextResult.value as any;
       verboseApiResult("peer.context(user) → representation", ctx.representation);

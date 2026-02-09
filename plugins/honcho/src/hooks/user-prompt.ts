@@ -141,7 +141,9 @@ export async function handleUserPrompt(): Promise<void> {
     // Use cached context - instant response
     logCache("hit", "userContext", "using cached");
 
-    // Verbose output (Ctrl+O) — show what's in the cache
+    // Verbose output (file-based — ~/.honcho/verbose.log)
+    // UserPromptSubmit stdout is always visible to Claude, so we use
+    // the log file for debug data. View with: tail -f ~/.honcho/verbose.log
     const cachedRep = cachedContext?.representation;
     verboseApiResult("session.context() → representation (cached)", cachedRep);
     verboseList("session.context() → peerCard (cached)", cachedContext?.peerCard);
@@ -271,7 +273,8 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
     setCachedUserContext(contextResult); // Update cache
     const rep = (contextResult as any).representation;
 
-    // Verbose output (Ctrl+O) — show raw API response
+    // Verbose output (file-based — ~/.honcho/verbose.log)
+    // UserPromptSubmit stdout is always visible, so debug data goes to file.
     verboseApiResult("session.context() → representation", rep);
     verboseList("session.context() → peerCard", (contextResult as any).peerCard);
 
