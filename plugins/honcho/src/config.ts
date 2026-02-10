@@ -175,7 +175,7 @@ export function getSessionForPath(cwd: string): string | null {
 }
 
 /**
- * Default session name: peerName_repoName (e.g. user-repo-name).
+ * Default session name: peerName-repoName (e.g. user-repo-name).
  * If a session is configured for this path, that name is returned instead.
  */
 export function getSessionName(cwd: string): string {
