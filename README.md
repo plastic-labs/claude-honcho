@@ -120,10 +120,10 @@ Paste this into Claude Code:
 > ## How to use it:
 > - Trust the Honcho context injected at session start. It contains what you
 >   know about me — act on it. Do not ignore it or ask me things you already know.
-> - Use `create_conclusion` to save new insights as you learn them: my preferences,
->   decisions, patterns I like, things I've asked you not to do. Be liberal.
 > - Use `chat` or `search` mid-conversation when you need context beyond what
 >   was loaded at startup.
+> - Use `create_conclusion` to save new insights as you learn them: my preferences,
+>   decisions, patterns I like, things I've asked you not to do.
 > - I should never have to repeat myself. If I've told you something before,
 >   you should already know it.
 >
