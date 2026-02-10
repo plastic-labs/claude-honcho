@@ -1,6 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getHonchoClientOptions, isPluginEnabled } from "../config.js";
-import { basename } from "path";
+import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
 import {
   setCachedUserContext,
   setCachedClaudeContext,
@@ -15,6 +14,7 @@ import { Spinner } from "../spinner.js";
 import { displayHonchoStartup } from "../pixel.js";
 import { captureGitState, getRecentCommits, isGitRepo, inferFeatureContext } from "../git.js";
 import { logHook, logApiCall, logCache, logFlow, logAsync, setLogContext } from "../log.js";
+import { verboseApiResult, verboseList, clearVerboseLog } from "../visual.js";
 
 
 interface HookInput {
@@ -24,53 +24,11 @@ interface HookInput {
   source?: string;
 }
 
-function getSessionName(cwd: string): string {
-  const configuredSession = getSessionForPath(cwd);
-  if (configuredSession) {
-    return configuredSession;
-  }
-  return basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-}
-
-/**
- * Sort facts by recency (most recent first)
- * Falls back to original order if no timestamps available
- */
-function sortByRecency<T extends { created_at?: string; metadata?: { created_at?: string } }>(items: T[]): T[] {
-  return [...items].sort((a, b) => {
-    const aTime = a.created_at || a.metadata?.created_at || '';
-    const bTime = b.created_at || b.metadata?.created_at || '';
-    if (!aTime && !bTime) return 0;
-    if (!aTime) return 1;
-    if (!bTime) return -1;
-    return new Date(bTime).getTime() - new Date(aTime).getTime();
-  });
-}
-
 function formatRepresentation(rep: any): string {
-  const parts: string[] = [];
-
-  if (rep?.explicit?.length > 0) {
-    // Sort by recency - recent facts are more relevant
-    const sorted = sortByRecency(rep.explicit);
-    const explicit = sorted
-      .slice(0, 12)  // Reduced from 15 for less noise
-      .map((e: any) => `- ${e.content || e}`)
-      .join("\n");
-    parts.push(`### Explicit Facts\n${explicit}`);
+  if (typeof rep === "string" && rep.trim()) {
+    return rep;
   }
-
-  if (rep?.deductive?.length > 0) {
-    // Sort by recency
-    const sorted = sortByRecency(rep.deductive);
-    const deductive = sorted
-      .slice(0, 8)  // Reduced from 10 for less noise
-      .map((d: any) => `- ${d.conclusion} (from: ${d.premises?.join(", ") || "prior observations"})`)
-      .join("\n");
-    parts.push(`### Deduced Insights\n${deductive}`);
-  }
-
-  return parts.join("\n\n");
+  return "";
 }
 
 export async function handleSessionStart(): Promise<void> {
@@ -106,6 +64,9 @@ export async function handleSessionStart(): Promise<void> {
   // Set log context early so all logs include cwd/session
   const sessionName = getSessionName(cwd);
   setLogContext(cwd, sessionName);
+
+  // Clear verbose log for fresh session
+  clearVerboseLog();
 
   // Reset message count for this session (for threshold-based knowledge graph refresh)
   resetMessageCount();
@@ -293,29 +254,55 @@ export async function handleSessionStart(): Promise<void> {
     const successCount = asyncResults.filter(r => r.success).length;
     logAsync("context-fetch", `Completed: ${successCount}/5 succeeded in ${fetchDuration}ms`, asyncResults);
 
+    // ========== VERBOSE OUTPUT (file-based) ==========
+    // Written to ~/.honcho/verbose.log — NOT shown in Ctrl+O.
+    // SessionStart stdout is always visible to Claude, so we can't
+    // use stdout for debug data. View with: tail -f ~/.honcho/verbose.log
+    if (userContextResult.status === "fulfilled" && userContextResult.value) {
+      const ctx = userContextResult.value as any;
+      verboseApiResult("peer.context(user) → representation", ctx.representation);
+      verboseList("peer.context(user) → peerCard", ctx.peerCard);
+    }
+    if (claudeContextResult.status === "fulfilled" && claudeContextResult.value) {
+      const ctx = claudeContextResult.value as any;
+      verboseApiResult("peer.context(claude) → representation", ctx.representation);
+    }
+    if (summariesResult.status === "fulfilled" && summariesResult.value) {
+      const s = summariesResult.value as any;
+      const short = s.shortSummary;
+      verboseApiResult("session.summaries() → shortSummary", short?.content);
+    }
+    if (userChatResult.status === "fulfilled") {
+      const chatVal = typeof userChatResult.value === "string" ? userChatResult.value : (userChatResult.value as any)?.content;
+      verboseApiResult(`peer.chat(user) → "${config.peerName}"`, chatVal);
+    }
+    if (claudeChatResult.status === "fulfilled") {
+      const chatVal = typeof claudeChatResult.value === "string" ? claudeChatResult.value : (claudeChatResult.value as any)?.content;
+      verboseApiResult(`peer.chat(claude) → "${config.claudePeer}"`, chatVal);
+    }
+
     // ========== CONSOLIDATED CONTEXT OUTPUT ==========
     // Reduced from 6+ overlapping sections to 2-3 focused sections
     // (as recommended in FEEDBACK-FROM-CLAUDE.md)
 
-    // Section 1: User Profile + Key Facts (CONSOLIDATED)
-    // Combines: peer_card, explicit facts, deductive insights
-    // Skips redundant "AI Summary" dialectic if we have good facts
+    // Section 1: User Profile + Conclusions (CONSOLIDATED)
+    // Combines: peerCard and representation
+    // Skips redundant "AI Summary" dialectic if we have good conclusions
     if (userContextResult.status === "fulfilled" && userContextResult.value) {
       const context = userContextResult.value as any;
       setCachedUserContext(context); // Cache for user-prompt hook
       const rep = context.representation;
-      logCache("write", "userContext", `${rep?.explicit?.length || 0} facts`);
+      const repConclusionCount = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
+      logCache("write", "userContext", `${repConclusionCount} conclusions`);
 
       const userSection: string[] = [];
 
-      // Profile as a compact line (not a whole section)
-      // New SDK may use peerCard instead of peer_card
-      const peerCard = context.peerCard || context.peer_card;
+      const peerCard = context.peerCard;
       if (peerCard && peerCard.length > 0) {
         userSection.push(peerCard.join("\n"));
       }
 
-      // Add key facts (session-scoped, so should be relevant)
+      // Add conclusions (session-scoped, so should be relevant)
       if (rep) {
         const repText = formatRepresentation(rep);
         if (repText) {
@@ -329,13 +316,14 @@ export async function handleSessionStart(): Promise<void> {
     }
 
     // Section 2: Recent Work (CONSOLIDATED)
-    // Combines: claude facts, session summary, self-reflection
+    // Combines: claude conclusions, session summary, self-reflection
     // Prioritizes concrete work items over vague summaries
     if (claudeContextResult.status === "fulfilled" && claudeContextResult.value) {
       const context = claudeContextResult.value as any;
       setCachedClaudeContext(context); // Cache
       const rep = context.representation;
-      logCache("write", "claudeContext", `${rep?.explicit?.length || 0} facts`);
+      const claudeRepConclusionCount = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
+      logCache("write", "claudeContext", `${claudeRepConclusionCount} conclusions`);
 
       if (rep) {
         const repText = formatRepresentation(rep);
@@ -348,12 +336,11 @@ export async function handleSessionStart(): Promise<void> {
     // Session summary - only include SHORT summary (skip Extended History to reduce noise)
     if (summariesResult.status === "fulfilled" && summariesResult.value) {
       const s = summariesResult.value as any;
-      // New SDK may use shortSummary instead of short_summary
-      const shortSummary = s.shortSummary || s.short_summary;
+      const shortSummary = s.shortSummary;
       if (shortSummary?.content) {
         contextParts.push(`## Recent Session Summary\n${shortSummary.content}`);
       }
-      // Skip long_summary - it overlaps with facts and adds too many tokens
+      // Skip long_summary - it overlaps with conclusions and adds too many tokens
     }
 
     // AI dialectic summaries - always include when available

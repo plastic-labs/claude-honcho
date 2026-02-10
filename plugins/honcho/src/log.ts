@@ -11,6 +11,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { existsSync, appendFileSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { symbols, arrows, box } from "./unicode.js";
+import { isLoggingEnabled } from "./config.js";
 
 const CACHE_DIR = join(homedir(), ".honcho");
 const LOG_FILE = join(CACHE_DIR, "activity.log");
@@ -118,6 +119,7 @@ export function logActivity(
   data?: any,
   options?: { timing?: number; success?: boolean; depth?: number; cwd?: string; session?: string }
 ): void {
+  if (!isLoggingEnabled()) return;
   ensureLogDir();
 
   const entry: LogEntry = {

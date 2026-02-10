@@ -1,8 +1,8 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getHonchoClientOptions, isPluginEnabled } from "../config.js";
-import { basename } from "path";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
 import { Spinner } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { formatVerboseBlock, formatVerboseList } from "../visual.js";
 
 
 interface HookInput {
@@ -11,14 +11,6 @@ interface HookInput {
   cwd?: string;
   trigger?: "manual" | "auto";
   custom_instructions?: string;
-}
-
-function getSessionName(cwd: string): string {
-  const configuredSession = getSessionForPath(cwd);
-  if (configuredSession) {
-    return configuredSession;
-  }
-  return basename(cwd).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
 /**
@@ -39,7 +31,7 @@ function formatMemoryCard(
   // Header - identity anchor
   parts.push(`## HONCHO MEMORY ANCHOR (Pre-Compaction Injection)
 This context is being injected because the conversation is about to be summarized.
-These facts MUST be preserved in the summary.
+These conclusions MUST be preserved in the summary.
 
 ### Session Identity
 - User: ${config.peerName}
@@ -48,45 +40,29 @@ These facts MUST be preserved in the summary.
 - Session: ${sessionName}`);
 
   // User profile - critical to preserve
-  if (userContext?.peer_card?.length > 0) {
+  const userPeerCard = userContext?.peerCard;
+  if (userPeerCard?.length > 0) {
     parts.push(`### ${config.peerName}'s Profile (PRESERVE)
-${userContext.peer_card.join("\n")}`);
+${userPeerCard.join("\n")}`);
   }
 
-  // Key user facts - explicit knowledge
-  if (userContext?.representation?.explicit?.length > 0) {
-    const facts = userContext.representation.explicit
-      .slice(0, 10)
-      .map((e: any) => `- ${e.content || e}`)
-      .join("\n");
-    parts.push(`### Key Facts About ${config.peerName} (PRESERVE)
-${facts}`);
-  }
-
-  // User preferences from deductive reasoning
-  if (userContext?.representation?.deductive?.length > 0) {
-    const insights = userContext.representation.deductive
-      .slice(0, 5)
-      .map((d: any) => `- ${d.conclusion}`)
-      .join("\n");
-    parts.push(`### ${config.peerName}'s Preferences & Patterns (PRESERVE)
-${insights}`);
+  // Key user conclusions
+  const userRep = userContext?.representation;
+  if (typeof userRep === "string" && userRep.trim()) {
+    parts.push(`### Key Conclusions About ${config.peerName} (PRESERVE)\n${userRep}`);
   }
 
   // Claude's self-context - what was I working on
-  if (claudeContext?.representation?.explicit?.length > 0) {
-    const claudeFacts = claudeContext.representation.explicit
-      .slice(0, 8)
-      .map((e: any) => `- ${e.content || e}`)
-      .join("\n");
-    parts.push(`### ${config.claudePeer}'s Recent Work (PRESERVE)
-${claudeFacts}`);
+  const claudeRep = claudeContext?.representation;
+  if (typeof claudeRep === "string" && claudeRep.trim()) {
+    parts.push(`### ${config.claudePeer}'s Recent Work (PRESERVE)\n${claudeRep}`);
   }
 
   // Session summary - what we were doing
-  if (summaries?.short_summary?.content) {
+  const shortSummary = summaries?.shortSummary;
+  if (shortSummary?.content) {
     parts.push(`### Session Context (PRESERVE)
-${summaries.short_summary.content}`);
+${shortSummary.content}`);
   }
 
   // Fresh dialectic insights - expensive but worth it at compaction time
@@ -102,7 +78,7 @@ ${claudeDialectic}`);
 
   parts.push(`### End Memory Anchor
 The above context represents persistent memory from Honcho.
-When summarizing this conversation, ensure these facts are preserved.`);
+When summarizing this conversation, ensure these conclusions are preserved.`);
 
   return parts.join("\n\n");
 }
@@ -192,6 +168,15 @@ export async function handlePreCompact(): Promise<void> {
     const userContext = userContextResult.status === "fulfilled" ? userContextResult.value : null;
     const claudeContext = claudeContextResult.status === "fulfilled" ? claudeContextResult.value : null;
     const summaries = summariesResult.status === "fulfilled" ? summariesResult.value : null;
+
+    // Build verbose output blocks — these will be appended to stdout after the
+    // memory card. PreCompact stdout is only shown in Ctrl+O, so verbose data
+    // is hidden by default and visible when the user presses Ctrl+O.
+    const verboseBlocks: string[] = [];
+    verboseBlocks.push(formatVerboseBlock("pre-compact peer.context(user)", (userContext as any)?.representation));
+    verboseBlocks.push(formatVerboseBlock("pre-compact peer.context(claude)", (claudeContext as any)?.representation));
+    verboseBlocks.push(formatVerboseList("pre-compact peerCard", (userContext as any)?.peerCard));
+
     const userDialectic =
       userChatResult.status === "fulfilled"
         ? userChatResult.value
@@ -216,11 +201,21 @@ export async function handlePreCompact(): Promise<void> {
       spinner.stop("memory anchored");
     }
 
+    // Add dialectic responses to verbose output
+    if (userDialectic) {
+      verboseBlocks.push(formatVerboseBlock(`pre-compact peer.chat(user) → "${config.peerName}"`, userDialectic));
+    }
+    if (claudeDialectic) {
+      verboseBlocks.push(formatVerboseBlock(`pre-compact peer.chat(claude) → "${config.claudePeer}"`, claudeDialectic));
+    }
+
     logHook("pre-compact", `Memory anchored (${memoryCard.length} chars)`);
 
-    // Output the memory card - this gets included in pre-compaction context
-    // and will be preserved in the summary
-    console.log(`[${config.claudePeer}/Honcho Memory Anchor]\n\n${memoryCard}`);
+    // Output memory card to stdout, followed by verbose API data.
+    // PreCompact stdout is only shown in Ctrl+O, so the verbose blocks
+    // are hidden by default and visible when the user presses Ctrl+O.
+    const verboseOutput = verboseBlocks.filter(Boolean).join("\n");
+    console.log(`[${config.claudePeer}/Honcho Memory Anchor]\n\n${memoryCard}${verboseOutput}`);
     process.exit(0);
   } catch (error) {
     logHook("pre-compact", `Error: ${error}`, { error: String(error) });

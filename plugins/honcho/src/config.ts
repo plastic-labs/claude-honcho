@@ -1,6 +1,10 @@
 import { homedir } from "os";
-import { join } from "path";
+import { join, basename } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+
+function sanitizeForSessionName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+}
 
 export interface MessageUploadConfig {
   maxUserTokens?: number; // Truncate user messages to this many tokens (null = no limit)
@@ -43,6 +47,7 @@ export interface HonchoCLAUDEConfig {
   endpoint?: HonchoEndpointConfig; // SaaS vs local instance config
   localContext?: LocalContextConfig; // Local claude-context.md settings
   enabled?: boolean; // Temporarily disable plugin (default: true)
+  logging?: boolean; // Enable file logging to ~/.honcho/ (default: true)
 }
 
 const CONFIG_DIR = join(homedir(), ".honcho");
@@ -105,6 +110,7 @@ export function loadConfigFromEnv(): HonchoCLAUDEConfig | null {
     claudePeer,
     saveMessages: process.env.HONCHO_SAVE_MESSAGES !== "false",
     enabled: process.env.HONCHO_ENABLED !== "false",
+    logging: process.env.HONCHO_LOGGING !== "false",
   };
 
   // Handle endpoint configuration
@@ -139,6 +145,9 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   if (process.env.HONCHO_ENABLED === "false") {
     config.enabled = false;
   }
+  if (process.env.HONCHO_LOGGING === "false") {
+    config.logging = false;
+  }
 
   return config;
 }
@@ -163,6 +172,21 @@ export function getSessionForPath(cwd: string): string | null {
   const config = loadConfig();
   if (!config?.sessions) return null;
   return config.sessions[cwd] || null;
+}
+
+/**
+ * Default session name: peerName-repoName (e.g. user-repo-name).
+ * If a session is configured for this path, that name is returned instead.
+ */
+export function getSessionName(cwd: string): string {
+  const configuredSession = getSessionForPath(cwd);
+  if (configuredSession) {
+    return configuredSession;
+  }
+  const config = loadConfig();
+  const peerPart = config?.peerName ? sanitizeForSessionName(config.peerName) : "user";
+  const repoPart = sanitizeForSessionName(basename(cwd));
+  return `${peerPart}-${repoPart}`;
 }
 
 export function setSessionForPath(cwd: string, sessionName: string): void {
@@ -213,6 +237,12 @@ export function getLocalContextConfig(): LocalContextConfig {
   return {
     maxEntries: config?.localContext?.maxEntries ?? 50, // Default 50 entries
   };
+}
+
+// File logging enable/disable
+export function isLoggingEnabled(): boolean {
+  const config = loadConfig();
+  return config?.logging !== false; // default: true
 }
 
 // Plugin enable/disable
