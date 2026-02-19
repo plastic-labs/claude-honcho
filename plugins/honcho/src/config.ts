@@ -62,7 +62,7 @@ export function detectHost(stdinInput?: Record<string, unknown>): HonchoHost {
 
 const DEFAULT_WORKSPACE: Record<HonchoHost, string> = {
   "cursor": "cursor",
-  "claude-code": "claude_code",
+  "claude-code": "claude-code",
 };
 
 // Stdin cache: entry points read stdin once, handlers consume from cache
@@ -221,17 +221,15 @@ export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null 
 }
 
 function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
+  // Only merge global (non-host-specific) env vars here.
+  // workspace and aiPeer are host-specific — already resolved by the hosts
+  // block in resolveConfig(). Generic env vars must not override them,
+  // otherwise HONCHO_WORKSPACE set for one host clobbers the other.
   if (process.env.HONCHO_API_KEY) {
     config.apiKey = process.env.HONCHO_API_KEY;
   }
-  if (process.env.HONCHO_WORKSPACE) {
-    config.workspace = process.env.HONCHO_WORKSPACE;
-  }
   if (process.env.HONCHO_PEER_NAME) {
     config.peerName = process.env.HONCHO_PEER_NAME;
-  }
-  if (process.env.HONCHO_AI_PEER) {
-    config.aiPeer = process.env.HONCHO_AI_PEER;
   }
   if (process.env.HONCHO_ENABLED === "false") {
     config.enabled = false;
@@ -278,10 +276,14 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
     aiPeer: config.aiPeer,
   };
 
-  // Clean up legacy flat fields if hosts block exists
-  delete existing.workspace;
-  delete existing.cursorPeer;
-  delete existing.claudePeer;
+  // Keep legacy flat fields for backwards compatibility with old code
+  // that hasn't been updated to read from hosts block yet
+  existing.workspace = config.workspace;
+  if (host === "cursor") {
+    existing.cursorPeer = config.aiPeer;
+  } else {
+    existing.claudePeer = config.aiPeer;
+  }
 
   writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
 }

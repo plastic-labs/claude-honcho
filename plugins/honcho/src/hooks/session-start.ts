@@ -22,6 +22,7 @@ interface HookInput {
   transcript_path?: string;
   cwd?: string;
   source?: string;
+  workspace_roots?: string[];
 }
 
 function formatRepresentation(rep: any): string {
@@ -53,7 +54,7 @@ export async function handleSessionStart(): Promise<void> {
     // No input or invalid JSON
   }
 
-  const cwd = hookInput.cwd || process.cwd();
+  const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const claudeInstanceId = hookInput.session_id;
 
   // Store Claude's instance ID for parallel session support

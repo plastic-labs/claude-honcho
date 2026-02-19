@@ -10,6 +10,7 @@ interface HookInput {
   tool_input?: Record<string, any>;
   tool_response?: Record<string, any>;
   cwd?: string;
+  workspace_roots?: string[];
 }
 
 function shouldLogTool(toolName: string, toolInput: Record<string, any>): boolean {
@@ -208,7 +209,7 @@ export async function handlePostToolUse(): Promise<void> {
   const toolName = hookInput.tool_name || "";
   const toolInput = hookInput.tool_input || {};
   const toolResponse = hookInput.tool_response || {};
-  const cwd = hookInput.cwd || process.cwd();
+  const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
 
   // Set log context
   setLogContext(cwd, getSessionName(cwd));

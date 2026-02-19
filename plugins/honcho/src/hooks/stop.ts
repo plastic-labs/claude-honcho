@@ -10,6 +10,7 @@ interface HookInput {
   transcript_path?: string;
   cwd?: string;
   stop_hook_active?: boolean;
+  workspace_roots?: string[];
 }
 
 interface TranscriptEntry {
@@ -123,7 +124,7 @@ export async function handleStop(): Promise<void> {
     process.exit(0);
   }
 
-  const cwd = hookInput.cwd || process.cwd();
+  const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const transcriptPath = hookInput.transcript_path;
   const sessionName = getSessionName(cwd);
 

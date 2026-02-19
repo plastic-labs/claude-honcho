@@ -11,6 +11,7 @@ interface HookInput {
   cwd?: string;
   trigger?: "manual" | "auto";
   custom_instructions?: string;
+  workspace_roots?: string[];
 }
 
 /**
@@ -105,7 +106,7 @@ export async function handlePreCompact(): Promise<void> {
     // No input, continue with defaults
   }
 
-  const cwd = hookInput.cwd || process.cwd();
+  const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const trigger = hookInput.trigger || "auto";
 
   // Set log context

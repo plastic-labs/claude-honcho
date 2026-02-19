@@ -19,6 +19,7 @@ interface HookInput {
   transcript_path?: string;
   cwd?: string;
   reason?: string;
+  workspace_roots?: string[];
 }
 
 interface TranscriptEntry {
@@ -197,7 +198,7 @@ export async function handleSessionEnd(): Promise<void> {
     // Continue with defaults
   }
 
-  const cwd = hookInput.cwd || process.cwd();
+  const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const reason = hookInput.reason || "unknown";
   const transcriptPath = hookInput.transcript_path;
 
