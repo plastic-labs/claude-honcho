@@ -5,9 +5,10 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getHonchoClientOptions, getSessionName } from "../config.js";
+import { loadConfig, getHonchoClientOptions, getSessionName, setDetectedHost } from "../config.js";
 
 export async function runMcpServer(): Promise<void> {
+  setDetectedHost("claude-code");
   const config = loadConfig();
   if (!config) {
     console.error("[honcho-mcp] Not configured. Run: honcho init");

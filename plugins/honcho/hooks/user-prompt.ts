@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
-/**
- * Standalone entry point for user-prompt hook.
- * Can be executed directly by Claude Code plugin system or via `bun run`.
- */
+import { detectHost, setDetectedHost, cacheStdin } from "../src/config.js";
 import { handleUserPrompt } from "../src/hooks/user-prompt.js";
 
+const stdinText = await Bun.stdin.text();
+cacheStdin(stdinText);
+const input = JSON.parse(stdinText || "{}");
+setDetectedHost(detectHost(input));
 await handleUserPrompt();

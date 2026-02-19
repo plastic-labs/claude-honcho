@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
-/**
- * Standalone entry point for session-start hook.
- * Can be executed directly by Claude Code plugin system or via `bun run`.
- */
+import { detectHost, setDetectedHost, cacheStdin } from "../src/config.js";
 import { handleSessionStart } from "../src/hooks/session-start.js";
 
+const stdinText = await Bun.stdin.text();
+cacheStdin(stdinText);
+const input = JSON.parse(stdinText || "{}");
+setDetectedHost(detectHost(input));
 await handleSessionStart();
