@@ -5,5 +5,6 @@ import { handlePreCompact } from "../src/hooks/pre-compact.js";
 const stdinText = await Bun.stdin.text();
 cacheStdin(stdinText);
 const input = JSON.parse(stdinText || "{}");
+if (input.cursor_version) process.exit(0);
 setDetectedHost(detectHost(input));
 await handlePreCompact();
