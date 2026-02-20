@@ -47,7 +47,7 @@ const HONCHO_BASE_URLS = {
 // Host Detection
 // ============================================
 
-export type HonchoHost = "cursor" | "claude-code";
+export type HonchoHost = "cursor" | "claude_code";
 
 export interface HostConfig {
   /** Honcho workspace name for this host */
@@ -63,22 +63,22 @@ export function setDetectedHost(host: HonchoHost): void {
 }
 
 export function getDetectedHost(): HonchoHost {
-  return _detectedHost ?? "claude-code";
+  return _detectedHost ?? "claude_code";
 }
 
 export function detectHost(stdinInput?: Record<string, unknown>): HonchoHost {
   if (stdinInput?.cursor_version) return "cursor";
-  return "claude-code";
+  return "claude_code";
 }
 
 const DEFAULT_WORKSPACE: Record<HonchoHost, string> = {
   "cursor": "cursor",
-  "claude-code": "claude_code",
+  "claude_code": "claude_code",
 };
 
 const DEFAULT_AI_PEER: Record<HonchoHost, string> = {
   "cursor": "cursor",
-  "claude-code": "clawd",
+  "claude_code": "clawd",
 };
 
 // Stdin cache: entry points read stdin once via initHook(),
@@ -213,7 +213,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     if (host === "cursor") {
       aiPeer = raw.cursorPeer ?? DEFAULT_AI_PEER["cursor"];
     } else {
-      aiPeer = raw.claudePeer ?? DEFAULT_AI_PEER["claude-code"];
+      aiPeer = raw.claudePeer ?? DEFAULT_AI_PEER["claude_code"];
     }
   }
 

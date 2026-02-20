@@ -8,7 +8,7 @@ import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getHonchoClientOptions, getSessionName, setDetectedHost } from "../config.js";
 
 export async function runMcpServer(): Promise<void> {
-  setDetectedHost("claude-code");
+  setDetectedHost("claude_code");
   const config = loadConfig();
   if (!config) {
     console.error("[honcho-mcp] Not configured. Run: honcho init");
