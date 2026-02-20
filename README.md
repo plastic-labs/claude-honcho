@@ -1,4 +1,5 @@
 # Honcho Plugins for Claude Code
+
 [![Honcho Banner](./assets/honcho_clawd.png)](https://honcho.dev)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -103,7 +104,7 @@ to the peer name you chose in your environment: it will carry across different p
 ### Step 6: (Recommended) Configure Your CLAUDE.md
 
 Tell Claude how to use its memory by adding directives to your **personal** `~/.claude/CLAUDE.md`
-(not a project-level `CLAUDE.md`). We use the personal file because Honcho is about *you* — your
+(not a project-level `CLAUDE.md`). We use the personal file because Honcho is about _you_ — your
 preferences and memory follow you across every project, not just one repo. A project-level
 `CLAUDE.md` would only apply when working in that specific directory.
 
@@ -265,11 +266,11 @@ This plugin provides skills to help you integrate Honcho into your projects and 
 
 ## Skills
 
-| Command                  | Description                                      |
-| ------------------------ | ------------------------------------------------ |
-| `/honcho-dev:integrate`  | Add Honcho to your project                       |
-| `/honcho-dev:migrate-py` | Migrate Python code to the latest Honcho SDK     |
-| `/honcho-dev:migrate-ts` | Migrate TypeScript code to the latest Honcho SDK |
+| Command                  | Description                                        |
+| ------------------------ | -------------------------------------------------- |
+| `/honcho-dev:integrate`  | Add Honcho memory to your project or bot framework |
+| `/honcho-dev:migrate-py` | Migrate Python code to the latest Honcho SDK       |
+| `/honcho-dev:migrate-ts` | Migrate TypeScript code to the latest Honcho SDK   |
 
 ## Installation
 
