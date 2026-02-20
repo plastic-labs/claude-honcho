@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
 import { appendClaudeWork, getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visCapture } from "../visual.js";
@@ -10,6 +10,7 @@ interface HookInput {
   tool_input?: Record<string, any>;
   tool_response?: Record<string, any>;
   cwd?: string;
+  workspace_roots?: string[];
 }
 
 function shouldLogTool(toolName: string, toolInput: Record<string, any>): boolean {
@@ -197,7 +198,7 @@ export async function handlePostToolUse(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = getCachedStdin() ?? await Bun.stdin.text();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -208,7 +209,7 @@ export async function handlePostToolUse(): Promise<void> {
   const toolName = hookInput.tool_name || "";
   const toolInput = hookInput.tool_input || {};
   const toolResponse = hookInput.tool_response || {};
-  const cwd = hookInput.cwd || process.cwd();
+  const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
 
   // Set log context
   setLogContext(cwd, getSessionName(cwd));
@@ -241,14 +242,14 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
 
   // Get session and peer using new fluent API
   const session = await honcho.session(sessionName);
-  const claudePeer = await honcho.peer(config.claudePeer);
+  const aiPeer = await honcho.peer(config.aiPeer);
 
   // Log the tool use with instance_id and session_affinity for project-scoped fact extraction
   logApiCall("session.addMessages", "POST", `tool: ${summary.slice(0, 50)}`);
   const instanceId = getClaudeInstanceId();
 
   await session.addMessages([
-    claudePeer.message(`[Tool] ${summary}`, {
+    aiPeer.message(`[Tool] ${summary}`, {
       metadata: {
         instance_id: instanceId || undefined,
         session_affinity: sessionName,

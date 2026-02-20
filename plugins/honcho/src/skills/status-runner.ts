@@ -35,7 +35,7 @@ function status(): void {
   console.log(s.dim(getConfigPath()));
   console.log("");
   console.log(`  ${s.label("Peer name")}:     ${config.peerName}`);
-  console.log(`  ${s.label("Claude peer")}:   ${config.claudePeer}`);
+  console.log(`  ${s.label("AI peer")}:       ${config.aiPeer}`);
   console.log(`  ${s.label("Workspace")}:     ${config.workspace}`);
   console.log(`  ${s.label("Save messages")}: ${config.saveMessages !== false ? "enabled" : "disabled"}`);
   console.log(`  ${s.label("API key")}:       ${s.dim(config.apiKey.slice(0, 20) + "...")}`);

@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
 import { existsSync, readFileSync } from "fs";
 import { getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -10,6 +10,7 @@ interface HookInput {
   transcript_path?: string;
   cwd?: string;
   stop_hook_active?: boolean;
+  workspace_roots?: string[];
 }
 
 interface TranscriptEntry {
@@ -109,7 +110,7 @@ export async function handleStop(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = getCachedStdin() ?? await Bun.stdin.text();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -123,7 +124,7 @@ export async function handleStop(): Promise<void> {
     process.exit(0);
   }
 
-  const cwd = hookInput.cwd || process.cwd();
+  const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const transcriptPath = hookInput.transcript_path;
   const sessionName = getSessionName(cwd);
 
@@ -146,14 +147,14 @@ export async function handleStop(): Promise<void> {
 
     // Get session and peer using new fluent API
     const session = await honcho.session(sessionName);
-    const claudePeer = await honcho.peer(config.claudePeer);
+    const aiPeer = await honcho.peer(config.aiPeer);
 
     // Upload the assistant response
     const instanceId = getClaudeInstanceId();
     logApiCall("session.addMessages", "POST", `assistant response (${lastMessage.length} chars)`);
 
     await session.addMessages([
-      claudePeer.message(lastMessage.slice(0, 3000), {
+      aiPeer.message(lastMessage.slice(0, 3000), {
         metadata: {
           instance_id: instanceId || undefined,
           type: "assistant_response",

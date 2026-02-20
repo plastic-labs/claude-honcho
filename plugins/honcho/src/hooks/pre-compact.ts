@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
 import { Spinner } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { formatVerboseBlock, formatVerboseList } from "../visual.js";
@@ -11,6 +11,7 @@ interface HookInput {
   cwd?: string;
   trigger?: "manual" | "auto";
   custom_instructions?: string;
+  workspace_roots?: string[];
 }
 
 /**
@@ -18,7 +19,7 @@ interface HookInput {
  * This is injected RIGHT BEFORE compaction so it becomes part of the summary
  */
 function formatMemoryCard(
-  config: { peerName: string; claudePeer: string; workspace: string },
+  config: { peerName: string; aiPeer: string; workspace: string },
   sessionName: string,
   userContext: any,
   claudeContext: any,
@@ -35,7 +36,7 @@ These conclusions MUST be preserved in the summary.
 
 ### Session Identity
 - User: ${config.peerName}
-- AI: ${config.claudePeer}
+- AI: ${config.aiPeer}
 - Workspace: ${config.workspace}
 - Session: ${sessionName}`);
 
@@ -55,7 +56,7 @@ ${userPeerCard.join("\n")}`);
   // Claude's self-context - what was I working on
   const claudeRep = claudeContext?.representation;
   if (typeof claudeRep === "string" && claudeRep.trim()) {
-    parts.push(`### ${config.claudePeer}'s Recent Work (PRESERVE)\n${claudeRep}`);
+    parts.push(`### ${config.aiPeer}'s Recent Work (PRESERVE)\n${claudeRep}`);
   }
 
   // Session summary - what we were doing
@@ -72,7 +73,7 @@ ${userDialectic}`);
   }
 
   if (claudeDialectic) {
-    parts.push(`### ${config.claudePeer}'s Self-Reflection (PRESERVE)
+    parts.push(`### ${config.aiPeer}'s Self-Reflection (PRESERVE)
 ${claudeDialectic}`);
   }
 
@@ -97,7 +98,7 @@ export async function handlePreCompact(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = getCachedStdin() ?? await Bun.stdin.text();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -105,7 +106,7 @@ export async function handlePreCompact(): Promise<void> {
     // No input, continue with defaults
   }
 
-  const cwd = hookInput.cwd || process.cwd();
+  const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const trigger = hookInput.trigger || "auto";
 
   // Set log context
@@ -126,13 +127,13 @@ export async function handlePreCompact(): Promise<void> {
     // Get session and peers using new fluent API
     const session = await honcho.session(sessionName);
     const userPeer = await honcho.peer(config.peerName);
-    const claudePeer = await honcho.peer(config.claudePeer);
+    const aiPeer = await honcho.peer(config.aiPeer);
 
     if (trigger === "auto") {
       spinner.update("fetching memory context");
     }
 
-    logApiCall("peer.context", "GET", `${config.peerName} + ${config.claudePeer}`);
+    logApiCall("peer.context", "GET", `${config.peerName} + ${config.aiPeer}`);
     logApiCall("session.summaries", "GET", sessionName);
     logApiCall("peer.chat", "POST", "dialectic queries x2");
 
@@ -146,7 +147,7 @@ export async function handlePreCompact(): Promise<void> {
           includeMostFrequent: true,
         }),
         // Claude's self-context
-        claudePeer.context({
+        aiPeer.context({
           maxConclusions: 20,
           includeMostFrequent: true,
         }),
@@ -158,8 +159,8 @@ export async function handlePreCompact(): Promise<void> {
           { session }
         ),
         // Fresh dialectic - claude self-reflection
-        claudePeer.chat(
-          `What are the most important things ${config.claudePeer} was working on with ${config.peerName}? Summarize key context that should be preserved.`,
+        aiPeer.chat(
+          `What are the most important things ${config.aiPeer} was working on with ${config.peerName}? Summarize key context that should be preserved.`,
           { session }
         ),
       ]);
@@ -206,7 +207,7 @@ export async function handlePreCompact(): Promise<void> {
       verboseBlocks.push(formatVerboseBlock(`pre-compact peer.chat(user) → "${config.peerName}"`, userDialectic));
     }
     if (claudeDialectic) {
-      verboseBlocks.push(formatVerboseBlock(`pre-compact peer.chat(claude) → "${config.claudePeer}"`, claudeDialectic));
+      verboseBlocks.push(formatVerboseBlock(`pre-compact peer.chat(claude) → "${config.aiPeer}"`, claudeDialectic));
     }
 
     logHook("pre-compact", `Memory anchored (${memoryCard.length} chars)`);
@@ -215,7 +216,7 @@ export async function handlePreCompact(): Promise<void> {
     // PreCompact stdout is only shown in Ctrl+O, so the verbose blocks
     // are hidden by default and visible when the user presses Ctrl+O.
     const verboseOutput = verboseBlocks.filter(Boolean).join("\n");
-    console.log(`[${config.claudePeer}/Honcho Memory Anchor]\n\n${memoryCard}${verboseOutput}`);
+    console.log(`[${config.aiPeer}/Honcho Memory Anchor]\n\n${memoryCard}${verboseOutput}`);
     process.exit(0);
   } catch (error) {
     logHook("pre-compact", `Error: ${error}`, { error: String(error) });

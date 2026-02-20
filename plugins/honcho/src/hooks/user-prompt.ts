@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
 import {
   getCachedUserContext,
   isContextCacheStale,
@@ -18,6 +18,7 @@ interface HookInput {
   prompt?: string;
   cwd?: string;
   session_id?: string;
+  workspace_roots?: string[];
 }
 
 // Patterns to skip heavy context retrieval
@@ -79,7 +80,7 @@ export async function handleUserPrompt(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = getCachedStdin() ?? await Bun.stdin.text();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -88,7 +89,7 @@ export async function handleUserPrompt(): Promise<void> {
   }
 
   const prompt = hookInput.prompt || "";
-  const cwd = hookInput.cwd || process.cwd();
+  const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
 
   // Set log context for this hook
   setLogContext(cwd, getSessionName(cwd));
