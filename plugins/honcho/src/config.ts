@@ -73,7 +73,7 @@ export function detectHost(stdinInput?: Record<string, unknown>): HonchoHost {
 
 const DEFAULT_WORKSPACE: Record<HonchoHost, string> = {
   "cursor": "cursor",
-  "claude-code": "claude-code",
+  "claude-code": "claude_code",
 };
 
 const DEFAULT_AI_PEER: Record<HonchoHost, string> = {
