@@ -52,7 +52,7 @@ export type HonchoHost = "cursor" | "claude_code";
 export interface HostConfig {
   /** Honcho workspace name for this host */
   workspace?: string;
-  /** AI peer name for this host (e.g. "clawd", "cursor") */
+  /** AI peer name for this host (e.g. "claude", "cursor") */
   aiPeer?: string;
 }
 
@@ -78,7 +78,7 @@ const DEFAULT_WORKSPACE: Record<HonchoHost, string> = {
 
 const DEFAULT_AI_PEER: Record<HonchoHost, string> = {
   "cursor": "cursor",
-  "claude_code": "clawd",
+  "claude_code": "claude",
 };
 
 // Stdin cache: entry points read stdin once via initHook(),
@@ -101,7 +101,8 @@ export function getCachedStdin(): string | null {
 export async function initHook(): Promise<void> {
   const stdinText = await Bun.stdin.text();
   cacheStdin(stdinText);
-  const input = JSON.parse(stdinText || "{}");
+  let input: Record<string, unknown> = {};
+  try { input = JSON.parse(stdinText || "{}"); } catch { process.exit(0); }
   if (input.cursor_version) process.exit(0);
   setDetectedHost(detectHost(input));
 }
@@ -139,7 +140,7 @@ export interface HonchoCLAUDEConfig {
   apiKey: string;
   /** Honcho workspace name (resolved per-host) */
   workspace: string;
-  /** AI peer name (resolved per-host, e.g. "clawd" for claude-code) */
+  /** AI peer name (resolved per-host, e.g. "claude" for claude-code) */
   aiPeer: string;
   /** Map of directory path -> session name overrides */
   sessions?: Record<string, string>;
@@ -249,7 +250,10 @@ export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null 
   const resolvedHost = host ?? getDetectedHost();
   const peerName = process.env.HONCHO_PEER_NAME || process.env.USER || "user";
   const workspace = process.env.HONCHO_WORKSPACE || DEFAULT_WORKSPACE[resolvedHost];
-  const aiPeer = process.env.HONCHO_AI_PEER || process.env.HONCHO_CLAUDE_PEER || process.env.HONCHO_CURSOR_PEER || DEFAULT_AI_PEER[resolvedHost];
+  const hostPeerEnv = resolvedHost === "cursor"
+    ? process.env.HONCHO_CURSOR_PEER
+    : process.env.HONCHO_CLAUDE_PEER;
+  const aiPeer = process.env.HONCHO_AI_PEER || hostPeerEnv || DEFAULT_AI_PEER[resolvedHost];
   const endpoint = process.env.HONCHO_ENDPOINT;
 
   const config: HonchoCLAUDEConfig = {

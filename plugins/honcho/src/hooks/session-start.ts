@@ -203,7 +203,7 @@ export async function handleSessionStart(): Promise<void> {
     // Load local claude context immediately (instant, no API call)
     const localClaudeContext = loadClaudeLocalContext();
     if (localClaudeContext) {
-      contextParts.push(`## CLAUDE Local Context (What I Was Working On)\n${localClaudeContext.slice(0, 2000)}`);
+      contextParts.push(`## Local Context (What I Was Working On)\n${localClaudeContext.slice(0, 2000)}`);
     }
 
     // Build context-aware dialectic queries
