@@ -142,6 +142,12 @@ export function getCachedUserContext(): any | null {
   return null;
 }
 
+/** Return cached context even if expired (for timeout fallback) */
+export function getStaleCachedUserContext(): any | null {
+  const cache = loadContextCache();
+  return cache.userContext?.data ?? null;
+}
+
 export function setCachedUserContext(data: any): void {
   const cache = loadContextCache();
   cache.userContext = { data, fetchedAt: Date.now() };
