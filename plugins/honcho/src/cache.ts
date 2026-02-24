@@ -534,3 +534,30 @@ export function clearAllCaches(): void {
   if (existsSync(GIT_STATE_FILE)) writeFileSync(GIT_STATE_FILE, "{}");
   // Don't clear claude-context.md - that's valuable history
 }
+
+/** Clear only the ID cache (workspace, peer, session IDs) */
+export function clearIdCache(): void {
+  ensureCacheDir();
+  writeFileSync(ID_CACHE_FILE, "{}");
+}
+
+/** Clear only peer IDs from the ID cache */
+export function clearPeerCache(): void {
+  const cache = loadIdCache();
+  delete cache.peers;
+  saveIdCache(cache);
+}
+
+/** Clear only userContext from the context cache */
+export function clearUserContextOnly(): void {
+  const cache = loadContextCache();
+  delete cache.userContext;
+  saveContextCache(cache);
+}
+
+/** Clear only claudeContext from the context cache */
+export function clearClaudeContextOnly(): void {
+  const cache = loadContextCache();
+  delete cache.claudeContext;
+  saveContextCache(cache);
+}

@@ -1,6 +1,8 @@
 import { homedir } from "os";
 import { join, basename } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { captureGitState } from "./git.js";
+import { getClaudeInstanceId } from "./cache.js";
 
 function sanitizeForSessionName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
@@ -29,6 +31,8 @@ export interface LocalContextConfig {
   maxEntries?: number;
 }
 
+export type SessionStrategy = "per-directory" | "git-branch" | "claude-instance";
+
 export type HonchoEnvironment = "production" | "local";
 
 export interface HonchoEndpointConfig {
@@ -54,6 +58,8 @@ export interface HostConfig {
   workspace?: string;
   /** AI peer name for this host (e.g. "claude", "cursor") */
   aiPeer?: string;
+  /** Other host keys whose workspaces to read context from (writes stay local) */
+  linkedHosts?: string[];
 }
 
 let _detectedHost: HonchoHost | null = null;
@@ -124,6 +130,9 @@ interface HonchoFileConfig {
   localContext?: LocalContextConfig;
   enabled?: boolean;
   logging?: boolean;
+  sessionStrategy?: SessionStrategy;
+  /** Prefix session names with peerName (default: true, disable for solo use) */
+  sessionPeerPrefix?: boolean;
   hosts?: Record<string, HostConfig>;
   // Legacy flat fields (read-only fallbacks)
   cursorPeer?: string;
@@ -142,6 +151,12 @@ export interface HonchoCLAUDEConfig {
   workspace: string;
   /** AI peer name (resolved per-host, e.g. "claude" for claude-code) */
   aiPeer: string;
+  /** Other host keys whose workspaces to also read context from */
+  linkedHosts?: string[];
+  /** How sessions are named: per-directory, git-branch, or claude-instance */
+  sessionStrategy?: SessionStrategy;
+  /** Prefix session names with peerName (default: true, disable for solo use) */
+  sessionPeerPrefix?: boolean;
   /** Map of directory path -> session name overrides */
   sessions?: Record<string, string>;
   /** Save messages to Honcho (default: true) */
@@ -218,11 +233,17 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     }
   }
 
+  // Resolve linked hosts
+  const linkedHosts = hostBlock?.linkedHosts ?? [];
+
   const config: HonchoCLAUDEConfig = {
     apiKey,
     peerName,
     workspace,
     aiPeer,
+    linkedHosts: linkedHosts.length ? linkedHosts : undefined,
+    sessionStrategy: raw.sessionStrategy,
+    sessionPeerPrefix: raw.sessionPeerPrefix,
     sessions: raw.sessions,
     saveMessages: raw.saveMessages,
     messageUpload: raw.messageUpload,
@@ -304,10 +325,10 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
 /**
  * Read-merge-write: reads existing file, merges in changes, writes back.
  * This prevents one host from clobbering fields owned by the other.
- * Host-specific fields (workspace, aiPeer) are written into both the
- * hosts block AND legacy flat fields. The flat fields exist so that
- * older plugin versions (pre-hosts-block) can still read the config
- * if the user downgrades or runs mixed versions.
+ * Host-specific fields (workspace, aiPeer, linkedHosts) live in the
+ * hosts block. Legacy flat fields (workspace, cursorPeer, claudePeer)
+ * are no longer written — they may still exist in old config files but
+ * are only consulted as fallbacks when the hosts block is missing.
  */
 export function saveConfig(config: HonchoCLAUDEConfig): void {
   if (!existsSync(CONFIG_DIR)) {
@@ -326,6 +347,8 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   // Merge shared fields
   existing.apiKey = config.apiKey;
   existing.peerName = config.peerName;
+  existing.sessionStrategy = config.sessionStrategy;
+  existing.sessionPeerPrefix = config.sessionPeerPrefix;
   existing.sessions = config.sessions;
   existing.saveMessages = config.saveMessages;
   existing.messageUpload = config.messageUpload;
@@ -341,16 +364,8 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   existing.hosts[host] = {
     workspace: config.workspace,
     aiPeer: config.aiPeer,
+    ...(config.linkedHosts?.length ? { linkedHosts: config.linkedHosts } : {}),
   };
-
-  // Keep legacy flat fields for backwards compatibility with old code
-  // that hasn't been updated to read from hosts block yet
-  existing.workspace = config.workspace;
-  if (host === "cursor") {
-    existing.cursorPeer = config.aiPeer;
-  } else {
-    existing.claudePeer = config.aiPeer;
-  }
 
   writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
 }
@@ -369,16 +384,41 @@ export function getSessionForPath(cwd: string): string | null {
   return config.sessions[cwd] || null;
 }
 
-/** Default session name: peerName-repoName. Configured session overrides. */
+/** Session name derived from strategy. Manual overrides always take precedence. */
 export function getSessionName(cwd: string): string {
+  // Manual overrides always win
   const configuredSession = getSessionForPath(cwd);
   if (configuredSession) {
     return configuredSession;
   }
+
   const config = loadConfig();
+  const strategy = config?.sessionStrategy ?? "per-directory";
+  const usePrefix = config?.sessionPeerPrefix !== false; // default true
   const peerPart = config?.peerName ? sanitizeForSessionName(config.peerName) : "user";
   const repoPart = sanitizeForSessionName(basename(cwd));
-  return `${peerPart}-${repoPart}`;
+  const base = usePrefix ? `${peerPart}-${repoPart}` : repoPart;
+
+  switch (strategy) {
+    case "git-branch": {
+      const gitState = captureGitState(cwd);
+      if (gitState) {
+        const branchPart = sanitizeForSessionName(gitState.branch);
+        return `${base}-${branchPart}`;
+      }
+      return base;
+    }
+    case "claude-instance": {
+      const instanceId = getClaudeInstanceId();
+      if (instanceId) {
+        return `claude-${instanceId}`;
+      }
+      return base;
+    }
+    case "per-directory":
+    default:
+      return base;
+  }
 }
 
 export function setSessionForPath(cwd: string, sessionName: string): void {
@@ -443,6 +483,52 @@ export function setPluginEnabled(enabled: boolean): void {
   if (!config) return;
   config.enabled = enabled;
   saveConfig(config);
+}
+
+/**
+ * Get workspace names from linked hosts.
+ * Returns the workspace names configured for each linked host key.
+ * If a linked host has no workspace set, uses its default.
+ */
+export function getLinkedWorkspaces(): string[] {
+  const config = loadConfig();
+  if (!config?.linkedHosts?.length) return [];
+
+  const cfgPath = getConfigPath();
+  if (!existsSync(cfgPath)) return [];
+
+  let raw: Record<string, any>;
+  try {
+    raw = JSON.parse(readFileSync(cfgPath, "utf-8"));
+  } catch {
+    return [];
+  }
+
+  const workspaces: string[] = [];
+  for (const hostKey of config.linkedHosts) {
+    const block = raw.hosts?.[hostKey];
+    // Use that host's configured workspace, or fall back to host key as workspace name
+    const ws = block?.workspace ?? hostKey;
+    // Don't include our own workspace
+    if (ws !== config.workspace) {
+      workspaces.push(ws);
+    }
+  }
+  return workspaces;
+}
+
+/**
+ * Get all known host keys from the config file's hosts block.
+ */
+export function getKnownHosts(): string[] {
+  const cfgPath = getConfigPath();
+  if (!existsSync(cfgPath)) return [];
+  try {
+    const raw = JSON.parse(readFileSync(cfgPath, "utf-8"));
+    return raw.hosts ? Object.keys(raw.hosts) : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Simple token estimation (chars / 4) */
