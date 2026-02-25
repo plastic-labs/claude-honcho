@@ -104,26 +104,20 @@ If confirmed, call `set_config` again WITH `confirm: true`.
 
 ### Session mapping
 
-Use `AskUserQuestion` with preview markdown to show each strategy:
-
 ```
 AskUserQuestion:
   question: "Which session mapping strategy?"
   header: "Sessions"
   options:
-    - label: "per-directory"
-      description: "One session per project (default)"
-      markdown: |
-        {peer}-{repo}
+    - label: "per-directory (Recommended)"
+      description: "{peer}-{repo} — one session per project"
     - label: "git-branch"
-      description: "Session follows branch"
-      markdown: |
-        {peer}-{repo}-{branch}
+      description: "{peer}-{repo}-{branch} — session follows branch"
     - label: "chat-instance"
-      description: "Fresh session each launch"
-      markdown: |
-        chat-{session_id}
+      description: "chat-{id} — fresh each launch"
 ```
+
+Do NOT use markdown previews for this menu — descriptions are sufficient and previews truncate in narrow terminals.
 
 After strategy selection, ask about peer prefix:
 
