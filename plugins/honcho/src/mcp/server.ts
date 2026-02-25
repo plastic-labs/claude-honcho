@@ -126,10 +126,19 @@ function handleGetConfig(cwd: string) {
     host: `${endpointLabel} (${endpointInfo?.url})`,
   } : null;
 
-  // Host info
+  // Host info — include other hosts so the config skill can offer linking
+  const allHosts = getKnownHosts();
+  const otherHosts: Record<string, { workspace: string }> = {};
+  for (const hk of allHosts) {
+    if (hk === host) continue;
+    const block = rawFile.hosts?.[hk];
+    otherHosts[hk] = { workspace: block?.workspace ?? hk };
+  }
+
   const hostInfo = {
     detected: host,
     hasHostsBlock: !!rawFile.hosts,
+    otherHosts,
   };
 
   // Warnings
