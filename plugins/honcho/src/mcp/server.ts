@@ -188,12 +188,12 @@ function handleGetConfig(cwd: string) {
 
   const card = cfg ? renderCard([
     ["workspace", cfg.workspace],
+    ["linked", linkedLabel],
     ["session", sessionName ?? "unknown"],
     ["mapping", strategyLabels[cfg.sessionStrategy ?? "per-directory"] ?? cfg.sessionStrategy ?? "per directory"],
     ["peer", `${cfg.peerName} / ${cfg.aiPeer}`],
     ["host", hostLabel],
     ["messages", cfg.saveMessages !== false ? "saving enabled" : "saving disabled"],
-    ["linked", linkedLabel],
   ], "current honcho config") : null;
 
   return {

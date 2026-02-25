@@ -39,10 +39,8 @@ AskUserQuestion:
       description: "Your name and AI name (currently: {resolved.peerName} / {resolved.aiPeer})"
     - label: "Session mapping"
       description: "How sessions are named — per directory, git branch, or per chat (currently: {resolved.sessionStrategy})"
-    - label: "Linked hosts"
-      description: "Merge context from other tools (currently: {resolved.linkedHosts || 'none'})"
     - label: "Workspace"
-      description: "Data space — CAUTION: changes visible data (currently: {resolved.workspace})"
+      description: "Data space, linking, and cross-tool context (currently: {resolved.workspace})"
 ```
 
 If the user selects "Other", present advanced options:
@@ -85,23 +83,6 @@ Then ask for the new value. Call `set_config` with `peerName` or `aiPeer`.
 
 Use `AskUserQuestion` to ask for the new value if there are known options, otherwise ask the user to type it. Call `set_config` with the appropriate field. Show the result.
 
-### Dangerous fields (Workspace, Host)
-
-These require confirmation. First call `set_config` WITHOUT `confirm: true`. The tool will return a description of what will happen. Use `AskUserQuestion` to confirm:
-
-```
-AskUserQuestion:
-  question: "Switch workspace to '{value}'?"
-  header: "Confirm"
-  options:
-    - label: "Yes, switch"
-      description: "Change to the new workspace"
-    - label: "Cancel"
-      description: "Keep current workspace"
-```
-
-If confirmed, call `set_config` again WITH `confirm: true`.
-
 ### Session mapping
 
 ```
@@ -132,80 +113,90 @@ AskUserQuestion:
       description: "Cleaner for solo use"
 ```
 
-### Linked hosts
+### Workspace
 
-Linking makes the config **unified** across hosts. All linked hosts share the same workspace, session mapping, and peer names. Context flows between all linked workspaces.
-
-**Step 1: Show current state.** If `resolved.linkedHosts` is non-empty, show what's linked. If `globalOverride` is true, note that config is already unified.
-
-**Step 2: Pick hosts to link.**
+When selected, present a sub-menu:
 
 ```
 AskUserQuestion:
-  question: "Which hosts should share context?"
+  question: "Workspace settings?"
+  header: "Workspace"
+  options:
+    - label: "Rename workspace"
+      description: "Change workspace name (currently: {resolved.workspace})"
+    - label: "Link / unlink hosts"
+      description: "Share context across tools (currently: {resolved.linkedHosts || 'none'})"
+```
+
+#### Workspace > Rename
+
+Dangerous field — requires confirmation. First call `set_config` WITHOUT `confirm: true`. The tool will return a description of what will happen. Use `AskUserQuestion` to confirm:
+
+```
+AskUserQuestion:
+  question: "Switch workspace to '{value}'?"
+  header: "Confirm"
+  options:
+    - label: "Yes, switch"
+      description: "Change to the new workspace"
+    - label: "Cancel"
+      description: "Keep current workspace"
+```
+
+If confirmed, call `set_config` again WITH `confirm: true`.
+
+#### Workspace > Link / unlink hosts
+
+Linking and global mode are one concept: if any hosts are linked, global mode is on (shared workspace, sessions, peers). If all hosts are unlinked, global mode is off.
+
+Go straight to the multi-select picker. Pre-select any hosts that are currently linked. The user toggles individual hosts on or off.
+
+```
+AskUserQuestion:
+  question: "Toggle hosts to link/unlink:"
   header: "Link"
   multiSelect: true
   options:
-    - label: "{hostKey}"
-      description: "workspace: {hostWorkspace}"
+    - label: "{hostKey} (linked)"   // if currently in resolved.linkedHosts
+      description: "workspace: {hostWorkspace} — deselect to unlink"
+    - label: "{hostKey}"            // if not currently linked
+      description: "workspace: {hostWorkspace} — select to link"
     (one option per detected host from get_config's host.otherHosts)
 ```
 
-If the user selects none (or deselects all), disable linking: call `set_config` with `field: "linkedHosts"`, `value: []`, then call `set_config` with `field: "globalOverride"`, `value: false`. Skip remaining steps.
+**If the user selected one or more hosts** (linking is being enabled or changed):
 
-**Step 3: Pick the shared workspace.**
+Call `set_config` with `field: "linkedHosts"` and the selected host array.
+
+Then prompt for the shared workspace name:
 
 ```
 AskUserQuestion:
-  question: "Which workspace should all linked hosts use?"
+  question: "Shared workspace name for all linked hosts?"
   header: "Workspace"
   options:
     - label: "{currentWorkspace} (Recommended)"
-      description: "Keep the current workspace for all hosts"
+      description: "Keep the current workspace"
     - label: "{otherHostWorkspace}"
-      description: "Use {otherHost}'s workspace instead"
-    (one option per unique workspace among linked hosts)
+      description: "Use {otherHost}'s workspace"
+    (one option per unique workspace among linked hosts + current host)
 ```
 
 Call `set_config` with `field: "workspace"`, `value: chosen`, `confirm: true`.
+Then call `set_config` with `field: "globalOverride"`, `value: true`, `confirm: true`.
 
-**Step 4: Session mapping.**
+Explain: "Linked. All selected hosts share workspace '{chosen}', sessions, and peers. Context flows between them."
 
-```
-AskUserQuestion:
-  question: "How should sessions be mapped across all hosts?"
-  header: "Sessions"
-  options:
-    - label: "per-directory (Recommended)"
-      description: "{repoName} — one session per project"
-    - label: "git-branch"
-      description: "{repoName}-{branch} — session follows branch"
-    - label: "chat-instance"
-      description: "chat-{id} — fresh each launch"
-```
+**If the user deselected all hosts** (unlinking everything):
 
-Call `set_config` with `field: "sessionStrategy"` and the selection.
+Call `set_config` with `field: "linkedHosts"`, `value: []`.
+Then call `set_config` with `field: "globalOverride"`, `value: false`.
 
-Then ask about prefix:
+Explain: "Unlinked. Each host uses its own workspace and config."
 
-```
-AskUserQuestion:
-  question: "Include your name in session names?"
-  header: "Prefix"
-  options:
-    - label: "Yes — {peerName}-{repoName}"
-      description: "For teams sharing a workspace"
-    - label: "No — {repoName} only"
-      description: "Cleaner for solo use"
-```
+### Dangerous fields (Host)
 
-Call `set_config` with `field: "sessionPeerPrefix"`.
-
-**Step 5: Enable unified config.**
-
-Call `set_config` with `field: "linkedHosts"` and the selected host array, then call `set_config` with `field: "globalOverride"`, `value: true`, `confirm: true`.
-
-Explain: "Linking is active. Any changes to peers, session mapping, or workspace now apply to all linked hosts. Each host still reads context from its own workspace plus all linked workspaces."
+Host changes require confirmation. First call `set_config` WITHOUT `confirm: true`. The tool will return a description of what will happen. Use `AskUserQuestion` to confirm, then call again WITH `confirm: true`.
 
 ### Context refresh
 
