@@ -10,5 +10,7 @@
   "repository": "https://github.com/plastic-labs/claude-honcho",
   "license": "MIT",
   "keywords": ["memory", "context", "ai", "honcho", "persistence"],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
   "skills": "./skills/"
 }

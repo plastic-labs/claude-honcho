@@ -78,6 +78,8 @@ export function detectHost(stdinInput?: Record<string, unknown>): HonchoHost {
   if (envHost === "cursor" || envHost === "claude_code" || envHost === "obsidian") return envHost;
 
   if (stdinInput?.cursor_version) return "cursor";
+  // Cursor sets CURSOR_PROJECT_DIR for child processes (incl. Claude Code inside Cursor)
+  if (process.env.CURSOR_PROJECT_DIR) return "cursor";
   return "claude_code";
 }
 
@@ -249,8 +251,11 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     workspace = hostBlock.workspace ?? DEFAULT_WORKSPACE[host];
     aiPeer = hostBlock.aiPeer ?? DEFAULT_AI_PEER[host];
   } else {
-    // Legacy flat-field fallback for configs written before hosts block
-    workspace = raw.workspace ?? DEFAULT_WORKSPACE[host];
+    // Legacy flat-field fallback for configs written before hosts block.
+    // Env var is respected here (matching main-branch behavior) so it gets
+    // captured into the hosts block on first saveConfig(), after which the
+    // env var becomes redundant and is safely ignored.
+    workspace = process.env.HONCHO_WORKSPACE ?? raw.workspace ?? DEFAULT_WORKSPACE[host];
     if (host === "cursor") {
       aiPeer = raw.cursorPeer ?? DEFAULT_AI_PEER["cursor"];
     } else {
