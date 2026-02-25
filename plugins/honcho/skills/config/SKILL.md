@@ -39,10 +39,10 @@ AskUserQuestion:
       description: "Your name and AI name (currently: {resolved.peerName} / {resolved.aiPeer})"
     - label: "Session mapping"
       description: "How sessions are named — per directory, git branch, or per chat (currently: {resolved.sessionStrategy})"
+    - label: "Linked hosts"
+      description: "Merge context from other tools (currently: {resolved.linkedHosts || 'none'})"
     - label: "Workspace"
       description: "Data space — CAUTION: changes visible data (currently: {resolved.workspace})"
-    - label: "Host"
-      description: "Platform / local / custom URL (currently: {current.host})"
 ```
 
 If the user selects "Other", present advanced options:
@@ -52,8 +52,8 @@ AskUserQuestion:
   question: "Advanced settings:"
   header: "Advanced"
   options:
-    - label: "Linked hosts"
-      description: "Merge context from other tools"
+    - label: "Host"
+      description: "Platform / local / custom URL (currently: {current.host})"
     - label: "Context refresh"
       description: "TTL, message threshold, dialectic settings"
     - label: "Message upload"
@@ -134,22 +134,78 @@ AskUserQuestion:
 
 ### Linked hosts
 
-Use `AskUserQuestion` with multiSelect to let the user pick which hosts to link:
+Linking makes the config **unified** across hosts. All linked hosts share the same workspace, session mapping, and peer names. Context flows between all linked workspaces.
+
+**Step 1: Show current state.** If `resolved.linkedHosts` is non-empty, show what's linked. If `globalOverride` is true, note that config is already unified.
+
+**Step 2: Pick hosts to link.**
 
 ```
 AskUserQuestion:
-  question: "Which hosts should share context with this one?"
+  question: "Which hosts should share context?"
   header: "Link"
   multiSelect: true
   options:
     - label: "{hostKey}"
-      description: "Reads from workspace: {hostWorkspace}"
-    (one option per detected host in host.otherHosts)
+      description: "workspace: {hostWorkspace}"
+    (one option per detected host from get_config's host.otherHosts)
 ```
 
-Explain briefly: linking means this plugin reads context from that host's workspace. Writes stay local.
+If the user selects none (or deselects all), disable linking: call `set_config` with `field: "linkedHosts"`, `value: []`, then call `set_config` with `field: "globalOverride"`, `value: false`. Skip remaining steps.
 
-Call `set_config` with `field: "linkedHosts"` and the selected array.
+**Step 3: Pick the shared workspace.**
+
+```
+AskUserQuestion:
+  question: "Which workspace should all linked hosts use?"
+  header: "Workspace"
+  options:
+    - label: "{currentWorkspace} (Recommended)"
+      description: "Keep the current workspace for all hosts"
+    - label: "{otherHostWorkspace}"
+      description: "Use {otherHost}'s workspace instead"
+    (one option per unique workspace among linked hosts)
+```
+
+Call `set_config` with `field: "workspace"`, `value: chosen`, `confirm: true`.
+
+**Step 4: Session mapping.**
+
+```
+AskUserQuestion:
+  question: "How should sessions be mapped across all hosts?"
+  header: "Sessions"
+  options:
+    - label: "per-directory (Recommended)"
+      description: "{repoName} — one session per project"
+    - label: "git-branch"
+      description: "{repoName}-{branch} — session follows branch"
+    - label: "chat-instance"
+      description: "chat-{id} — fresh each launch"
+```
+
+Call `set_config` with `field: "sessionStrategy"` and the selection.
+
+Then ask about prefix:
+
+```
+AskUserQuestion:
+  question: "Include your name in session names?"
+  header: "Prefix"
+  options:
+    - label: "Yes — {peerName}-{repoName}"
+      description: "For teams sharing a workspace"
+    - label: "No — {repoName} only"
+      description: "Cleaner for solo use"
+```
+
+Call `set_config` with `field: "sessionPeerPrefix"`.
+
+**Step 5: Enable unified config.**
+
+Call `set_config` with `field: "linkedHosts"` and the selected host array, then call `set_config` with `field: "globalOverride"`, `value: true`, `confirm: true`.
+
+Explain: "Linking is active. Any changes to peers, session mapping, or workspace now apply to all linked hosts. Each host still reads context from its own workspace plus all linked workspaces."
 
 ### Context refresh
 
