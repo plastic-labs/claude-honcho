@@ -252,7 +252,9 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.peerName = String(value);
       clearPeerCache();
       clearUserContextOnly();
-      cacheInvalidation = { cleared: ["peer IDs", "user context"], reason: "Peer name changed" };
+      // Clear persisted session names — they embed the peer name
+      cfg.sessions = {};
+      cacheInvalidation = { cleared: ["peer IDs", "user context", "session overrides"], reason: "Peer name changed" };
       break;
 
     case "aiPeer":
@@ -299,11 +301,15 @@ function handleSetConfig(args: Record<string, unknown>) {
     case "sessionStrategy":
       previousValue = cfg.sessionStrategy ?? "per-directory";
       cfg.sessionStrategy = String(value) as SessionStrategy;
+      // Clear persisted session names — they were derived under the old strategy
+      cfg.sessions = {};
       break;
 
     case "sessionPeerPrefix":
       previousValue = cfg.sessionPeerPrefix !== false;
       cfg.sessionPeerPrefix = Boolean(value);
+      // Clear persisted session names — they embed the old prefix
+      cfg.sessions = {};
       break;
 
     case "linkedHosts": {
