@@ -27,19 +27,19 @@ interface TranscriptEntry {
  * Check if content is meaningful (not just tool announcements)
  */
 function isMeaningfulContent(content: string): boolean {
-  if (content.length < 50) return false;
+  if (content.length < 20) return false;
 
-  // Skip pure tool invocation announcements
+  // Skip pure tool invocation one-liners
   const toolAnnouncements = [
     /^(I'll|Let me|I'm going to|I will|Now I'll|First,? I'll)\s+(run|use|execute|check|read|look at|search|edit|write|create)/i,
   ];
   for (const pattern of toolAnnouncements) {
-    if (pattern.test(content.trim()) && content.length < 200) {
+    if (pattern.test(content.trim()) && content.length < 150) {
       return false;
     }
   }
 
-  return content.length >= 100;
+  return true;
 }
 
 /**
