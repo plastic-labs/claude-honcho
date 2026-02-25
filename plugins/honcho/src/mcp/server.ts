@@ -5,7 +5,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Honcho } from "@honcho-ai/sdk";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import {
   loadConfig,
   saveConfig,
@@ -23,9 +23,7 @@ import {
   type HonchoEnvironment,
 } from "../config.js";
 import {
-  loadIdCache,
-  loadContextCache,
-  getQueuedMessages,
+  getLastActiveCwd,
   clearIdCache,
   clearPeerCache,
   clearUserContextOnly,
@@ -54,6 +52,25 @@ const DANGEROUS_FIELDS = new Set(["workspace", "endpoint.environment", "endpoint
 // get_config handler
 // ============================================
 
+// ============================================
+// Pre-rendered status card (box-drawing)
+// ============================================
+
+function renderCard(rows: [string, string][], title: string): string {
+  const labelWidth = 12;
+  const gap = 3;
+  const maxVal = 22;
+  const ruleWidth = labelWidth + gap + maxVal + 2;
+  const top = `\u250C\u2500 ${title} ${"\u2500".repeat(Math.max(0, ruleWidth - title.length - 4))}`;
+  const bot = `\u2514${"\u2500".repeat(ruleWidth)}`;
+  const blank = "\u2502";
+  const body = rows.map(([label, value]) => {
+    const v = value.length > maxVal ? value.slice(0, maxVal - 1) + "\u2026" : value;
+    return `\u2502  ${label.padEnd(labelWidth)}${" ".repeat(gap)}${v}`;
+  });
+  return [top, blank, ...body, blank, bot].join("\n");
+}
+
 function handleGetConfig(cwd: string) {
   const cfg = loadConfig();
   const host = getDetectedHost();
@@ -68,11 +85,13 @@ function handleGetConfig(cwd: string) {
 
   // Resolved config
   const linkedWorkspaces = getLinkedWorkspaces();
+  const globalOverride = rawFile.globalOverride === true;
   const resolved = cfg ? {
     peerName: cfg.peerName,
     aiPeer: cfg.aiPeer,
     workspace: cfg.workspace,
     endpoint: getEndpointInfo(cfg),
+    globalOverride,
     sessionStrategy: cfg.sessionStrategy ?? "per-directory",
     sessionPeerPrefix: cfg.sessionPeerPrefix !== false,
     linkedHosts: cfg.linkedHosts ?? [],
@@ -90,7 +109,7 @@ function handleGetConfig(cwd: string) {
   const sessionName = cfg ? getSessionName(cwd) : null;
   const endpointInfo = cfg ? getEndpointInfo(cfg) : null;
   const endpointLabel = endpointInfo
-    ? endpointInfo.type === "production" ? "SaaS" : endpointInfo.type
+    ? endpointInfo.type === "production" ? "platform" : endpointInfo.type
     : null;
 
   const current = cfg ? {
@@ -102,36 +121,27 @@ function handleGetConfig(cwd: string) {
   } : null;
 
   // Host info
-  const knownHosts = getKnownHosts();
   const hostInfo = {
     detected: host,
     hasHostsBlock: !!rawFile.hosts,
-    hostKeys: knownHosts,
-    otherHosts: knownHosts.filter(h => h !== host),
-  };
-
-  // Cache state
-  const idCache = loadIdCache();
-  const contextCache = loadContextCache();
-  const messageQueue = getQueuedMessages();
-
-  const cache = {
-    workspaceName: idCache.workspace?.name ?? null,
-    peerCount: idCache.peers ? Object.keys(idCache.peers).length : 0,
-    sessionCount: idCache.sessions ? Object.keys(idCache.sessions).length : 0,
-    contextAge: contextCache.userContext
-      ? Math.round((Date.now() - contextCache.userContext.fetchedAt) / 1000)
-      : null,
-    messageQueueSize: messageQueue.length,
   };
 
   // Warnings
   const warnings: string[] = [];
 
-  // Check for env var shadowing
+  // Host-specific fields (workspace, aiPeer) are NOT overridden by env vars
+  // when a hosts block exists. Only warn about env vars that actually apply.
+  const hasHostsBlock = !!rawFile.hosts?.[host];
+  const hostSpecificFields = new Set(["workspace", "aiPeer"]);
+
   for (const [field, envVar] of Object.entries(ENV_SHADOW_MAP)) {
-    if (process.env[envVar]) {
-      warnings.push(`${field} is shadowed by env var ${envVar}="${process.env[envVar]}"`);
+    const envVal = process.env[envVar];
+    if (!envVal) continue;
+    if (hasHostsBlock && hostSpecificFields.has(field)) {
+      // Env var is set but hosts block takes precedence — not actually shadowed
+      warnings.push(`env var ${envVar}="${envVal}" is set but ignored (hosts block takes precedence). Remove it from your shell config.`);
+    } else {
+      warnings.push(`${field} is shadowed by env var ${envVar}="${envVal}"`);
     }
   }
 
@@ -140,15 +150,41 @@ function handleGetConfig(cwd: string) {
     warnings.push("Config uses legacy flat fields. Consider running /honcho:config to migrate to hosts block.");
   }
 
-  // Check for cache/config workspace mismatch
-  if (cfg && idCache.workspace && idCache.workspace.name !== cfg.workspace) {
-    warnings.push(`Cache workspace "${idCache.workspace.name}" does not match config workspace "${cfg.workspace}". Consider clearing caches.`);
+  if (cfgExists && rawFile.hosts && rawFile.workspace && rawFile.globalOverride === undefined) {
+    warnings.push("Config has flat 'workspace' alongside hosts block but no 'globalOverride' set. The flat field is unused. Set globalOverride=true to apply it globally, or remove it.");
   }
+
+  // Pre-render the status card
+  const strategyLabels: Record<string, string> = {
+    "per-directory": "per directory",
+    "git-branch": "per git branch",
+    "chat-instance": "per chat",
+  };
+  const hostLabel = endpointInfo
+    ? endpointInfo.type === "production"
+      ? `platform (app.honcho.dev)`
+      : endpointInfo.type === "local"
+        ? `local (${endpointInfo.url})`
+        : endpointInfo.url
+    : "unknown";
+  const linkedLabel = resolved?.linkedHosts?.length
+    ? resolved.linkedHosts.join(", ")
+    : "none";
+
+  const card = cfg ? renderCard([
+    ["workspace", cfg.workspace],
+    ["session", sessionName ?? "unknown"],
+    ["mapping", strategyLabels[cfg.sessionStrategy ?? "per-directory"] ?? cfg.sessionStrategy ?? "per directory"],
+    ["peer", `${cfg.peerName} / ${cfg.aiPeer}`],
+    ["host", hostLabel],
+    ["messages", cfg.saveMessages !== false ? "saving enabled" : "saving disabled"],
+    ["linked", linkedLabel],
+  ], "current honcho config") : null;
 
   return {
     content: [{
       type: "text",
-      text: JSON.stringify({ resolved, current, host: hostInfo, cache, warnings, configPath: cfgPath, configExists: cfgExists }, null, 2),
+      text: JSON.stringify({ card, resolved, current, host: hostInfo, warnings, configPath: cfgPath, configExists: cfgExists }, null, 2),
     }],
   };
 }
@@ -165,9 +201,9 @@ function handleSetConfig(args: Record<string, unknown>) {
   // Dangerous field gate
   if (DANGEROUS_FIELDS.has(field) && !confirm) {
     const descriptions: Record<string, string> = {
-      workspace: "Changing workspace switches the entire data space. All cached IDs, context, and session mappings will be invalidated. Existing data remains in the old workspace but will no longer be visible.",
-      "endpoint.environment": "Changing the endpoint switches the Honcho backend. All cached IDs and context will be invalidated.",
-      "endpoint.baseUrl": "Changing the endpoint URL switches the Honcho backend. All cached IDs and context will be invalidated.",
+      workspace: "Switches to a different workspace.",
+      "endpoint.environment": "Switches the Honcho backend.",
+      "endpoint.baseUrl": "Switches the Honcho backend URL.",
     };
     return {
       content: [{
@@ -176,7 +212,7 @@ function handleSetConfig(args: Record<string, unknown>) {
           success: false,
           field,
           requiresConfirm: true,
-          description: descriptions[field] ?? "This is a dangerous change. Pass confirm=true to proceed.",
+          description: descriptions[field] ?? "Pass confirm=true to proceed.",
         }, null, 2),
       }],
     };
@@ -233,8 +269,8 @@ function handleSetConfig(args: Record<string, unknown>) {
     case "endpoint.environment":
       previousValue = cfg.endpoint?.environment;
       if (!cfg.endpoint) cfg.endpoint = {};
-      // Accept "saas" as alias for "production"
-      const envVal = String(value) === "saas" ? "production" : String(value);
+      // Accept "platform" as alias for "production"
+      const envVal = String(value) === "platform" ? "production" : String(value);
       cfg.endpoint.environment = envVal as HonchoEnvironment;
       cfg.endpoint.baseUrl = undefined;
       clearIdCache();
@@ -269,6 +305,35 @@ function handleSetConfig(args: Record<string, unknown>) {
       const hosts = Array.isArray(value) ? value.map(String) : [];
       cfg.linkedHosts = hosts.length ? hosts : undefined;
       break;
+    }
+
+    case "globalOverride": {
+      // Read-modify-write the raw file directly since globalOverride
+      // is a file-level field, not part of the resolved HonchoCLAUDEConfig
+      const goCfgPath = getConfigPath();
+      let goRaw: Record<string, any> = {};
+      try { goRaw = JSON.parse(readFileSync(goCfgPath, "utf-8")); } catch { /* */ }
+      previousValue = goRaw.globalOverride ?? false;
+      goRaw.globalOverride = Boolean(value);
+      if (goRaw.globalOverride && !goRaw.workspace) {
+        // When enabling, ensure flat workspace exists
+        goRaw.workspace = cfg.workspace;
+      }
+      writeFileSync(goCfgPath, JSON.stringify(goRaw, null, 2));
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            field,
+            previousValue,
+            newValue: Boolean(value),
+            description: Boolean(value)
+              ? "Global override enabled: flat workspace field now applies to ALL hosts."
+              : "Global override disabled: each host uses its own hosts block.",
+          }, null, 2),
+        }],
+      };
     }
 
     case "enabled":
@@ -489,6 +554,7 @@ export async function runMcpServer(): Promise<void> {
                   "peerName",
                   "aiPeer",
                   "workspace",
+                  "globalOverride",
                   "endpoint.environment",
                   "endpoint.baseUrl",
                   "sessionStrategy",
@@ -526,7 +592,7 @@ export async function runMcpServer(): Promise<void> {
   // Handle tool calls
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const cwd = process.cwd();
+    const cwd = getLastActiveCwd() || process.cwd();
 
     // ── Config tools (no Honcho session needed) ──
 

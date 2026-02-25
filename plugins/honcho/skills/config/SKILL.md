@@ -1,4 +1,5 @@
 ---
+name: honcho:config
 description: Configure Honcho memory plugin settings interactively
 allowed-tools: get_config, set_config
 user-invocable: true
@@ -6,118 +7,216 @@ user-invocable: true
 
 # Honcho Configuration
 
-Interactive configuration for the Honcho memory plugin. Lets the user inspect and change connection settings, session behavior, and cache state through a menu-driven flow.
+Interactive configuration for the Honcho memory plugin. Uses AskUserQuestion for all menus and selections — never dump numbered text lists.
 
 ## Step 1: Status Header
 
-Call `get_config` to load the current state. Display a status block:
+Call `get_config` to load the current state. The response includes a `card` field — a pre-rendered box-drawing card with perfect alignment.
 
+**Output the `card` value exactly as-is inside a code fence.** Do not modify it, re-render it, or add any formatting. Just wrap it in triple backticks:
+
+````
 ```
-Workspace: {resolved.workspace}
-Session:   {current.session} ({resolved.sessionStrategy})
-Peer:      {resolved.peerName}
-AI peer:   {resolved.aiPeer}
-Host:      {current.host}
-Linked:    {resolved.linkedHosts} -> {resolved.linkedWorkspaces}
+{card value here, verbatim}
 ```
-
-If `linkedHosts` is empty, show `Linked: none`. If other hosts are detected in `host.otherHosts`, mention them as available to link.
-
-If `configExists` is false, tell the user no config file exists yet and offer to create one.
-
-If there are `warnings`, display them after the status block.
+````
+- Do NOT show cache info, config paths, or raw JSON.
+- Do NOT show warnings unless they indicate something is broken (skip env var shadowing warnings where the values match what's configured).
+- If `configExists` is false, tell the user no config exists and offer to create one.
 
 ## Step 2: Menu
 
-Present this menu:
+Use `AskUserQuestion` with two questions to present the menu. First question selects the category, second selects the specific setting.
+
+Present ONE question with these options:
 
 ```
-What would you like to configure?
-
-Connection
-  1. Peer name        -- your name in Honcho
-  2. AI peer          -- the AI's name (affects memory retrieval)
-  3. Workspace        -- data space (CAUTION: changes visible data)
-  4. Host             -- SaaS / local / custom URL
-
-Behavior
-  5. Session strategy -- how sessions are created and named
-  6. Linked hosts     -- merge context from other tools (cursor, obsidian)
-  7. Context refresh  -- TTL, message threshold, dialectic
-  8. Message upload   -- token limits, summarization
-  9. Logging          -- file logging, enable/disable
-
- 10. Done
+AskUserQuestion:
+  question: "What would you like to configure?"
+  header: "Config"
+  options:
+    - label: "Peers"
+      description: "Your name and AI name (currently: {resolved.peerName} / {resolved.aiPeer})"
+    - label: "Session mapping"
+      description: "How sessions are named — per directory, git branch, or per chat (currently: {resolved.sessionStrategy})"
+    - label: "Workspace"
+      description: "Data space — CAUTION: changes visible data (currently: {resolved.workspace})"
+    - label: "Host"
+      description: "Platform / local / custom URL (currently: {current.host})"
 ```
+
+If the user selects "Other", present advanced options:
+
+```
+AskUserQuestion:
+  question: "Advanced settings:"
+  header: "Advanced"
+  options:
+    - label: "Linked hosts"
+      description: "Merge context from other tools"
+    - label: "Context refresh"
+      description: "TTL, message threshold, dialectic settings"
+    - label: "Message upload"
+      description: "Token limits, summarization settings"
+```
+
+Always include current values in the description so the user can see what's set.
 
 ## Step 3: Handle Selection
 
-### Simple fields (1, 2, 9)
+### Peers
 
-Ask for the new value and call `set_config` with the appropriate field. Show the result.
+When selected, use `AskUserQuestion` to ask which peer to change:
 
-### Dangerous fields (3, 4)
+```
+AskUserQuestion:
+  question: "Which peer to change?"
+  header: "Peers"
+  options:
+    - label: "Your name"
+      description: "Currently: {resolved.peerName}"
+    - label: "AI name"
+      description: "Currently: {resolved.aiPeer}"
+```
 
-These require confirmation. First call `set_config` WITHOUT `confirm: true`. The tool will return a description of what will happen. Show this to the user and ask if they want to proceed. If yes, call `set_config` again WITH `confirm: true`.
+Then ask for the new value. Call `set_config` with `peerName` or `aiPeer`.
 
-### Session strategy (5)
+### Simple fields (Logging, etc.)
 
-Explain the three modes:
+Use `AskUserQuestion` to ask for the new value if there are known options, otherwise ask the user to type it. Call `set_config` with the appropriate field. Show the result.
 
-- **per-directory** (default): Session = `{peerName}-{repoName}`. Each project directory gets one session.
-- **git-branch**: Session = `{peerName}-{repoName}-{branch}`. Switching branches switches context. Each branch maintains its own memory thread.
-- **claude-instance**: Session = `claude-{session_id}`. Every Claude launch is a fresh session. No cross-session memory within a workspace.
+### Dangerous fields (Workspace, Host)
 
-Also mention: manual overrides in the sessions map always take precedence over any strategy.
+These require confirmation. First call `set_config` WITHOUT `confirm: true`. The tool will return a description of what will happen. Use `AskUserQuestion` to confirm:
 
-Ask which mode they want and call `set_config` with `field: "sessionStrategy"`.
+```
+AskUserQuestion:
+  question: "Switch workspace to '{value}'?"
+  header: "Confirm"
+  options:
+    - label: "Yes, switch"
+      description: "Change to the new workspace"
+    - label: "Cancel"
+      description: "Keep current workspace"
+```
 
-Also show the **peer prefix** setting (`resolved.sessionPeerPrefix`):
-- **true** (default): sessions are named `{peerName}-{repoName}` — needed for teams where multiple users share a workspace
-- **false**: sessions are named `{repoName}` only — cleaner for solo use
+If confirmed, call `set_config` again WITH `confirm: true`.
 
-If the user wants to disable the prefix, call `set_config` with `field: "sessionPeerPrefix"` and `value: false`.
+### Session mapping
 
-### Linked hosts (6)
+Use `AskUserQuestion` with preview markdown to show each strategy:
 
-Show:
-- Currently linked hosts (`resolved.linkedHosts`)
-- The workspaces being read from (`resolved.linkedWorkspaces`)
-- Other detected hosts in the config (`host.otherHosts`)
+```
+AskUserQuestion:
+  question: "Which session mapping strategy?"
+  header: "Sessions"
+  options:
+    - label: "per-directory"
+      description: "One session per project (default)"
+      markdown: |
+        {peer}-{repo}
+    - label: "git-branch"
+      description: "Session follows branch"
+      markdown: |
+        {peer}-{repo}-{branch}
+    - label: "chat-instance"
+      description: "Fresh session each launch"
+      markdown: |
+        chat-{session_id}
+```
 
-Explain: linking a host means this plugin will also read context from that host's workspace when building your prompt. Writes (message saves, conclusions) always go to the current workspace only. This lets you have shared memory across tools.
+After strategy selection, ask about peer prefix:
 
-Example: if you use both Claude Code and Cursor on the same project, linking `cursor` means Claude Code can see what Cursor's AI discussed with you.
+```
+AskUserQuestion:
+  question: "Include your name in session names?"
+  header: "Prefix"
+  options:
+    - label: "Yes — {peerName}-{repoName}"
+      description: "For teams sharing a workspace"
+    - label: "No — {repoName} only"
+      description: "Cleaner for solo use"
+```
 
-If other hosts are detected, offer them as options. The user can also type a host key manually (e.g., `obsidian` if they know the obsidian-honcho plugin writes to that key).
+### Linked hosts
 
-Call `set_config` with `field: "linkedHosts"` and `value: ["cursor", "obsidian"]` (array of host keys).
+Use `AskUserQuestion` with multiSelect to let the user pick which hosts to link:
 
-### Context refresh (7)
+```
+AskUserQuestion:
+  question: "Which hosts should share context with this one?"
+  header: "Link"
+  multiSelect: true
+  options:
+    - label: "{hostKey}"
+      description: "Reads from workspace: {hostWorkspace}"
+    (one option per detected host in host.otherHosts)
+```
 
-Show current values and explain:
-- **TTL** (`contextRefresh.ttlSeconds`): How long cached context is valid (default: 300s)
-- **Message threshold** (`contextRefresh.messageThreshold`): Refresh knowledge graph every N messages (default: 30)
-- **Skip dialectic** (`contextRefresh.skipDialectic`): Skip the chat() call in user-prompt hook (default: false)
+Explain briefly: linking means this plugin reads context from that host's workspace. Writes stay local.
 
-Ask which to change and call `set_config` for each.
+Call `set_config` with `field: "linkedHosts"` and the selected array.
 
-### Message upload (8)
+### Context refresh
 
-Show current values and explain:
-- **Max user tokens** (`messageUpload.maxUserTokens`): Truncate user messages (default: no limit)
-- **Max assistant tokens** (`messageUpload.maxAssistantTokens`): Truncate assistant messages (default: no limit)
-- **Summarize assistant** (`messageUpload.summarizeAssistant`): Use summary instead of full text (default: false)
+Use `AskUserQuestion` to pick which setting to change:
 
-Ask which to change and call `set_config` for each.
+```
+AskUserQuestion:
+  question: "Which context refresh setting?"
+  header: "Refresh"
+  options:
+    - label: "TTL"
+      description: "Cache lifetime — currently {contextRefresh.ttlSeconds}s (default: 300)"
+    - label: "Message threshold"
+      description: "Refresh every N messages — currently {contextRefresh.messageThreshold} (default: 30)"
+    - label: "Skip dialectic"
+      description: "Skip chat() in prompt hook — currently {contextRefresh.skipDialectic} (default: false)"
+```
+
+Then ask for the new value and call `set_config`.
+
+### Message upload
+
+Use `AskUserQuestion` to pick which setting to change:
+
+```
+AskUserQuestion:
+  question: "Which message upload setting?"
+  header: "Upload"
+  options:
+    - label: "Max user tokens"
+      description: "Truncate user messages — currently {messageUpload.maxUserTokens || 'no limit'}"
+    - label: "Max assistant tokens"
+      description: "Truncate assistant messages — currently {messageUpload.maxAssistantTokens || 'no limit'}"
+    - label: "Summarize assistant"
+      description: "Use summary instead of full text — currently {messageUpload.summarizeAssistant}"
+```
+
+Then ask for the new value and call `set_config`.
 
 ## Step 4: Loop
 
-After handling a selection, call `get_config` again to refresh the status header, then show the menu again. Continue until the user selects Done.
+After handling a selection, call `get_config` again to refresh state. Use `AskUserQuestion` to ask if they want to configure more:
+
+```
+AskUserQuestion:
+  question: "Configuration updated. What next?"
+  header: "Next"
+  options:
+    - label: "Configure more"
+      description: "Return to settings menu"
+    - label: "Done"
+      description: "Exit configuration"
+```
+
+If "Configure more", go back to Step 2. If "Done", show the final status header and exit.
 
 ## Guardrails
 
+- ALWAYS use AskUserQuestion for menus and confirmations. Never present numbered text lists.
 - Always show the result of `set_config` including any cache invalidation that occurred.
 - If a warning about env var shadowing is returned, explain that the env var takes precedence at runtime.
-- Never guess values -- always ask the user.
+- Never guess values — always ask the user.
+- Include current values in option descriptions so the user sees what's set without expanding anything.
 - If `get_config` returns `configExists: false`, guide the user to set HONCHO_API_KEY first.
