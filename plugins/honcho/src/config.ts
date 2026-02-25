@@ -2,7 +2,7 @@ import { homedir } from "os";
 import { join, basename } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { captureGitState } from "./git.js";
-import { getClaudeInstanceId } from "./cache.js";
+import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
 
 function sanitizeForSessionName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
@@ -425,8 +425,12 @@ export function getSessionForPath(cwd: string): string | null {
   return config.sessions[cwd] || null;
 }
 
-/** Session name derived from strategy. Manual overrides only apply to per-directory. */
-export function getSessionName(cwd: string): string {
+/** Session name derived from strategy. Manual overrides only apply to per-directory.
+ *  @param instanceId - Explicit instance ID for chat-instance strategy. Falls back to
+ *                      per-cwd cache, then global cache. Callers should pass hookInput.session_id
+ *                      when available to avoid cross-session collision from the global cache.
+ */
+export function getSessionName(cwd: string, instanceId?: string): string {
   const config = loadConfig();
   const strategy = config?.sessionStrategy ?? "per-directory";
 
@@ -454,9 +458,10 @@ export function getSessionName(cwd: string): string {
       return base;
     }
     case "chat-instance": {
-      const instanceId = getClaudeInstanceId();
-      if (instanceId) {
-        return `chat-${instanceId}`;
+      // Prefer explicit instanceId > per-cwd cache > global cache (legacy)
+      const resolved = instanceId || getInstanceIdForCwd(cwd) || getClaudeInstanceId();
+      if (resolved) {
+        return `chat-${resolved}`;
       }
       return base;
     }

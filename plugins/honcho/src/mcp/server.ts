@@ -48,6 +48,12 @@ const ENV_SHADOW_MAP: Record<string, string> = {
 // Fields that require confirm=true to change
 const DANGEROUS_FIELDS = new Set(["workspace", "endpoint.environment", "endpoint.baseUrl"]);
 
+// Fields that affect session identity/routing — stale sessions risk cross-contamination
+const SESSION_AFFECTING_FIELDS = new Set([
+  "workspace", "aiPeer", "peerName", "sessionStrategy", "sessionPeerPrefix",
+  "endpoint.environment", "endpoint.baseUrl", "globalOverride",
+]);
+
 // ============================================
 // get_config handler
 // ============================================
@@ -331,6 +337,7 @@ function handleSetConfig(args: Record<string, unknown>) {
             description: Boolean(value)
               ? "Global override enabled: flat workspace field now applies to ALL hosts."
               : "Global override disabled: each host uses its own hosts block.",
+            restartWarning: "Close and restart all active Claude Code sessions. Open sessions still use the previous config and will write to the wrong Honcho session.",
           }, null, 2),
         }],
       };
@@ -443,6 +450,11 @@ function handleSetConfig(args: Record<string, unknown>) {
     saveMessages: cfg.saveMessages !== false,
   };
 
+  // Warn about stale sessions when changing fields that affect session routing
+  const restartWarning = SESSION_AFFECTING_FIELDS.has(field)
+    ? "Close and restart all active Claude Code sessions. Open sessions still use the previous config and will write to the wrong Honcho session."
+    : undefined;
+
   return {
     content: [{
       type: "text",
@@ -452,6 +464,7 @@ function handleSetConfig(args: Record<string, unknown>) {
         previousValue,
         newValue: value,
         cacheInvalidation,
+        restartWarning,
         warnings: warnings.length ? warnings : undefined,
         resolved,
       }, null, 2),

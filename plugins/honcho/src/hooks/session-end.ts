@@ -7,7 +7,7 @@ import {
   generateClaudeSummary,
   saveClaudeLocalContext,
   loadClaudeLocalContext,
-  getClaudeInstanceId,
+  getInstanceIdForCwd,
   chunkContent,
 } from "../cache.js";
 import { playCooldown } from "../spinner.js";
@@ -24,6 +24,7 @@ interface HookInput {
 
 interface TranscriptEntry {
   type: string;
+  timestamp?: string;
   message?: {
     role?: string;
     content: string | Array<{ type: string; text?: string; name?: string; input?: any }>;
@@ -75,8 +76,8 @@ function isMeaningfulAssistantContent(content: string): boolean {
   return content.length >= 200;
 }
 
-function parseTranscript(transcriptPath: string): Array<{ role: string; content: string; isMeaningful?: boolean }> {
-  const messages: Array<{ role: string; content: string; isMeaningful?: boolean }> = [];
+function parseTranscript(transcriptPath: string): Array<{ role: string; content: string; isMeaningful?: boolean; timestamp?: string }> {
+  const messages: Array<{ role: string; content: string; isMeaningful?: boolean; timestamp?: string }> = [];
 
   if (!transcriptPath || !existsSync(transcriptPath)) {
     return messages;
@@ -103,7 +104,7 @@ function parseTranscript(transcriptPath: string): Array<{ role: string; content:
                   .map((p) => p.text || "")
                   .join("\n");
           if (userContent && userContent.trim()) {
-            messages.push({ role: "user", content: userContent });
+            messages.push({ role: "user", content: userContent, timestamp: entry.timestamp });
           }
         } else if (entryType === "assistant" && messageContent) {
           let assistantContent = "";
@@ -139,6 +140,7 @@ function parseTranscript(transcriptPath: string): Array<{ role: string; content:
               role: "assistant",
               content: assistantContent.slice(0, maxLen),
               isMeaningful,
+              timestamp: entry.timestamp,
             });
           }
         }
@@ -201,9 +203,10 @@ export async function handleSessionEnd(): Promise<void> {
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const reason = hookInput.reason || "unknown";
   const transcriptPath = hookInput.transcript_path;
+  const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
 
   // Set log context
-  setLogContext(cwd, getSessionName(cwd));
+  setLogContext(cwd, getSessionName(cwd, instanceId || undefined));
 
   // Play cooldown animation
   await playCooldown("saving memory");
@@ -212,7 +215,7 @@ export async function handleSessionEnd(): Promise<void> {
 
   try {
     const honcho = new Honcho(getHonchoClientOptions(config));
-    const sessionName = getSessionName(cwd);
+    const sessionName = getSessionName(cwd, instanceId || undefined);
 
     // Get session and peers using new fluent API
     const session = await honcho.session(sessionName);
@@ -226,7 +229,6 @@ export async function handleSessionEnd(): Promise<void> {
     // Step 1: Upload queued user messages (backup for failed fire-and-forget)
     // Only upload messages for THIS session (by cwd), not other sessions
     // =====================================================
-    const instanceId = getClaudeInstanceId();
     const queuedMessages = getQueuedMessages(cwd);  // Filter by current session's cwd
     logHook("session-end", `Processing ${queuedMessages.length} queued messages`);
     if (queuedMessages.length > 0) {
@@ -235,6 +237,7 @@ export async function handleSessionEnd(): Promise<void> {
         const chunks = chunkContent(msg.content);
         return chunks.map(chunk =>
           userPeer.message(chunk, {
+            createdAt: msg.timestamp,
             metadata: {
               instance_id: msg.instanceId || undefined,
               session_affinity: sessionName,
@@ -254,7 +257,7 @@ export async function handleSessionEnd(): Promise<void> {
     // post-tool-use only logs tool activity, not Claude's prose responses
     // This captures: explanations, summaries, recommendations, analysis
     // =====================================================
-    let assistantMessages: Array<{ role: string; content: string; isMeaningful?: boolean }> = [];
+    let assistantMessages: Array<{ role: string; content: string; isMeaningful?: boolean; timestamp?: string }> = [];
     if (config.saveMessages !== false && transcriptMessages.length > 0) {
       // Extract assistant prose - prioritize meaningful content
       const allAssistant = transcriptMessages.filter((msg) => msg.role === "assistant");
@@ -278,6 +281,7 @@ export async function handleSessionEnd(): Promise<void> {
           const chunks = chunkContent(msg.content);
           return chunks.map(chunk =>
             aiPeer.message(chunk, {
+              createdAt: msg.timestamp,
               metadata: {
                 instance_id: instanceId || undefined,
                 type: msg.isMeaningful ? 'assistant_prose' : 'assistant_brief',
@@ -324,6 +328,7 @@ export async function handleSessionEnd(): Promise<void> {
       aiPeer.message(
         `[Session ended] Reason: ${reason}, Messages: ${transcriptMessages.length}, Time: ${new Date().toISOString()}`,
         {
+          createdAt: new Date().toISOString(),
           metadata: {
             instance_id: instanceId || undefined,
             session_affinity: sessionName,

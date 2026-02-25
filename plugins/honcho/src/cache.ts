@@ -23,8 +23,8 @@ function ensureCacheDir(): void {
 interface IdCache {
   workspace?: { name: string; id: string };
   peers?: Record<string, string>; // peerName -> peerId
-  sessions?: Record<string, { name: string; id: string; updatedAt: string }>; // cwd -> session info
-  claudeInstanceId?: string; // Current Claude Code session_id for instance tagging
+  sessions?: Record<string, { name: string; id: string; updatedAt: string; instanceId?: string }>; // cwd -> session info
+  claudeInstanceId?: string; // DEPRECATED: use per-cwd instanceId in sessions map instead
 }
 
 export function loadIdCache(): IdCache {
@@ -75,11 +75,24 @@ export function getCachedSessionId(cwd: string): string | null {
   return cache.sessions?.[cwd]?.id || null;
 }
 
-export function setCachedSessionId(cwd: string, name: string, id: string): void {
+export function setCachedSessionId(cwd: string, name: string, id: string, instanceId?: string): void {
   const cache = loadIdCache();
   if (!cache.sessions) cache.sessions = {};
-  cache.sessions[cwd] = { name, id, updatedAt: new Date().toISOString() };
+  cache.sessions[cwd] = { name, id, updatedAt: new Date().toISOString(), instanceId };
   saveIdCache(cache);
+}
+
+/** Find the most recently active CWD from cached sessions (fallback for MCP servers without project dir) */
+export function getLastActiveCwd(): string | null {
+  const cache = loadIdCache();
+  if (!cache.sessions) return null;
+  let latest: { cwd: string; updatedAt: string } | null = null;
+  for (const [cwd, entry] of Object.entries(cache.sessions)) {
+    if (!latest || entry.updatedAt > latest.updatedAt) {
+      latest = { cwd, updatedAt: entry.updatedAt };
+    }
+  }
+  return latest?.cwd || null;
 }
 
 // Claude instance tracking for parallel session support
@@ -92,6 +105,12 @@ export function setClaudeInstanceId(instanceId: string): void {
   const cache = loadIdCache();
   cache.claudeInstanceId = instanceId;
   saveIdCache(cache);
+}
+
+/** Get the instance ID stored for a specific cwd (scoped, no cross-session collision) */
+export function getInstanceIdForCwd(cwd: string): string | null {
+  const cache = loadIdCache();
+  return cache.sessions?.[cwd]?.instanceId ?? null;
 }
 
 // ============================================

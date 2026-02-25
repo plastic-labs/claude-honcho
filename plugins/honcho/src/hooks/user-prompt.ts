@@ -5,11 +5,10 @@ import {
   getStaleCachedUserContext,
   isContextCacheStale,
   setCachedUserContext,
-  queueMessage,
   incrementMessageCount,
   shouldRefreshKnowledgeGraph,
   markKnowledgeGraphRefreshed,
-  getClaudeInstanceId,
+  getInstanceIdForCwd,
   chunkContent,
 } from "../cache.js";
 import { logHook, logApiCall, logCache, setLogContext } from "../log.js";
@@ -91,9 +90,10 @@ export async function handleUserPrompt(): Promise<void> {
 
   const prompt = hookInput.prompt || "";
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
+  const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
 
   // Set log context for this hook
-  setLogContext(cwd, getSessionName(cwd));
+  setLogContext(cwd, getSessionName(cwd, instanceId || undefined));
 
   // Skip empty prompts
   if (!prompt.trim()) {
@@ -102,16 +102,10 @@ export async function handleUserPrompt(): Promise<void> {
 
   logHook("user-prompt", `Prompt received (${prompt.length} chars)`);
 
-  // CRITICAL: Save message to local queue FIRST (instant, ~1-3ms)
-  // This survives ctrl+c, network failures, everything
-  if (config.saveMessages !== false) {
-    queueMessage(prompt, config.peerName, cwd);
-  }
-
   // Start upload immediately (we'll await before exit)
   let uploadPromise: Promise<void> | null = null;
   if (config.saveMessages !== false) {
-    uploadPromise = uploadMessageAsync(config, cwd, prompt);
+    uploadPromise = uploadMessageAsync(config, cwd, prompt, instanceId || undefined);
   }
 
   // Track message count for threshold-based knowledge graph refresh
@@ -208,17 +202,16 @@ export async function handleUserPrompt(): Promise<void> {
   process.exit(0);
 }
 
-async function uploadMessageAsync(config: any, cwd: string, prompt: string): Promise<void> {
+async function uploadMessageAsync(config: any, cwd: string, prompt: string, instanceId?: string): Promise<void> {
   logApiCall("session.addMessages", "POST", `user prompt (${prompt.length} chars)`);
   const honcho = new Honcho(getHonchoClientOptions(config));
-  const sessionName = getSessionName(cwd);
+  const sessionName = getSessionName(cwd, instanceId);
 
   // Get session and peer using new fluent API
   const session = await honcho.session(sessionName);
   const userPeer = await honcho.peer(config.peerName);
 
   // Chunk large messages to stay under API size limits
-  const instanceId = getClaudeInstanceId();
   const chunks = chunkContent(prompt);
   const messages = chunks.map(chunk =>
     userPeer.message(chunk, {

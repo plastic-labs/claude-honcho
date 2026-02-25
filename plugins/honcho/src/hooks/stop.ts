@@ -1,7 +1,7 @@
 import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
 import { existsSync, readFileSync } from "fs";
-import { getClaudeInstanceId } from "../cache.js";
+import { getInstanceIdForCwd } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visStopMessage } from "../visual.js";
 
@@ -126,7 +126,8 @@ export async function handleStop(): Promise<void> {
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const transcriptPath = hookInput.transcript_path;
-  const sessionName = getSessionName(cwd);
+  const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
+  const sessionName = getSessionName(cwd, instanceId || undefined);
 
   // Set log context
   setLogContext(cwd, sessionName);
@@ -150,11 +151,11 @@ export async function handleStop(): Promise<void> {
     const aiPeer = await honcho.peer(config.aiPeer);
 
     // Upload the assistant response
-    const instanceId = getClaudeInstanceId();
     logApiCall("session.addMessages", "POST", `assistant response (${lastMessage.length} chars)`);
 
     await session.addMessages([
       aiPeer.message(lastMessage.slice(0, 3000), {
+        createdAt: new Date().toISOString(),
         metadata: {
           instance_id: instanceId || undefined,
           type: "assistant_response",

@@ -3,6 +3,7 @@ import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHo
 import {
   setCachedUserContext,
   setCachedClaudeContext,
+  setCachedSessionId,
   loadClaudeLocalContext,
   resetMessageCount,
   setClaudeInstanceId,
@@ -58,12 +59,13 @@ export async function handleSessionStart(): Promise<void> {
   const claudeInstanceId = hookInput.session_id;
 
   // Store Claude's instance ID for parallel session support
+  // Global write kept for backward compat (post-tool-use, MCP server, etc.)
   if (claudeInstanceId) {
     setClaudeInstanceId(claudeInstanceId);
   }
 
   // Set log context early so all logs include cwd/session
-  const sessionName = getSessionName(cwd);
+  const sessionName = getSessionName(cwd, claudeInstanceId);
   setLogContext(cwd, sessionName);
 
   // Clear verbose log for fresh session
@@ -86,6 +88,13 @@ export async function handleSessionStart(): Promise<void> {
     setCachedGitState(cwd, currentGitState);
   }
 
+  // Show workspace info immediately (before any API calls)
+  console.log(displayHonchoStartup(
+    "Honcho Memory",
+    `${config.workspace} · ${sessionName}`,
+    currentGitState?.branch ? `branch: ${currentGitState.branch}` : undefined,
+  ));
+
   // Start loading animation with neural style
   const spinner = new Spinner({ style: "neural" });
   spinner.start("loading memory");
@@ -99,7 +108,7 @@ export async function handleSessionStart(): Promise<void> {
 
     // Step 1-3: Get session and peers using new fluent API (lazily created)
     spinner.update("Loading session");
-    const sessionName = getSessionName(cwd);
+    const sessionName = getSessionName(cwd, claudeInstanceId);
 
     const startTime = Date.now();
     // New SDK: session() and peer() are async and create lazily
@@ -110,6 +119,10 @@ export async function handleSessionStart(): Promise<void> {
     ]);
     logApiCall("honcho.session/peer", "GET", `session + 2 peers`, Date.now() - startTime, true);
 
+    // Write CWD to cache so MCP server can resolve the project directory
+    // Also stores instanceId per-cwd to prevent cross-session collision
+    setCachedSessionId(cwd, sessionName, session.id, claudeInstanceId);
+
     // Step 4: Set session peer configuration (fire-and-forget)
     // New SDK uses session.setPeerConfiguration()
     Promise.all([
@@ -117,8 +130,10 @@ export async function handleSessionStart(): Promise<void> {
       session.setPeerConfiguration(aiPeer, { observeMe: false, observeOthers: true }),
     ]).catch((e) => logHook("session-start", `Set peers failed: ${e}`));
 
-    // Store session mapping
-    if (!getSessionForPath(cwd)) {
+    // Only persist session names for per-directory strategy (stable names).
+    // Dynamic strategies (git-branch, chat-instance) change per session,
+    // so locking them as overrides defeats the purpose.
+    if (!getSessionForPath(cwd) && (!config.sessionStrategy || config.sessionStrategy === "per-directory")) {
       setSessionForPath(cwd, sessionName);
     }
 
@@ -360,21 +375,22 @@ export async function handleSessionStart(): Promise<void> {
       contextParts.push(`## AI Self-Reflection (What ${config.aiPeer} Has Been Doing)\n${claudeChatContent}`);
     }
 
-    // Stop spinner and display pixel art
+    // Stop spinner
     spinner.stop();
 
     logFlow("complete", `Memory loaded: ${contextParts.length} sections, ${successCount}/5 API calls succeeded`);
-
-    // Display Honcho pixel character with startup message
-    console.log(displayHonchoStartup("Honcho Memory"));
 
     // Output all context
     console.log(`\n[${config.aiPeer}/Honcho Memory Loaded]\n\n${contextParts.join("\n\n")}`);
     process.exit(0);
   } catch (error) {
     logHook("session-start", `Error: ${error}`, { error: String(error) });
-    spinner.fail("memory load failed");
-    console.error(`[honcho] ${error}`);
-    process.exit(1);
+    spinner.stop();
+    // Degrade gracefully — workspace info was already shown above.
+    // Output whatever context we managed to collect.
+    if (contextParts.length > 0) {
+      console.log(`\n[${config.aiPeer}/Honcho Memory (partial)]\n\n${contextParts.join("\n\n")}`);
+    }
+    process.exit(0);
   }
 }
