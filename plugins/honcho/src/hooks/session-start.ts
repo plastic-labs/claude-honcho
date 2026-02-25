@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getLinkedWorkspaces, getHonchoBaseUrl } from "../config.js";
 import {
   setCachedUserContext,
   setCachedClaudeContext,
@@ -373,6 +373,38 @@ export async function handleSessionStart(): Promise<void> {
       : null;
     if (claudeChatContent) {
       contextParts.push(`## AI Self-Reflection (What ${config.aiPeer} Has Been Doing)\n${claudeChatContent}`);
+    }
+
+    // Fetch context from linked workspaces (reads only, writes stay local)
+    const linkedWorkspaces = getLinkedWorkspaces();
+    if (linkedWorkspaces.length > 0) {
+      spinner.update("Fetching linked context");
+      logAsync("linked-context", `Fetching from ${linkedWorkspaces.length} linked workspace(s): ${linkedWorkspaces.join(", ")}`);
+
+      const linkedResults = await Promise.allSettled(
+        linkedWorkspaces.map(async (ws) => {
+          const linkedClient = new Honcho({
+            apiKey: config.apiKey,
+            baseUrl: getHonchoBaseUrl(config),
+            workspaceId: ws,
+          });
+          const linkedPeer = await linkedClient.peer(config.peerName);
+          return { ws, context: await linkedPeer.context({ maxConclusions: 10, includeMostFrequent: true }) };
+        })
+      );
+
+      for (const result of linkedResults) {
+        if (result.status === "fulfilled" && result.value.context) {
+          const { ws, context } = result.value;
+          const rep = formatRepresentation((context as any).representation);
+          if (rep) {
+            contextParts.push(`## Linked Context (${ws})\n${rep}`);
+          }
+          logAsync("linked-context", `${ws}: loaded`);
+        } else if (result.status === "rejected") {
+          logAsync("linked-context", `Failed: ${result.reason}`);
+        }
+      }
     }
 
     // Stop spinner

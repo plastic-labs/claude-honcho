@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getLinkedWorkspaces, getHonchoBaseUrl } from "../config.js";
 import {
   getCachedUserContext,
   getStaleCachedUserContext,
@@ -296,6 +296,39 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
     const peerCard = (contextResult as any).peerCard;
     if (peerCard?.length) {
       contextParts.push(`Profile: ${peerCard.join("; ")}`);
+    }
+  }
+
+  // Fetch from linked workspaces (lightweight — just conclusions, no dialectic)
+  const linkedWorkspaces = getLinkedWorkspaces();
+  if (linkedWorkspaces.length > 0) {
+    const linkedResults = await Promise.allSettled(
+      linkedWorkspaces.map(async (ws) => {
+        const linkedClient = new Honcho({
+          apiKey: config.apiKey,
+          baseUrl: getHonchoBaseUrl(config),
+          workspaceId: ws,
+        });
+        const linkedSession = await linkedClient.session(sessionName);
+        return {
+          ws,
+          context: await linkedSession.context({
+            searchQuery,
+            representationOptions: { searchTopK: 3, searchMaxDistance: 0.7, maxConclusions: 5 },
+          }),
+        };
+      })
+    );
+
+    for (const result of linkedResults) {
+      if (result.status === "fulfilled" && result.value.context) {
+        const rep = (result.value.context as any).representation;
+        if (typeof rep === "string" && rep.trim()) {
+          const lines = rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
+          const summary = lines.slice(0, 3).map((l: string) => l.replace(/^\[.*?\]\s*/, "").replace(/^- /, "")).join("; ");
+          if (summary) contextParts.push(`Linked (${result.value.ws}): ${summary}`);
+        }
+      }
     }
   }
 
