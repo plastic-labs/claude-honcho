@@ -26,9 +26,7 @@ Call `get_config` to load the current state. The response includes a `card` fiel
 
 ## Step 2: Menu
 
-Use `AskUserQuestion` with two questions to present the menu. First question selects the category, second selects the specific setting.
-
-Present ONE question with these options:
+Present ONE question with these options (the user can select "Other" to reach advanced settings):
 
 ```
 AskUserQuestion:

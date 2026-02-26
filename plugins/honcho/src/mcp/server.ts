@@ -209,7 +209,13 @@ function handleGetConfig(cwd: string) {
 // ============================================
 
 function handleSetConfig(args: Record<string, unknown>) {
-  const field = args.field as string;
+  const field = args.field;
+  if (typeof field !== "string" || !field) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({ success: false, error: "field must be a non-empty string" }, null, 2) }],
+      isError: true,
+    };
+  }
   const value = args.value;
   const confirm = args.confirm === true;
 
@@ -418,7 +424,15 @@ function handleSetConfig(args: Record<string, unknown>) {
       break;
 
     case "sessions.set": {
-      const { path, name: sName } = value as { path: string; name: string };
+      const obj = value as Record<string, unknown>;
+      const path = obj?.path;
+      const sName = obj?.name;
+      if (typeof path !== "string" || !path || typeof sName !== "string" || !sName) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: "sessions.set requires {path: string, name: string}" }, null, 2) }],
+          isError: true,
+        };
+      }
       if (!cfg.sessions) cfg.sessions = {};
       previousValue = cfg.sessions[path] ?? null;
       cfg.sessions[path] = sName;
@@ -426,7 +440,14 @@ function handleSetConfig(args: Record<string, unknown>) {
     }
 
     case "sessions.remove": {
-      const { path: rPath } = value as { path: string };
+      const obj = value as Record<string, unknown>;
+      const rPath = obj?.path;
+      if (typeof rPath !== "string" || !rPath) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: "sessions.remove requires {path: string}" }, null, 2) }],
+          isError: true,
+        };
+      }
       if (!cfg.sessions) cfg.sessions = {};
       previousValue = cfg.sessions[rPath] ?? null;
       delete cfg.sessions[rPath];

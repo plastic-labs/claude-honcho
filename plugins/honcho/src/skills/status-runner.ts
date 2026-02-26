@@ -3,7 +3,8 @@
  * Runner script for the status skill.
  * Minimal: connection, queue, conclusions.
  */
-import { Honcho } from "@honcho-ai/sdk";
+import { Honcho, type Page, type Conclusion } from "@honcho-ai/sdk";
+import type { QueueStatus } from "@honcho-ai/sdk";
 import { loadConfig, getHonchoClientOptions, getEndpointInfo } from "../config.js";
 import * as s from "../styles.js";
 
@@ -31,13 +32,19 @@ async function status(): Promise<void> {
     ]);
 
     const latency = Date.now() - pingStart;
+
+    // If both API calls failed, treat as a connection failure
+    if (queueResult.status === "rejected" && conclusionsResult.status === "rejected") {
+      throw queueResult.reason;
+    }
+
     console.log(`  ${s.label("Connection")}:  ${s.success("connected")} ${s.dim(`(${latency}ms)`)}`);
     console.log(`  ${s.label("Workspace")}:   ${config.workspace} ${s.dim(`@ ${endpointInfo.url}`)}`);
     console.log(`  ${s.label("Peers")}:       ${config.peerName} / ${config.aiPeer}`);
 
     // Observation queue — messages being processed into conclusions
     if (queueResult.status === "fulfilled") {
-      const q = queueResult.value as any;
+      const q: QueueStatus = queueResult.value;
       const total = q.totalWorkUnits ?? 0;
       const completed = q.completedWorkUnits ?? 0;
       const inProgress = q.inProgressWorkUnits ?? 0;
@@ -55,12 +62,12 @@ async function status(): Promise<void> {
 
     // Conclusions
     if (conclusionsResult.status === "fulfilled") {
-      const page = conclusionsResult.value as any;
+      const page: Page<Conclusion> = conclusionsResult.value;
       const total = page.total ?? page.items?.length ?? "?";
       console.log(`  ${s.label("Conclusions")}: ${total} ${s.dim(`(${config.peerName})`)}`);
     }
-  } catch (err: any) {
-    const message = err?.message || String(err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
     if (message.includes("401") || message.includes("Unauthorized")) {
       console.log(`  ${s.label("Connection")}:  ${s.error("auth failed")} ${s.dim("check API key")}`);
     } else if (message.includes("ECONNREFUSED") || message.includes("fetch failed")) {

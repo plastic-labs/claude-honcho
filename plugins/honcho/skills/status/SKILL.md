@@ -6,16 +6,15 @@ user-invocable: true
 
 # Honcho Status
 
-Display the current Honcho memory system status, including configuration, session info, connection health, and live API stats.
+Display the current Honcho memory system status: connection health, workspace, peers, observation queue, and conclusion count.
 
 ## What It Shows
 
-1. **Plugin Status** - Whether Honcho memory is enabled or disabled
-2. **Configuration** - Peer name, AI peer, workspace, message saving
-3. **Current Session** - Session name, strategy, directory
-4. **Endpoint** - Production (api.honcho.dev) or local instance
-5. **Cache Status** - Instance ID, context age, queued messages
-6. **Honcho API** - Live connection health, latency, queue processing status, session count, conclusion/memory count
+1. **Connection** - Live connection health and latency
+2. **Workspace** - Current workspace and endpoint URL
+3. **Peers** - User peer and AI peer names
+4. **Observing** - Queue processing status (messages observed, active, sessions)
+5. **Conclusions** - Total conclusion/memory count for the user peer
 
 ## Usage
 

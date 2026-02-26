@@ -635,9 +635,12 @@ export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url
   return { type: "production", url: HONCHO_BASE_URLS.production };
 }
 
+const VALID_ENVIRONMENTS = new Set<HonchoEnvironment>(["production", "local"]);
+
 export function setEndpoint(environment?: HonchoEnvironment, baseUrl?: string): void {
   const config = loadConfig();
   if (!config) return;
+  if (environment && !VALID_ENVIRONMENTS.has(environment)) return;
   config.endpoint = { environment, baseUrl };
   saveConfig(config);
 }

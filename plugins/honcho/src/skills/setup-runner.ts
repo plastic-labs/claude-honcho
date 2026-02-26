@@ -67,17 +67,21 @@ async function setup(): Promise<void> {
   // Write config if it doesn't exist
   if (!configExists()) {
     console.log(s.section("Creating config"));
-    const host = getDetectedHost();
-    saveConfig({
-      apiKey: config.apiKey,
-      peerName: config.peerName,
-      workspace: getDefaultWorkspace(host),
-      aiPeer: getDefaultAiPeer(host),
-      saveMessages: true,
-      enabled: true,
-      logging: true,
-    });
-    console.log(s.success(`Written to ${getConfigPath()}`));
+    try {
+      saveConfig({
+        apiKey: config.apiKey,
+        peerName: config.peerName,
+        workspace: config.workspace,
+        aiPeer: config.aiPeer,
+        saveMessages: true,
+        enabled: true,
+        logging: true,
+      });
+      console.log(s.success(`Written to ${getConfigPath()}`));
+    } catch (err) {
+      console.log(s.warn(`Failed to write config: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    }
     console.log("");
   } else {
     console.log(s.dim(`Config already exists at ${getConfigPath()}`));
