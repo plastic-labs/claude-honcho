@@ -149,30 +149,30 @@ If confirmed, call `set_config` again WITH `confirm: true`.
 
 Linking and global mode are one concept: if any hosts are linked, global mode is on (shared workspace, sessions, peers). If all hosts are unlinked, global mode is off.
 
-Go straight to the multi-select picker. Pre-select any hosts that are currently linked. The user toggles individual hosts on or off.
+Show one option per host. Each option is either "Link {host}" or "Unlink {host}" depending on current state. Do NOT use multiSelect — use single-select so only one action happens at a time.
 
 ```
 AskUserQuestion:
-  question: "Toggle hosts to link/unlink:"
+  question: "Link or unlink a host:"
   header: "Link"
-  multiSelect: true
   options:
-    - label: "{hostKey} (linked)"   // if currently in resolved.linkedHosts
-      description: "workspace: {hostWorkspace} — deselect to unlink"
-    - label: "{hostKey}"            // if not currently linked
-      description: "workspace: {hostWorkspace} — select to link"
-    (one option per detected host from get_config's host.otherHosts)
+    - label: "Unlink {hostKey}"              // for each host in resolved.linkedHosts
+      description: "Currently linked (workspace: {hostWorkspace})"
+    - label: "Link {hostKey}"                // for each host NOT in resolved.linkedHosts
+      description: "workspace: {hostWorkspace}"
+    (one option per host from get_config's host.otherHosts)
 ```
 
-**If the user selected one or more hosts** (linking is being enabled or changed):
+**If the user chose "Link {host}":**
 
-Call `set_config` with `field: "linkedHosts"` and the selected host array.
+Compute the new linked array: current `resolved.linkedHosts` + the new host.
+Call `set_config` with `field: "linkedHosts"` and the new array.
 
-Then prompt for the shared workspace name:
+If this is the first link (was previously empty), prompt for shared workspace:
 
 ```
 AskUserQuestion:
-  question: "Shared workspace name for all linked hosts?"
+  question: "Shared workspace name?"
   header: "Workspace"
   options:
     - label: "{currentWorkspace} (Recommended)"
@@ -183,16 +183,20 @@ AskUserQuestion:
 ```
 
 Call `set_config` with `field: "workspace"`, `value: chosen`, `confirm: true`.
-Then call `set_config` with `field: "globalOverride"`, `value: true`, `confirm: true`.
+Call `set_config` with `field: "globalOverride"`, `value: true`, `confirm: true`.
 
-Explain: "Linked. All selected hosts share workspace '{chosen}', sessions, and peers. Context flows between them."
+If already linked to other hosts (just adding one more), skip the workspace prompt — the shared workspace is already set.
 
-**If the user deselected all hosts** (unlinking everything):
+**If the user chose "Unlink {host}":**
 
-Call `set_config` with `field: "linkedHosts"`, `value: []`.
-Then call `set_config` with `field: "globalOverride"`, `value: false`.
+Compute the new linked array: current `resolved.linkedHosts` minus that host.
+Call `set_config` with `field: "linkedHosts"` and the new array.
 
-Explain: "Unlinked. Each host uses its own workspace and config."
+If the new array is empty (no hosts linked), also disable global mode:
+Call `set_config` with `field: "globalOverride"`, `value: false`.
+Explain: "All hosts unlinked. Each host uses its own workspace and config."
+
+If hosts remain linked, just confirm: "Unlinked {host}. Still linked to: {remaining}."
 
 ### Dangerous fields (Host)
 
