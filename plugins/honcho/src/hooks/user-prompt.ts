@@ -1,14 +1,14 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getLinkedWorkspaces, getHonchoBaseUrl } from "../config.js";
 import {
   getCachedUserContext,
+  getStaleCachedUserContext,
   isContextCacheStale,
   setCachedUserContext,
-  queueMessage,
   incrementMessageCount,
   shouldRefreshKnowledgeGraph,
   markKnowledgeGraphRefreshed,
-  getClaudeInstanceId,
+  getInstanceIdForCwd,
   chunkContent,
 } from "../cache.js";
 import { logHook, logApiCall, logCache, setLogContext } from "../log.js";
@@ -18,6 +18,7 @@ interface HookInput {
   prompt?: string;
   cwd?: string;
   session_id?: string;
+  workspace_roots?: string[];
 }
 
 // Patterns to skip heavy context retrieval
@@ -79,7 +80,7 @@ export async function handleUserPrompt(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = getCachedStdin() ?? await Bun.stdin.text();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -88,10 +89,11 @@ export async function handleUserPrompt(): Promise<void> {
   }
 
   const prompt = hookInput.prompt || "";
-  const cwd = hookInput.cwd || process.cwd();
+  const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
+  const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
 
   // Set log context for this hook
-  setLogContext(cwd, getSessionName(cwd));
+  setLogContext(cwd, getSessionName(cwd, instanceId || undefined));
 
   // Skip empty prompts
   if (!prompt.trim()) {
@@ -100,16 +102,10 @@ export async function handleUserPrompt(): Promise<void> {
 
   logHook("user-prompt", `Prompt received (${prompt.length} chars)`);
 
-  // CRITICAL: Save message to local queue FIRST (instant, ~1-3ms)
-  // This survives ctrl+c, network failures, everything
-  if (config.saveMessages !== false) {
-    queueMessage(prompt, config.peerName, cwd);
-  }
-
   // Start upload immediately (we'll await before exit)
   let uploadPromise: Promise<void> | null = null;
   if (config.saveMessages !== false) {
-    uploadPromise = uploadMessageAsync(config, cwd, prompt);
+    uploadPromise = uploadMessageAsync(config, cwd, prompt, instanceId || undefined);
   }
 
   // Track message count for threshold-based knowledge graph refresh
@@ -157,11 +153,22 @@ export async function handleUserPrompt(): Promise<void> {
   }
 
   // Fetch fresh context when:
-  // 1. Cache is stale (>60s old), OR
-  // 2. Message threshold reached (every 10 messages)
+  // 1. Cache is stale (TTL expired), OR
+  // 2. Message threshold reached (every N messages)
+  // Race against a 5s timeout -- serve stale cache on timeout instead of failing.
   logCache("miss", "userContext", forceRefresh ? "threshold refresh" : "stale cache");
-  try {
-    const { parts: contextParts, conclusionCount } = await fetchFreshContext(config, cwd, prompt);
+
+  const FETCH_TIMEOUT_MS = 5000;
+  const fetchResult = await Promise.race([
+    fetchFreshContext(config, cwd, prompt).then(r => ({ ok: true as const, ...r })),
+    new Promise<{ ok: false }>(resolve => setTimeout(() => resolve({ ok: false }), FETCH_TIMEOUT_MS)),
+  ]).catch((e): { ok: false } => {
+    logHook("user-prompt", `Context fetch failed: ${e}`, { error: String(e) });
+    return { ok: false };
+  });
+
+  if (fetchResult.ok) {
+    const { parts: contextParts, conclusionCount } = fetchResult;
     if (contextParts.length > 0) {
       const visMsg = visContextLine("user-prompt", {
         conclusions: conclusionCount,
@@ -172,12 +179,22 @@ export async function handleUserPrompt(): Promise<void> {
     } else {
       outputSystemOnly("[honcho] user-prompt \u2022 no matching context found");
     }
-    // Mark that we refreshed the knowledge graph
     if (forceRefresh) {
       markKnowledgeGraphRefreshed();
     }
-  } catch {
-    outputSystemOnly("[honcho] user-prompt \u2717 context fetch failed");
+  } else {
+    // Timeout or error -- serve stale cache instead of showing nothing
+    const staleContext = getStaleCachedUserContext();
+    if (staleContext) {
+      logHook("user-prompt", "Serving stale cache after timeout/error");
+      const contextParts = formatCachedContext(staleContext, config.peerName);
+      if (contextParts.length > 0) {
+        const visMsg = "[honcho] user-prompt \u2190 context injected (stale)";
+        outputContext(config.peerName, contextParts, visMsg);
+      }
+    } else {
+      outputSystemOnly("[honcho] user-prompt \u2717 context unavailable");
+    }
   }
 
   // Ensure upload completes before exit
@@ -185,17 +202,16 @@ export async function handleUserPrompt(): Promise<void> {
   process.exit(0);
 }
 
-async function uploadMessageAsync(config: any, cwd: string, prompt: string): Promise<void> {
+async function uploadMessageAsync(config: any, cwd: string, prompt: string, instanceId?: string): Promise<void> {
   logApiCall("session.addMessages", "POST", `user prompt (${prompt.length} chars)`);
   const honcho = new Honcho(getHonchoClientOptions(config));
-  const sessionName = getSessionName(cwd);
+  const sessionName = getSessionName(cwd, instanceId);
 
   // Get session and peer using new fluent API
   const session = await honcho.session(sessionName);
   const userPeer = await honcho.peer(config.peerName);
 
   // Chunk large messages to stay under API size limits
-  const instanceId = getClaudeInstanceId();
   const chunks = chunkContent(prompt);
   const messages = chunks.map(chunk =>
     userPeer.message(chunk, {
@@ -252,9 +268,9 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
   const contextResult = await session.context({
     searchQuery,
     representationOptions: {
-      searchTopK: 10,
+      searchTopK: 5,
       searchMaxDistance: 0.7,
-      maxConclusions: 15,
+      maxConclusions: 10,
     },
   });
 
@@ -280,6 +296,39 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
     const peerCard = (contextResult as any).peerCard;
     if (peerCard?.length) {
       contextParts.push(`Profile: ${peerCard.join("; ")}`);
+    }
+  }
+
+  // Fetch from linked workspaces (lightweight — just conclusions, no dialectic)
+  const linkedWorkspaces = getLinkedWorkspaces();
+  if (linkedWorkspaces.length > 0) {
+    const linkedResults = await Promise.allSettled(
+      linkedWorkspaces.map(async (ws) => {
+        const linkedClient = new Honcho({
+          apiKey: config.apiKey,
+          baseUrl: getHonchoBaseUrl(config),
+          workspaceId: ws,
+        });
+        const linkedSession = await linkedClient.session(sessionName);
+        return {
+          ws,
+          context: await linkedSession.context({
+            searchQuery,
+            representationOptions: { searchTopK: 3, searchMaxDistance: 0.7, maxConclusions: 5 },
+          }),
+        };
+      })
+    );
+
+    for (const result of linkedResults) {
+      if (result.status === "fulfilled" && result.value.context) {
+        const rep = (result.value.context as any).representation;
+        if (typeof rep === "string" && rep.trim()) {
+          const lines = rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
+          const summary = lines.slice(0, 3).map((l: string) => l.replace(/^\[.*?\]\s*/, "").replace(/^- /, "")).join("; ");
+          if (summary) contextParts.push(`Linked (${result.value.ws}): ${summary}`);
+        }
+      }
     }
   }
 

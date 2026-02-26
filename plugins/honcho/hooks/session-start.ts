@@ -1,8 +1,6 @@
 #!/usr/bin/env bun
-/**
- * Standalone entry point for session-start hook.
- * Can be executed directly by Claude Code plugin system or via `bun run`.
- */
+import { initHook } from "../src/config.js";
 import { handleSessionStart } from "../src/hooks/session-start.js";
 
+await initHook();
 await handleSessionStart();

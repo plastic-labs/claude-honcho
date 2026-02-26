@@ -1,8 +1,6 @@
 #!/usr/bin/env bun
-/**
- * Standalone entry point for user-prompt hook.
- * Can be executed directly by Claude Code plugin system or via `bun run`.
- */
+import { initHook } from "../src/config.js";
 import { handleUserPrompt } from "../src/hooks/user-prompt.js";
 
+await initHook();
 await handleUserPrompt();

@@ -1,53 +1,199 @@
 import { homedir } from "os";
 import { join, basename } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { captureGitState } from "./git.js";
+import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
 
 function sanitizeForSessionName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
 export interface MessageUploadConfig {
-  maxUserTokens?: number; // Truncate user messages to this many tokens (null = no limit)
-  maxAssistantTokens?: number; // Truncate assistant messages (null = no limit)
-  summarizeAssistant?: boolean; // Summarize assistant messages instead of full text (default: false)
+  /** Truncate user messages to this many tokens (undefined = no limit) */
+  maxUserTokens?: number;
+  /** Truncate assistant messages to this many tokens (undefined = no limit) */
+  maxAssistantTokens?: number;
+  /** Summarize assistant messages instead of sending full text (default: false) */
+  summarizeAssistant?: boolean;
 }
 
 export interface ContextRefreshConfig {
-  messageThreshold?: number; // Refresh every N messages (default: 50)
-  ttlSeconds?: number; // Cache TTL in seconds (default: 300)
-  skipDialectic?: boolean; // Skip chat() calls in user-prompt (default: true)
+  /** Refresh context every N messages (default: 30) */
+  messageThreshold?: number;
+  /** Cache TTL in seconds (default: 300) */
+  ttlSeconds?: number;
+  /** Skip dialectic chat() calls in user-prompt hook (default: false) */
+  skipDialectic?: boolean;
 }
 
 export interface LocalContextConfig {
-  maxEntries?: number; // Max entries in claude-context.md (default: 50)
+  /** Max entries in claude-context.md (default: 50) */
+  maxEntries?: number;
 }
+
+export type SessionStrategy = "per-directory" | "git-branch" | "chat-instance";
 
 export type HonchoEnvironment = "production" | "local";
 
 export interface HonchoEndpointConfig {
-  environment?: HonchoEnvironment; // "production" (SaaS) or "local" (localhost:8000)
-  baseUrl?: string; // Custom URL override (takes precedence over environment)
+  /** "production" (SaaS) or "local" (localhost:8000) */
+  environment?: HonchoEnvironment;
+  /** Custom URL override (takes precedence over environment) */
+  baseUrl?: string;
 }
 
-// Default base URLs for the new SDK (v3 API)
 const HONCHO_BASE_URLS = {
   production: "https://api.honcho.dev/v3",
   local: "http://localhost:8000/v3",
 } as const;
 
+// ============================================
+// Host Detection
+// ============================================
+
+export type HonchoHost = "cursor" | "claude_code" | "obsidian";
+
+export interface HostConfig {
+  /** Honcho workspace name for this host */
+  workspace?: string;
+  /** AI peer name for this host (e.g. "claude", "cursor") */
+  aiPeer?: string;
+  /** Other host keys whose workspaces to read context from (writes stay local) */
+  linkedHosts?: string[];
+}
+
+let _detectedHost: HonchoHost | null = null;
+
+export function setDetectedHost(host: HonchoHost): void {
+  _detectedHost = host;
+}
+
+export function getDetectedHost(): HonchoHost {
+  return _detectedHost ?? "claude_code";
+}
+
+export function detectHost(stdinInput?: Record<string, unknown>): HonchoHost {
+  // Explicit env var override (used by install scripts and external tooling)
+  const envHost = process.env.HONCHO_HOST;
+  if (envHost === "cursor" || envHost === "claude_code" || envHost === "obsidian") return envHost;
+
+  if (stdinInput?.cursor_version) return "cursor";
+  // Cursor sets CURSOR_PROJECT_DIR for child processes (incl. Claude Code inside Cursor)
+  if (process.env.CURSOR_PROJECT_DIR) return "cursor";
+  return "claude_code";
+}
+
+const DEFAULT_WORKSPACE: Record<HonchoHost, string> = {
+  "cursor": "cursor",
+  "claude_code": "claude_code",
+  "obsidian": "obsidian",
+};
+
+const DEFAULT_AI_PEER: Record<HonchoHost, string> = {
+  "cursor": "cursor",
+  "claude_code": "claude",
+  "obsidian": "honcho",
+};
+
+export function getDefaultWorkspace(host?: HonchoHost): string {
+  return DEFAULT_WORKSPACE[host ?? getDetectedHost()];
+}
+
+export function getDefaultAiPeer(host?: HonchoHost): string {
+  return DEFAULT_AI_PEER[host ?? getDetectedHost()];
+}
+
+// Stdin cache: entry points read stdin once via initHook(),
+// handlers consume from cache via getCachedStdin().
+let _stdinText: string | null = null;
+
+export function cacheStdin(text: string): void {
+  _stdinText = text;
+}
+
+export function getCachedStdin(): string | null {
+  return _stdinText;
+}
+
+/**
+ * Shared hook entry point initialization.
+ * Reads stdin once, caches it, detects host, and exits early for unsupported hosts.
+ * Must be called at the top of every hook entry point before the handler.
+ */
+export async function initHook(): Promise<void> {
+  const stdinText = await Bun.stdin.text();
+  cacheStdin(stdinText);
+  let input: Record<string, unknown> = {};
+  try { input = JSON.parse(stdinText || "{}"); } catch { process.exit(0); }
+  if (input.cursor_version) process.exit(0);
+  setDetectedHost(detectHost(input));
+}
+
+// ============================================
+// Config Types
+// ============================================
+
+/** Raw shape of ~/.honcho/config.json on disk */
+interface HonchoFileConfig {
+  apiKey?: string;
+  peerName?: string;
+  workspace?: string;
+  aiPeer?: string;
+  sessions?: Record<string, string>;
+  saveMessages?: boolean;
+  messageUpload?: MessageUploadConfig;
+  contextRefresh?: ContextRefreshConfig;
+  endpoint?: HonchoEndpointConfig;
+  localContext?: LocalContextConfig;
+  enabled?: boolean;
+  logging?: boolean;
+  sessionStrategy?: SessionStrategy;
+  /** Prefix session names with peerName (default: true, disable for solo use) */
+  sessionPeerPrefix?: boolean;
+  hosts?: Record<string, HostConfig>;
+  /** When true, flat workspace/aiPeer fields apply to ALL hosts,
+   *  ignoring host-specific blocks. When false (default), each host
+   *  uses its own block and flat fields are fallbacks only. */
+  globalOverride?: boolean;
+  // Legacy flat fields (read-only fallbacks when no hosts block)
+  cursorPeer?: string;
+  claudePeer?: string;
+}
+
+/** Resolved runtime config consumed by all other code.
+ *  Host-specific fields (workspace, aiPeer) are resolved from the hosts block
+ *  or legacy flat fields in HonchoFileConfig. */
 export interface HonchoCLAUDEConfig {
-  peerName: string; // The user's peer name
-  apiKey: string; // Honcho API key
-  workspace: string; // Honcho workspace name
-  claudePeer: string; // Claude's peer name (default: "claude")
-  sessions?: Record<string, string>; // Map of directory path -> session name
-  saveMessages?: boolean; // Save messages to Honcho (default: true)
-  messageUpload?: MessageUploadConfig; // Token-based upload limits (default: no limits)
-  contextRefresh?: ContextRefreshConfig; // Context retrieval settings
-  endpoint?: HonchoEndpointConfig; // SaaS vs local instance config
-  localContext?: LocalContextConfig; // Local claude-context.md settings
-  enabled?: boolean; // Temporarily disable plugin (default: true)
-  logging?: boolean; // Enable file logging to ~/.honcho/ (default: true)
+  /** The user's peer name */
+  peerName: string;
+  /** Honcho API key */
+  apiKey: string;
+  /** Honcho workspace name (resolved per-host) */
+  workspace: string;
+  /** AI peer name (resolved per-host, e.g. "claude" for claude-code) */
+  aiPeer: string;
+  /** Other host keys whose workspaces to also read context from */
+  linkedHosts?: string[];
+  /** How sessions are named: per-directory, git-branch, or chat-instance */
+  sessionStrategy?: SessionStrategy;
+  /** Prefix session names with peerName (default: true, disable for solo use) */
+  sessionPeerPrefix?: boolean;
+  /** Map of directory path -> session name overrides */
+  sessions?: Record<string, string>;
+  /** Save messages to Honcho (default: true) */
+  saveMessages?: boolean;
+  /** Token-based upload limits */
+  messageUpload?: MessageUploadConfig;
+  /** Context retrieval settings */
+  contextRefresh?: ContextRefreshConfig;
+  /** SaaS vs local instance config */
+  endpoint?: HonchoEndpointConfig;
+  /** Local claude-context.md settings */
+  localContext?: LocalContextConfig;
+  /** Temporarily disable plugin (default: true) */
+  enabled?: boolean;
+  /** Enable file logging to ~/.honcho/ (default: true) */
+  logging?: boolean;
 }
 
 const CONFIG_DIR = join(homedir(), ".honcho");
@@ -67,53 +213,110 @@ export function configExists(): boolean {
 
 /**
  * Load config from file, with environment variable fallbacks.
- * This allows the plugin to work without running `honcho init` first
- * if the user sets HONCHO_API_KEY and other env vars.
+ * Host-specific fields are resolved from the hosts block in the config file.
  */
-export function loadConfig(): HonchoCLAUDEConfig | null {
-  // Try file-based config first
+export function loadConfig(host?: HonchoHost): HonchoCLAUDEConfig | null {
+  const resolvedHost = host ?? getDetectedHost();
+
   if (configExists()) {
     try {
       const content = readFileSync(CONFIG_FILE, "utf-8");
-      const fileConfig = JSON.parse(content) as HonchoCLAUDEConfig;
-
-      // Merge with env vars (env vars take precedence for API key)
-      return mergeWithEnvVars(fileConfig);
+      const raw = JSON.parse(content) as HonchoFileConfig;
+      return resolveConfig(raw, resolvedHost);
     } catch {
       // Fall through to env-only config
     }
   }
+  return loadConfigFromEnv(resolvedHost);
+}
 
-  // No file config - try environment variables only
-  return loadConfigFromEnv();
+function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDEConfig | null {
+  const apiKey = process.env.HONCHO_API_KEY || raw.apiKey;
+  if (!apiKey) return null;
+
+  const peerName = raw.peerName || process.env.HONCHO_PEER_NAME || process.env.USER || "user";
+
+  // Resolve host-specific fields
+  let workspace: string;
+  let aiPeer: string;
+
+  const hostBlock = raw.hosts?.[host];
+
+  if (raw.globalOverride === true) {
+    // Global override: flat fields apply to ALL hosts
+    workspace = raw.workspace ?? DEFAULT_WORKSPACE[host];
+    aiPeer = raw.aiPeer ?? hostBlock?.aiPeer ?? DEFAULT_AI_PEER[host];
+  } else if (hostBlock) {
+    // Host-specific block takes precedence
+    workspace = hostBlock.workspace ?? DEFAULT_WORKSPACE[host];
+    aiPeer = hostBlock.aiPeer ?? DEFAULT_AI_PEER[host];
+  } else {
+    // Legacy flat-field fallback for configs written before hosts block.
+    // Env var is respected here (matching main-branch behavior) so it gets
+    // captured into the hosts block on first saveConfig(), after which the
+    // env var becomes redundant and is safely ignored.
+    workspace = process.env.HONCHO_WORKSPACE ?? raw.workspace ?? DEFAULT_WORKSPACE[host];
+    if (host === "cursor") {
+      aiPeer = raw.cursorPeer ?? DEFAULT_AI_PEER["cursor"];
+    } else {
+      aiPeer = raw.claudePeer ?? DEFAULT_AI_PEER["claude_code"];
+    }
+  }
+
+  // Resolve linked hosts
+  const linkedHosts = hostBlock?.linkedHosts ?? [];
+
+  const config: HonchoCLAUDEConfig = {
+    apiKey,
+    peerName,
+    workspace,
+    aiPeer,
+    linkedHosts: linkedHosts.length ? linkedHosts : undefined,
+    sessionStrategy: raw.sessionStrategy,
+    sessionPeerPrefix: raw.sessionPeerPrefix,
+    sessions: raw.sessions,
+    saveMessages: raw.saveMessages,
+    messageUpload: raw.messageUpload,
+    contextRefresh: raw.contextRefresh,
+    endpoint: raw.endpoint,
+    localContext: raw.localContext,
+    enabled: raw.enabled,
+    logging: raw.logging,
+  };
+
+  return mergeWithEnvVars(config);
 }
 
 /**
  * Load config purely from environment variables.
- * Returns null if required vars (HONCHO_API_KEY) are not set.
+ * Returns null if HONCHO_API_KEY is not set.
+ * HONCHO_WORKSPACE is respected here (no file config to conflict with).
  */
-export function loadConfigFromEnv(): HonchoCLAUDEConfig | null {
+export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null {
   const apiKey = process.env.HONCHO_API_KEY;
   if (!apiKey) {
     return null;
   }
 
+  const resolvedHost = host ?? getDetectedHost();
   const peerName = process.env.HONCHO_PEER_NAME || process.env.USER || "user";
-  const workspace = process.env.HONCHO_WORKSPACE || "claude_code";
-  const claudePeer = process.env.HONCHO_CLAUDE_PEER || "claude";
+  const workspace = process.env.HONCHO_WORKSPACE || DEFAULT_WORKSPACE[resolvedHost];
+  const hostPeerEnv = resolvedHost === "cursor"
+    ? process.env.HONCHO_CURSOR_PEER
+    : process.env.HONCHO_CLAUDE_PEER;
+  const aiPeer = process.env.HONCHO_AI_PEER || hostPeerEnv || DEFAULT_AI_PEER[resolvedHost];
   const endpoint = process.env.HONCHO_ENDPOINT;
 
   const config: HonchoCLAUDEConfig = {
     apiKey,
     peerName,
     workspace,
-    claudePeer,
+    aiPeer,
     saveMessages: process.env.HONCHO_SAVE_MESSAGES !== "false",
     enabled: process.env.HONCHO_ENABLED !== "false",
     logging: process.env.HONCHO_LOGGING !== "false",
   };
 
-  // Handle endpoint configuration
   if (endpoint) {
     if (endpoint === "local") {
       config.endpoint = { environment: "local" };
@@ -127,17 +330,15 @@ export function loadConfigFromEnv(): HonchoCLAUDEConfig | null {
 
 /**
  * Merge file-based config with environment variable overrides.
- * Env vars take precedence for sensitive values like API key.
+ * Only merges global (non-host-specific) env vars. workspace and aiPeer
+ * are host-specific fields already resolved by resolveConfig() from the
+ * hosts block -- generic env vars like HONCHO_WORKSPACE must not override
+ * them here, otherwise a value set for one host clobbers the other.
+ * (HONCHO_WORKSPACE IS respected in loadConfigFromEnv when no file exists.)
  */
 function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
-  // API key from env takes precedence (allows secure injection)
   if (process.env.HONCHO_API_KEY) {
     config.apiKey = process.env.HONCHO_API_KEY;
-  }
-
-  // Other env overrides
-  if (process.env.HONCHO_WORKSPACE) {
-    config.workspace = process.env.HONCHO_WORKSPACE;
   }
   if (process.env.HONCHO_PEER_NAME) {
     config.peerName = process.env.HONCHO_PEER_NAME;
@@ -148,15 +349,71 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   if (process.env.HONCHO_LOGGING === "false") {
     config.logging = false;
   }
-
   return config;
 }
 
+/**
+ * Read-merge-write: reads existing file, merges in changes, writes back.
+ * This prevents one host from clobbering fields owned by the other.
+ * Host-specific fields (workspace, aiPeer, linkedHosts) live in the
+ * hosts block. Legacy flat fields (workspace, cursorPeer, claudePeer)
+ * are no longer written — they may still exist in old config files but
+ * are only consulted as fallbacks when the hosts block is missing.
+ */
 export function saveConfig(config: HonchoCLAUDEConfig): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
   }
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+
+  let existing: HonchoFileConfig = {};
+  if (existsSync(CONFIG_FILE)) {
+    try {
+      existing = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+    } catch {
+      // Start fresh if corrupt
+    }
+  }
+
+  // Merge shared fields
+  existing.apiKey = config.apiKey;
+  existing.peerName = config.peerName;
+  existing.sessionStrategy = config.sessionStrategy;
+  existing.sessionPeerPrefix = config.sessionPeerPrefix;
+  existing.sessions = config.sessions;
+  existing.saveMessages = config.saveMessages;
+  existing.messageUpload = config.messageUpload;
+  existing.contextRefresh = config.contextRefresh;
+  existing.endpoint = config.endpoint;
+  existing.localContext = config.localContext;
+  existing.enabled = config.enabled;
+  existing.logging = config.logging;
+
+  // Write host-specific fields into hosts block
+  const host = getDetectedHost();
+  if (!existing.hosts) existing.hosts = {};
+  existing.hosts[host] = {
+    workspace: config.workspace,
+    aiPeer: config.aiPeer,
+    ...(config.linkedHosts?.length ? { linkedHosts: config.linkedHosts } : {}),
+  };
+
+  // Preserve globalOverride if set; never implicitly add it
+  // (only written when explicitly set via set_config or setup)
+
+  // Clean legacy flat fields when hosts block exists
+  if (existing.hosts && !existing.globalOverride) {
+    delete existing.cursorPeer;
+    delete existing.claudePeer;
+    // Only remove flat workspace if it duplicates a host block value
+    // (avoids breaking configs where globalOverride isn't set yet)
+    const hostWorkspaces = Object.values(existing.hosts).map((h: any) => h.workspace);
+    if (existing.workspace && hostWorkspaces.includes(existing.workspace)) {
+      delete existing.workspace;
+    }
+    delete existing.aiPeer;
+  }
+
+  writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
 }
 
 export function getClaudeSettingsPath(): string {
@@ -167,32 +424,61 @@ export function getClaudeSettingsDir(): string {
   return join(homedir(), ".claude");
 }
 
-// Session management helpers
 export function getSessionForPath(cwd: string): string | null {
   const config = loadConfig();
   if (!config?.sessions) return null;
   return config.sessions[cwd] || null;
 }
 
-/**
- * Default session name: peerName-repoName (e.g. user-repo-name).
- * If a session is configured for this path, that name is returned instead.
+/** Session name derived from strategy. Manual overrides only apply to per-directory.
+ *  @param instanceId - Explicit instance ID for chat-instance strategy. Falls back to
+ *                      per-cwd cache, then global cache. Callers should pass hookInput.session_id
+ *                      when available to avoid cross-session collision from the global cache.
  */
-export function getSessionName(cwd: string): string {
-  const configuredSession = getSessionForPath(cwd);
-  if (configuredSession) {
-    return configuredSession;
-  }
+export function getSessionName(cwd: string, instanceId?: string): string {
   const config = loadConfig();
+  const strategy = config?.sessionStrategy ?? "per-directory";
+
+  // Manual overrides only apply to per-directory strategy.
+  // For chat-instance and git-branch, the session name is always derived dynamically.
+  if (strategy === "per-directory") {
+    const configuredSession = getSessionForPath(cwd);
+    if (configuredSession) {
+      return configuredSession;
+    }
+  }
+
+  const usePrefix = config?.sessionPeerPrefix !== false; // default true
   const peerPart = config?.peerName ? sanitizeForSessionName(config.peerName) : "user";
   const repoPart = sanitizeForSessionName(basename(cwd));
-  return `${peerPart}-${repoPart}`;
+  const base = usePrefix ? `${peerPart}-${repoPart}` : repoPart;
+
+  switch (strategy) {
+    case "git-branch": {
+      const gitState = captureGitState(cwd);
+      if (gitState) {
+        const branchPart = sanitizeForSessionName(gitState.branch);
+        return `${base}-${branchPart}`;
+      }
+      return base;
+    }
+    case "chat-instance": {
+      // Prefer explicit instanceId > per-cwd cache > global cache (legacy)
+      const resolved = instanceId || getInstanceIdForCwd(cwd) || getClaudeInstanceId();
+      if (resolved) {
+        return `chat-${resolved}`;
+      }
+      return base;
+    }
+    case "per-directory":
+    default:
+      return base;
+  }
 }
 
 export function setSessionForPath(cwd: string, sessionName: string): void {
   const config = loadConfig();
   if (!config) return;
-
   if (!config.sessions) {
     config.sessions = {};
   }
@@ -208,17 +494,15 @@ export function getAllSessions(): Record<string, string> {
 export function removeSessionForPath(cwd: string): void {
   const config = loadConfig();
   if (!config?.sessions) return;
-
   delete config.sessions[cwd];
   saveConfig(config);
 }
 
-// Config helpers with defaults
 export function getMessageUploadConfig(): MessageUploadConfig {
   const config = loadConfig();
   return {
-    maxUserTokens: config?.messageUpload?.maxUserTokens ?? undefined, // No limit by default
-    maxAssistantTokens: config?.messageUpload?.maxAssistantTokens ?? undefined, // No limit by default
+    maxUserTokens: config?.messageUpload?.maxUserTokens ?? undefined,
+    maxAssistantTokens: config?.messageUpload?.maxAssistantTokens ?? undefined,
     summarizeAssistant: config?.messageUpload?.summarizeAssistant ?? false,
   };
 }
@@ -226,29 +510,27 @@ export function getMessageUploadConfig(): MessageUploadConfig {
 export function getContextRefreshConfig(): ContextRefreshConfig {
   const config = loadConfig();
   return {
-    messageThreshold: config?.contextRefresh?.messageThreshold ?? 30, // Every 30 messages
-    ttlSeconds: config?.contextRefresh?.ttlSeconds ?? 300, // 5 minutes
-    skipDialectic: config?.contextRefresh?.skipDialectic ?? false, // Dialectic enabled by default
+    messageThreshold: config?.contextRefresh?.messageThreshold ?? 30,
+    ttlSeconds: config?.contextRefresh?.ttlSeconds ?? 300,
+    skipDialectic: config?.contextRefresh?.skipDialectic ?? false,
   };
 }
 
 export function getLocalContextConfig(): LocalContextConfig {
   const config = loadConfig();
   return {
-    maxEntries: config?.localContext?.maxEntries ?? 50, // Default 50 entries
+    maxEntries: config?.localContext?.maxEntries ?? 50,
   };
 }
 
-// File logging enable/disable
 export function isLoggingEnabled(): boolean {
   const config = loadConfig();
-  return config?.logging !== false; // default: true
+  return config?.logging !== false;
 }
 
-// Plugin enable/disable
 export function isPluginEnabled(): boolean {
   const config = loadConfig();
-  return config?.enabled !== false; // default: true
+  return config?.enabled !== false;
 }
 
 export function setPluginEnabled(enabled: boolean): void {
@@ -258,12 +540,57 @@ export function setPluginEnabled(enabled: boolean): void {
   saveConfig(config);
 }
 
-// Simple token estimation (chars / 4)
+/**
+ * Get workspace names from linked hosts.
+ * Returns the workspace names configured for each linked host key.
+ * If a linked host has no workspace set, uses its default.
+ */
+export function getLinkedWorkspaces(): string[] {
+  const config = loadConfig();
+  if (!config?.linkedHosts?.length) return [];
+
+  const cfgPath = getConfigPath();
+  if (!existsSync(cfgPath)) return [];
+
+  let raw: Record<string, any>;
+  try {
+    raw = JSON.parse(readFileSync(cfgPath, "utf-8"));
+  } catch {
+    return [];
+  }
+
+  const workspaces: string[] = [];
+  for (const hostKey of config.linkedHosts) {
+    const block = raw.hosts?.[hostKey];
+    // Use that host's configured workspace, or fall back to host key as workspace name
+    const ws = block?.workspace ?? hostKey;
+    // Don't include our own workspace
+    if (ws !== config.workspace) {
+      workspaces.push(ws);
+    }
+  }
+  return workspaces;
+}
+
+/**
+ * Get all known host keys from the config file's hosts block.
+ */
+export function getKnownHosts(): string[] {
+  const cfgPath = getConfigPath();
+  if (!existsSync(cfgPath)) return [];
+  try {
+    const raw = JSON.parse(readFileSync(cfgPath, "utf-8"));
+    return raw.hosts ? Object.keys(raw.hosts) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Simple token estimation (chars / 4) */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-// Truncate text to approximate token limit
 export function truncateToTokens(text: string, maxTokens: number): string {
   const estimatedChars = maxTokens * 4;
   if (text.length <= estimatedChars) {
@@ -272,23 +599,15 @@ export function truncateToTokens(text: string, maxTokens: number): string {
   return text.slice(0, estimatedChars - 3) + "...";
 }
 
-// ============================================
-// Honcho Client Options Helper
-// ============================================
-
 export interface HonchoClientOptions {
   apiKey: string;
   baseUrl: string;
   workspaceId: string;
 }
 
-/**
- * Get the base URL for Honcho API based on config.
- * Priority: baseUrl > environment > "production" (default)
- */
+/** Get the base URL for Honcho API. Priority: baseUrl > environment > production */
 export function getHonchoBaseUrl(config: HonchoCLAUDEConfig): string {
   if (config.endpoint?.baseUrl) {
-    // Custom URL takes precedence - ensure it has /v3 suffix
     const url = config.endpoint.baseUrl;
     return url.endsWith("/v3") ? url : `${url}/v3`;
   }
@@ -298,10 +617,6 @@ export function getHonchoBaseUrl(config: HonchoCLAUDEConfig): string {
   return HONCHO_BASE_URLS.production;
 }
 
-/**
- * Get Honcho client options based on config.
- * New SDK requires baseUrl and workspaceId at construction time.
- */
 export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClientOptions {
   return {
     apiKey: config.apiKey,
@@ -310,9 +625,6 @@ export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClient
   };
 }
 
-/**
- * Get current endpoint display info
- */
 export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url: string } {
   if (config.endpoint?.baseUrl) {
     return { type: "custom", url: config.endpoint.baseUrl };
@@ -323,19 +635,12 @@ export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url
   return { type: "production", url: HONCHO_BASE_URLS.production };
 }
 
-/**
- * Set endpoint configuration
- */
-export function setEndpoint(
-  environment?: HonchoEnvironment,
-  baseUrl?: string
-): void {
+const VALID_ENVIRONMENTS = new Set<HonchoEnvironment>(["production", "local"]);
+
+export function setEndpoint(environment?: HonchoEnvironment, baseUrl?: string): void {
   const config = loadConfig();
   if (!config) return;
-
-  config.endpoint = {
-    environment,
-    baseUrl,
-  };
+  if (environment && !VALID_ENVIRONMENTS.has(environment)) return;
+  config.endpoint = { environment, baseUrl };
   saveConfig(config);
 }

@@ -1,8 +1,9 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
+import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getLinkedWorkspaces, getHonchoBaseUrl } from "../config.js";
 import {
   setCachedUserContext,
   setCachedClaudeContext,
+  setCachedSessionId,
   loadClaudeLocalContext,
   resetMessageCount,
   setClaudeInstanceId,
@@ -22,6 +23,7 @@ interface HookInput {
   transcript_path?: string;
   cwd?: string;
   source?: string;
+  workspace_roots?: string[];
 }
 
 function formatRepresentation(rep: any): string {
@@ -45,7 +47,7 @@ export async function handleSessionStart(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = getCachedStdin() ?? await Bun.stdin.text();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -53,16 +55,17 @@ export async function handleSessionStart(): Promise<void> {
     // No input or invalid JSON
   }
 
-  const cwd = hookInput.cwd || process.cwd();
+  const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const claudeInstanceId = hookInput.session_id;
 
   // Store Claude's instance ID for parallel session support
+  // Global write kept for backward compat (post-tool-use, MCP server, etc.)
   if (claudeInstanceId) {
     setClaudeInstanceId(claudeInstanceId);
   }
 
   // Set log context early so all logs include cwd/session
-  const sessionName = getSessionName(cwd);
+  const sessionName = getSessionName(cwd, claudeInstanceId);
   setLogContext(cwd, sessionName);
 
   // Clear verbose log for fresh session
@@ -85,39 +88,52 @@ export async function handleSessionStart(): Promise<void> {
     setCachedGitState(cwd, currentGitState);
   }
 
+  // Show workspace info immediately (before any API calls)
+  console.log(displayHonchoStartup(
+    "Honcho Memory",
+    `${config.workspace} · ${sessionName}`,
+    currentGitState?.branch ? `branch: ${currentGitState.branch}` : undefined,
+  ));
+
   // Start loading animation with neural style
   const spinner = new Spinner({ style: "neural" });
   spinner.start("loading memory");
 
   try {
     logHook("session-start", `Starting session in ${cwd}`, { branch: currentGitState?.branch });
-    logFlow("init", `workspace: ${config.workspace}, peers: ${config.peerName}/${config.claudePeer}`);
+    logFlow("init", `workspace: ${config.workspace}, peers: ${config.peerName}/${config.aiPeer}`);
 
     // New SDK: workspace is provided at construction time
     const honcho = new Honcho(getHonchoClientOptions(config));
 
     // Step 1-3: Get session and peers using new fluent API (lazily created)
     spinner.update("Loading session");
-    const sessionName = getSessionName(cwd);
+    const sessionName = getSessionName(cwd, claudeInstanceId);
 
     const startTime = Date.now();
     // New SDK: session() and peer() are async and create lazily
-    const [session, userPeer, claudePeer] = await Promise.all([
+    const [session, userPeer, aiPeer] = await Promise.all([
       honcho.session(sessionName),
       honcho.peer(config.peerName),
-      honcho.peer(config.claudePeer),
+      honcho.peer(config.aiPeer),
     ]);
     logApiCall("honcho.session/peer", "GET", `session + 2 peers`, Date.now() - startTime, true);
+
+    // Write CWD to cache so MCP server can resolve the project directory
+    // Also stores instanceId per-cwd to prevent cross-session collision
+    setCachedSessionId(cwd, sessionName, session.id, claudeInstanceId);
 
     // Step 4: Set session peer configuration (fire-and-forget)
     // New SDK uses session.setPeerConfiguration()
     Promise.all([
       session.setPeerConfiguration(userPeer, { observeMe: true, observeOthers: false }),
-      session.setPeerConfiguration(claudePeer, { observeMe: false, observeOthers: true }),
+      session.setPeerConfiguration(aiPeer, { observeMe: false, observeOthers: true }),
     ]).catch((e) => logHook("session-start", `Set peers failed: ${e}`));
 
-    // Store session mapping
-    if (!getSessionForPath(cwd)) {
+    // Only persist session names for per-directory strategy (stable names).
+    // Dynamic strategies (git-branch, chat-instance) change per session,
+    // so locking them as overrides defeats the purpose.
+    if (!getSessionForPath(cwd) && (!config.sessionStrategy || config.sessionStrategy === "per-directory")) {
       setSessionForPath(cwd, sessionName);
     }
 
@@ -153,7 +169,7 @@ export async function handleSessionStart(): Promise<void> {
     // Header with git context
     let headerContent = `## Honcho Memory System Active
 - User: ${config.peerName}
-- AI: ${config.claudePeer}
+- AI: ${config.aiPeer}
 - Workspace: ${config.workspace}
 - Session: ${sessionName}
 - Directory: ${cwd}`;
@@ -202,7 +218,7 @@ export async function handleSessionStart(): Promise<void> {
     // Load local claude context immediately (instant, no API call)
     const localClaudeContext = loadClaudeLocalContext();
     if (localClaudeContext) {
-      contextParts.push(`## CLAUDE Local Context (What I Was Working On)\n${localClaudeContext.slice(0, 2000)}`);
+      contextParts.push(`## Local Context (What I Was Working On)\n${localClaudeContext.slice(0, 2000)}`);
     }
 
     // Build context-aware dialectic queries
@@ -224,7 +240,7 @@ export async function handleSessionStart(): Promise<void> {
           includeMostFrequent: true,
         }),
         // 2. Get claude's context (self-awareness, also session-scoped)
-        claudePeer.context({
+        aiPeer.context({
           maxConclusions: 15,
           includeMostFrequent: true,
         }),
@@ -236,8 +252,8 @@ export async function handleSessionStart(): Promise<void> {
           { session }
         ),
         // 5. Dialectic: Ask about claude (self-reflection, context-enhanced)
-        claudePeer.chat(
-          `What has ${config.claudePeer} been working on recently?${branchContext}${featureHint} Summarize the AI assistant's recent activities and focus areas relevant to the current work context.`,
+        aiPeer.chat(
+          `What has ${config.aiPeer} been working on recently?${branchContext}${featureHint} Summarize the AI assistant's recent activities and focus areas relevant to the current work context.`,
           { session }
         ),
       ]);
@@ -278,7 +294,7 @@ export async function handleSessionStart(): Promise<void> {
     }
     if (claudeChatResult.status === "fulfilled") {
       const chatVal = typeof claudeChatResult.value === "string" ? claudeChatResult.value : (claudeChatResult.value as any)?.content;
-      verboseApiResult(`peer.chat(claude) → "${config.claudePeer}"`, chatVal);
+      verboseApiResult(`peer.chat(claude) → "${config.aiPeer}"`, chatVal);
     }
 
     // ========== CONSOLIDATED CONTEXT OUTPUT ==========
@@ -328,7 +344,7 @@ export async function handleSessionStart(): Promise<void> {
       if (rep) {
         const repText = formatRepresentation(rep);
         if (repText) {
-          contextParts.push(`## ${config.claudePeer}'s Work History (Self-Context)\n${repText}`);
+          contextParts.push(`## ${config.aiPeer}'s Work History (Self-Context)\n${repText}`);
         }
       }
     }
@@ -356,24 +372,57 @@ export async function handleSessionStart(): Promise<void> {
       ? (typeof claudeChatResult.value === "string" ? claudeChatResult.value : (claudeChatResult.value as any)?.content)
       : null;
     if (claudeChatContent) {
-      contextParts.push(`## AI Self-Reflection (What ${config.claudePeer} Has Been Doing)\n${claudeChatContent}`);
+      contextParts.push(`## AI Self-Reflection (What ${config.aiPeer} Has Been Doing)\n${claudeChatContent}`);
     }
 
-    // Stop spinner and display pixel art
+    // Fetch context from linked workspaces (reads only, writes stay local)
+    const linkedWorkspaces = getLinkedWorkspaces();
+    if (linkedWorkspaces.length > 0) {
+      spinner.update("Fetching linked context");
+      logAsync("linked-context", `Fetching from ${linkedWorkspaces.length} linked workspace(s): ${linkedWorkspaces.join(", ")}`);
+
+      const linkedResults = await Promise.allSettled(
+        linkedWorkspaces.map(async (ws) => {
+          const linkedClient = new Honcho({
+            apiKey: config.apiKey,
+            baseUrl: getHonchoBaseUrl(config),
+            workspaceId: ws,
+          });
+          const linkedPeer = await linkedClient.peer(config.peerName);
+          return { ws, context: await linkedPeer.context({ maxConclusions: 10, includeMostFrequent: true }) };
+        })
+      );
+
+      for (const result of linkedResults) {
+        if (result.status === "fulfilled" && result.value.context) {
+          const { ws, context } = result.value;
+          const rep = formatRepresentation((context as any).representation);
+          if (rep) {
+            contextParts.push(`## Linked Context (${ws})\n${rep}`);
+          }
+          logAsync("linked-context", `${ws}: loaded`);
+        } else if (result.status === "rejected") {
+          logAsync("linked-context", `Failed: ${result.reason}`);
+        }
+      }
+    }
+
+    // Stop spinner
     spinner.stop();
 
     logFlow("complete", `Memory loaded: ${contextParts.length} sections, ${successCount}/5 API calls succeeded`);
 
-    // Display Honcho pixel character with startup message
-    console.log(displayHonchoStartup("Honcho Memory"));
-
     // Output all context
-    console.log(`\n[${config.claudePeer}/Honcho Memory Loaded]\n\n${contextParts.join("\n\n")}`);
+    console.log(`\n[${config.aiPeer}/Honcho Memory Loaded]\n\n${contextParts.join("\n\n")}`);
     process.exit(0);
   } catch (error) {
     logHook("session-start", `Error: ${error}`, { error: String(error) });
-    spinner.fail("memory load failed");
-    console.error(`[honcho] ${error}`);
-    process.exit(1);
+    spinner.stop();
+    // Degrade gracefully — workspace info was already shown above.
+    // Output whatever context we managed to collect.
+    if (contextParts.length > 0) {
+      console.log(`\n[${config.aiPeer}/Honcho Memory (partial)]\n\n${contextParts.join("\n\n")}`);
+    }
+    process.exit(0);
   }
 }
