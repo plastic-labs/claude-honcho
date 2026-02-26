@@ -1,5 +1,4 @@
 ---
-name: honcho:config
 description: Configure Honcho memory plugin settings interactively
 allowed-tools: get_config, set_config
 user-invocable: true

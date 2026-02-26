@@ -1,5 +1,4 @@
 ---
-name: honcho:setup
 description: First-time Honcho configuration -- set API key, validate connection, create config
 user-invocable: true
 ---

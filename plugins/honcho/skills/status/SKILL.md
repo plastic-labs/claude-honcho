@@ -1,5 +1,4 @@
 ---
-name: honcho:status
 description: Show current Honcho memory status and configuration
 user-invocable: true
 ---
