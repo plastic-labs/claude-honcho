@@ -40,11 +40,10 @@ if [[ ! -d "$PLUGIN_DIR/node_modules" ]]; then
   echo ""
 fi
 
-# Sync files to cache (excludes .git, .claude-plugin, scripts, and dev artifacts)
+# Sync files to cache (excludes .git, scripts, and dev artifacts)
 mkdir -p "$CACHE_DIR"
 rsync -a --delete \
   --exclude '.git' \
-  --exclude '.claude-plugin' \
   --exclude 'scripts' \
   --exclude '.DS_Store' \
   "$PLUGIN_DIR/" "$CACHE_DIR/"
