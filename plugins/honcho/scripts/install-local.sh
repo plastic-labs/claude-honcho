@@ -7,6 +7,7 @@ set -euo pipefail
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CACHE_BASE="$HOME/.claude/plugins/cache/honcho/honcho"
+MARKETPLACE_DIR="$HOME/.claude/plugins/marketplaces/honcho/plugins/honcho"
 INSTALLED_JSON="$HOME/.claude/plugins/installed_plugins.json"
 
 # Read version from package.json
@@ -47,6 +48,13 @@ rsync -a --delete \
   --exclude 'scripts' \
   --exclude '.DS_Store' \
   "$PLUGIN_DIR/" "$CACHE_DIR/"
+
+# Sync skills + plugin manifest to marketplace (skills are loaded from here)
+if [[ -d "$MARKETPLACE_DIR" ]]; then
+  echo "  syncing marketplace skills..."
+  rsync -a --delete "$PLUGIN_DIR/skills/" "$MARKETPLACE_DIR/skills/"
+  rsync -a "$PLUGIN_DIR/.claude-plugin/" "$MARKETPLACE_DIR/.claude-plugin/"
+fi
 
 # Update installed_plugins.json if version changed
 if [[ -f "$INSTALLED_JSON" && -n "${INSTALLED_VERSION:-}" && "$INSTALLED_VERSION" != "$VERSION" ]]; then
