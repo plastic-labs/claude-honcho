@@ -5,7 +5,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Honcho } from "@honcho-ai/sdk";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import {
   loadConfig,
   saveConfig,
@@ -336,35 +336,10 @@ function handleSetConfig(args: Record<string, unknown>) {
       break;
     }
 
-    case "globalOverride": {
-      // Read-modify-write the raw file directly since globalOverride
-      // is a file-level field, not part of the resolved HonchoCLAUDEConfig
-      const goCfgPath = getConfigPath();
-      let goRaw: Record<string, any> = {};
-      try { goRaw = JSON.parse(readFileSync(goCfgPath, "utf-8")); } catch { /* */ }
-      previousValue = goRaw.globalOverride ?? false;
-      goRaw.globalOverride = Boolean(value);
-      if (goRaw.globalOverride && !goRaw.workspace) {
-        // When enabling, ensure flat workspace exists
-        goRaw.workspace = cfg.workspace;
-      }
-      writeFileSync(goCfgPath, JSON.stringify(goRaw, null, 2));
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            field,
-            previousValue,
-            newValue: Boolean(value),
-            description: Boolean(value)
-              ? "Global override enabled: flat workspace field now applies to ALL hosts."
-              : "Global override disabled: each host uses its own hosts block.",
-            restartWarning: "Close and restart all active Claude Code sessions. Open sessions still use the previous config and will write to the wrong Honcho session.",
-          }, null, 2),
-        }],
-      };
-    }
+    case "globalOverride":
+      previousValue = cfg.globalOverride ?? false;
+      cfg.globalOverride = Boolean(value);
+      break;
 
     case "enabled":
       previousValue = cfg.enabled;

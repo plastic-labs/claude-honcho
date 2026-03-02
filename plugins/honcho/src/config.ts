@@ -194,6 +194,8 @@ export interface HonchoCLAUDEConfig {
   enabled?: boolean;
   /** Enable file logging to ~/.honcho/ (default: true) */
   logging?: boolean;
+  /** When true, flat workspace/aiPeer fields apply to ALL hosts */
+  globalOverride?: boolean;
 }
 
 const CONFIG_DIR = join(homedir(), ".honcho");
@@ -282,6 +284,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     localContext: raw.localContext,
     enabled: raw.enabled,
     logging: raw.logging,
+    globalOverride: raw.globalOverride,
   };
 
   return mergeWithEnvVars(config);
@@ -397,8 +400,10 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
     ...(config.linkedHosts?.length ? { linkedHosts: config.linkedHosts } : {}),
   };
 
-  // Preserve globalOverride if set; never implicitly add it
-  // (only written when explicitly set via set_config or setup)
+  // Write globalOverride when explicitly set; preserve existing value otherwise
+  if (config.globalOverride !== undefined) {
+    existing.globalOverride = config.globalOverride;
+  }
 
   // Clean legacy flat fields when hosts block exists
   if (existing.hosts && !existing.globalOverride) {
