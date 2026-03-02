@@ -1,6 +1,6 @@
 {
   "name": "honcho",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Persistent memory for Claude Code sessions using Honcho by Plastic Labs",
   "author": {
     "name": "Plastic Labs",
@@ -10,5 +10,7 @@
   "repository": "https://github.com/plastic-labs/claude-honcho",
   "license": "MIT",
   "keywords": ["memory", "context", "ai", "honcho", "persistence"],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./mcp-servers.json",
   "skills": "./skills/"
 }

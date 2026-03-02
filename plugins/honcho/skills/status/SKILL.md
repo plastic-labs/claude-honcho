@@ -5,19 +5,23 @@ user-invocable: true
 
 # Honcho Status
 
-Display the current Honcho memory system status, including configuration, session info, and connection status.
+Display the current Honcho memory system status: connection health, workspace, peers, observation queue, and conclusion count.
 
 ## What It Shows
 
-1. **Plugin Status** - Whether Honcho memory is enabled or disabled
-2. **Configuration** - Peer name, Claude peer, workspace, message saving preference
-3. **Current Session** - The session name for the current directory
-4. **Endpoint** - Whether using SaaS (api.honcho.dev) or local instance
-5. **Cache Status** - Current cache state and freshness
+1. **Connection** - Live connection health and latency
+2. **Workspace** - Current workspace and endpoint URL
+3. **Peers** - User peer and AI peer names
+4. **Observing** - Queue processing status (messages observed, active, sessions)
+5. **Conclusions** - Total conclusion/memory count for the user peer
 
 ## Usage
 
 Run `/honcho:status` to see the current state of the Honcho memory system.
+
+## Presentation
+
+After running the script, present a concise status card echoing the runner output. Do NOT add prose commentary — the output speaks for itself. Only add a one-line note if something looks wrong (e.g. auth failed, unreachable, 0 conclusions).
 
 ## Implementation
 

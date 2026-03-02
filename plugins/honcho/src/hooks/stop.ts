@@ -1,7 +1,7 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
 import { existsSync, readFileSync } from "fs";
-import { getClaudeInstanceId } from "../cache.js";
+import { getInstanceIdForCwd } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visStopMessage } from "../visual.js";
 
@@ -10,6 +10,7 @@ interface HookInput {
   transcript_path?: string;
   cwd?: string;
   stop_hook_active?: boolean;
+  workspace_roots?: string[];
 }
 
 interface TranscriptEntry {
@@ -26,19 +27,19 @@ interface TranscriptEntry {
  * Check if content is meaningful (not just tool announcements)
  */
 function isMeaningfulContent(content: string): boolean {
-  if (content.length < 50) return false;
+  if (content.length < 20) return false;
 
-  // Skip pure tool invocation announcements
+  // Skip pure tool invocation one-liners
   const toolAnnouncements = [
     /^(I'll|Let me|I'm going to|I will|Now I'll|First,? I'll)\s+(run|use|execute|check|read|look at|search|edit|write|create)/i,
   ];
   for (const pattern of toolAnnouncements) {
-    if (pattern.test(content.trim()) && content.length < 200) {
+    if (pattern.test(content.trim()) && content.length < 150) {
       return false;
     }
   }
 
-  return content.length >= 100;
+  return true;
 }
 
 /**
@@ -109,7 +110,7 @@ export async function handleStop(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = await Bun.stdin.text();
+    const input = getCachedStdin() ?? await Bun.stdin.text();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
@@ -123,9 +124,10 @@ export async function handleStop(): Promise<void> {
     process.exit(0);
   }
 
-  const cwd = hookInput.cwd || process.cwd();
+  const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const transcriptPath = hookInput.transcript_path;
-  const sessionName = getSessionName(cwd);
+  const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
+  const sessionName = getSessionName(cwd, instanceId || undefined);
 
   // Set log context
   setLogContext(cwd, sessionName);
@@ -146,14 +148,14 @@ export async function handleStop(): Promise<void> {
 
     // Get session and peer using new fluent API
     const session = await honcho.session(sessionName);
-    const claudePeer = await honcho.peer(config.claudePeer);
+    const aiPeer = await honcho.peer(config.aiPeer);
 
     // Upload the assistant response
-    const instanceId = getClaudeInstanceId();
     logApiCall("session.addMessages", "POST", `assistant response (${lastMessage.length} chars)`);
 
     await session.addMessages([
-      claudePeer.message(lastMessage.slice(0, 3000), {
+      aiPeer.message(lastMessage.slice(0, 3000), {
+        createdAt: new Date().toISOString(),
         metadata: {
           instance_id: instanceId || undefined,
           type: "assistant_response",
