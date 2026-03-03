@@ -471,7 +471,7 @@ export function getSessionName(cwd: string, instanceId?: string): string {
       // Prefer explicit instanceId > per-cwd cache > global cache (legacy)
       const resolved = instanceId || getInstanceIdForCwd(cwd) || getClaudeInstanceId();
       if (resolved) {
-        return `chat-${resolved}`;
+        return usePrefix ? `${peerPart}-chat-${resolved}` : `chat-${resolved}`;
       }
       return base;
     }
