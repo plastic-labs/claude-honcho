@@ -306,7 +306,7 @@ async function fetchFreshContext(config: any, cwd: string, prompt: string): Prom
       linkedWorkspaces.map(async (ws) => {
         const linkedClient = new Honcho({
           apiKey: config.apiKey,
-          baseUrl: getHonchoBaseUrl(config),
+          baseURL: getHonchoBaseUrl(config),
           workspaceId: ws,
         });
         const linkedSession = await linkedClient.session(sessionName);

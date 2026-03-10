@@ -606,7 +606,7 @@ export function truncateToTokens(text: string, maxTokens: number): string {
 
 export interface HonchoClientOptions {
   apiKey: string;
-  baseUrl: string;
+  baseURL: string;
   workspaceId: string;
 }
 
@@ -625,7 +625,7 @@ export function getHonchoBaseUrl(config: HonchoCLAUDEConfig): string {
 export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClientOptions {
   return {
     apiKey: config.apiKey,
-    baseUrl: getHonchoBaseUrl(config),
+    baseURL: getHonchoBaseUrl(config),
     workspaceId: config.workspace,
   };
 }

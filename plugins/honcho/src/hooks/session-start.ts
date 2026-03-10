@@ -385,7 +385,7 @@ export async function handleSessionStart(): Promise<void> {
         linkedWorkspaces.map(async (ws) => {
           const linkedClient = new Honcho({
             apiKey: config.apiKey,
-            baseUrl: getHonchoBaseUrl(config),
+            baseURL: getHonchoBaseUrl(config),
             workspaceId: ws,
           });
           const linkedPeer = await linkedClient.peer(config.peerName);
