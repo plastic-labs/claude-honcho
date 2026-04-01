@@ -10,13 +10,15 @@ claude-honcho/
 │   └── marketplace.json    # Claude Code marketplace manifest
 ├── plugins/
 │   ├── honcho/             # Persistent memory plugin
-│   │   ├── src/            # TypeScript source
-│   │   ├── hooks/          # Claude Code hook scripts (compiled)
+│   │   ├── src/            # TypeScript source (run directly by Bun)
+│   │   ├── hooks/          # Hook entry points (thin wrappers into src/)
 │   │   ├── skills/         # Plugin skills (setup, config, status, interview)
 │   │   ├── mcp-server.ts   # MCP server entry point
+│   │   ├── mcp-servers.json
+│   │   ├── scripts/        # install-local.sh / install-local.ps1
 │   │   ├── package.json
 │   │   └── tsconfig.json
-│   └── honcho-dev/         # SDK skills plugin
+│   └── honcho-dev/         # SDK skills plugin (no compiled code)
 │       ├── skills/         # Skills for building with Honcho SDK
 │       └── .claude-plugin/
 ├── assets/
@@ -28,7 +30,7 @@ claude-honcho/
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) (the honcho plugin uses Bun as its runtime)
+- [Bun](https://bun.sh) -- the honcho plugin uses Bun as its runtime (runs TypeScript directly, no build step)
 - A Honcho API key from [app.honcho.dev](https://app.honcho.dev)
 
 ### Clone and Install
@@ -39,17 +41,9 @@ cd claude-honcho/plugins/honcho
 bun install
 ```
 
-### Build
-
-```bash
-bun run build
-```
-
-This compiles TypeScript from `src/` into the hook scripts and MCP server.
-
 ## Working on the `honcho` Plugin
 
-The `honcho` plugin provides persistent memory for Claude Code via hooks and an MCP server.
+The honcho plugin provides persistent memory for Claude Code via hooks and an MCP server. Bun runs TypeScript natively, so there is no build step.
 
 ### Key Files
 
@@ -57,34 +51,33 @@ The `honcho` plugin provides persistent memory for Claude Code via hooks and an 
 - `src/mcp/server.ts` -- MCP server for memory tools
 - `src/config.ts` -- Configuration management
 - `src/cache.ts` -- Local caching layer
+- `hooks/` -- Thin entry-point wrappers that Bun executes directly (these import from `src/`)
 - `skills/` -- Plugin skills (setup wizard, status check, etc.)
 
 ### Local Testing
 
-1. Build the plugin:
-   ```bash
-   cd plugins/honcho
-   bun run build
-   ```
+The repo includes install scripts that sync your local source into Claude Code's plugin cache:
 
-2. Install locally in Claude Code:
-   ```bash
-   # From the repo root
-   /plugin install --local ./plugins/honcho
-   ```
+```bash
+# macOS / Linux
+bash plugins/honcho/scripts/install-local.sh
 
-3. Restart Claude Code to pick up changes.
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -File plugins\honcho\scripts\install-local.ps1
+```
+
+After running, restart Claude Code to pick up changes.
 
 ### Making Changes
 
-- **TypeScript source** lives in `src/`. Always build after changes.
-- **Hooks** are Claude Code lifecycle hooks -- they fire on session start/end, user prompts, compaction, etc.
+- **Source** lives in `src/`. No build needed -- Bun runs `.ts` files directly.
+- **Hooks** are Claude Code lifecycle hooks. The entry points in `hooks/` are thin wrappers; put logic in `src/hooks/`.
 - **Skills** are markdown-based instructions in `skills/`. These don't need compilation.
 - **MCP server** provides tools that Claude can call for memory search, context retrieval, etc.
 
 ## Working on the `honcho-dev` Plugin
 
-The `honcho-dev` plugin is skills-only (no compiled code). It provides guidance for building apps with the Honcho SDK.
+The honcho-dev plugin is skills-only (no code to run). It provides guidance for building apps with the Honcho SDK.
 
 ### Key Files
 
@@ -98,12 +91,12 @@ To contribute new skills, create a directory under `plugins/honcho-dev/skills/` 
 - TypeScript with ESM modules
 - Bun as the runtime (not Node.js)
 - Prefer async/await over callbacks
-- Keep hook scripts focused -- each hook should do one thing
+- Keep hook entry points thin -- put logic in `src/`
 
 ## Submitting Changes
 
 1. Fork the repo and create a feature branch
-2. Make your changes and test locally with Claude Code
+2. Make your changes and test locally with the install-local script
 3. Update `CHANGELOG.md` if your change is user-facing
 4. Open a pull request with a clear description of what and why
 
