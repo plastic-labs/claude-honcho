@@ -542,7 +542,7 @@ export async function runMcpServer(): Promise<void> {
       tools: [
         {
           name: "search",
-          description: "Search across messages in the current Honcho session using semantic search",
+          description: "Search across messages using semantic search. Defaults to the current session; use scope='workspace' to search across all sessions.",
           inputSchema: {
             type: "object",
             properties: {
@@ -554,6 +554,12 @@ export async function runMcpServer(): Promise<void> {
                 type: "number",
                 description: "Max results (1-50)",
                 default: 10,
+              },
+              scope: {
+                type: "string",
+                enum: ["session", "workspace"],
+                description: "Search scope. 'session' searches only the current directory's session (default). 'workspace' searches across all sessions.",
+                default: "session",
               },
             },
             required: ["query"],
@@ -590,6 +596,47 @@ export async function runMcpServer(): Promise<void> {
               },
             },
             required: ["content"],
+          },
+        },
+        {
+          name: "list_conclusions",
+          description: "List conclusions Honcho has saved about the user. Use this to review what is remembered before creating duplicates, or to find IDs for deletion.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              page: {
+                type: "number",
+                description: "Page number (1-indexed)",
+                default: 1,
+              },
+              size: {
+                type: "number",
+                description: "Results per page (max 50)",
+                default: 20,
+              },
+            },
+          },
+        },
+        {
+          name: "delete_conclusion",
+          description: "Delete a conclusion from Honcho's memory by ID. Use list_conclusions to find the ID first.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              id: {
+                type: "string",
+                description: "The conclusion ID to delete",
+              },
+            },
+            required: ["id"],
+          },
+        },
+        {
+          name: "schedule_dream",
+          description: "Schedule a background memory consolidation for the current session. Honcho will merge redundant conclusions and derive higher-level insights. Call this at the end of a long or productive session.",
+          inputSchema: {
+            type: "object",
+            properties: {},
           },
         },
         {
@@ -664,6 +711,44 @@ export async function runMcpServer(): Promise<void> {
       return handleSetConfig(args as Record<string, unknown>);
     }
 
+    // ── Peer-only tools (no session needed) ──
+
+    if (name === "list_conclusions" || name === "delete_conclusion") {
+      try {
+        const aiPeer = await honcho.peer(config.aiPeer);
+
+        if (name === "list_conclusions") {
+          const page = (args?.page as number) ?? 1;
+          const size = (args?.size as number) ?? 20;
+          const scope = aiPeer.conclusionsOf(config.peerName);
+          const result = await scope.list({ page, size });
+          const items = result.items.map((c: any) => ({
+            id: c.id,
+            content: c.content,
+            createdAt: c.createdAt,
+          }));
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ items, total: result.total, page: result.page, pages: result.pages }, null, 2),
+            }],
+          };
+        }
+
+        // delete_conclusion
+        const id = args?.id as string;
+        await aiPeer.conclusionsOf(config.peerName).delete(id);
+        return {
+          content: [{ type: "text", text: `Deleted conclusion ${id}` }],
+        };
+      } catch (error) {
+        return {
+          content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
+          isError: true,
+        };
+      }
+    }
+
     // ── Honcho session tools ──
 
     const sessionName = getSessionName(cwd);
@@ -675,8 +760,11 @@ export async function runMcpServer(): Promise<void> {
         case "search": {
           const query = args?.query as string;
           const limit = (args?.limit as number) ?? 10;
+          const scope = (args?.scope as string) ?? "session";
 
-          const messages = await session.search(query, { limit });
+          const messages = scope === "workspace"
+            ? await honcho.search(query, { limit })
+            : await session.search(query, { limit });
 
           const results = messages.map((msg: any) => ({
             content: msg.content,
@@ -697,9 +785,10 @@ export async function runMcpServer(): Promise<void> {
         case "chat": {
           const query = args?.query as string;
           const reasoningLevel = (args?.reasoning_level as string) ?? config.reasoningLevel ?? "medium";
-          const userPeer = await honcho.peer(config.peerName);
+          const aiPeer = await honcho.peer(config.aiPeer);
 
-          const response = await userPeer.chat(query, {
+          const response = await aiPeer.chat(query, {
+            target: config.peerName,
             session,
             reasoningLevel,
           });
@@ -716,9 +805,9 @@ export async function runMcpServer(): Promise<void> {
 
         case "create_conclusion": {
           const content = args?.content as string;
-          const userPeer = await honcho.peer(config.peerName);
+          const aiPeer = await honcho.peer(config.aiPeer);
 
-          const conclusions = await userPeer.conclusions.create({
+          const conclusions = await aiPeer.conclusionsOf(config.peerName).create({
             content,
             sessionId: session.id,
           });
@@ -730,6 +819,13 @@ export async function runMcpServer(): Promise<void> {
                 text: `Saved conclusion: ${conclusions[0]?.content || content}`,
               },
             ],
+          };
+        }
+
+        case "schedule_dream": {
+          await honcho.scheduleDream({ observer: config.aiPeer, observed: config.peerName, session });
+          return {
+            content: [{ type: "text", text: "Dream scheduled. Honcho will consolidate memory for this session in the background." }],
           };
         }
 

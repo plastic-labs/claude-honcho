@@ -2,6 +2,35 @@
 
 All notable changes to claude-honcho will be documented in this file.
 
+## [0.2.4] - 2026-04-01
+
+### Added
+
+- `list_conclusions` MCP tool — paginated list of conclusions saved about the user, with `id`, `content`, and `createdAt` fields
+- `delete_conclusion` MCP tool — remove a conclusion by ID; use `list_conclusions` to find IDs
+- `schedule_dream` MCP tool — trigger background memory consolidation for the current session; Honcho merges redundant conclusions and derives higher-level insights
+- `search` tool now accepts `scope: "session" | "workspace"` — workspace scope searches across all sessions, not just the current directory's
+
+### Fixed
+
+- `chat` tool was calling `userPeer.chat()` (self-representation) instead of `aiPeer.chat({ target: userPeer })`. With conclusions stored as `observer=aiPeer, observed=userPeer`, this caused "I don't have any information" for facts that exist.
+- `create_conclusion` was creating self-conclusions (`observer=userPeer, observed=userPeer`) instead of AI-observer conclusions (`observer=aiPeer, observed=userPeer`). Stored conclusions were invisible to `chat`.
+- `list_conclusions` and `delete_conclusion` now correctly scope to `aiPeer.conclusionsOf(userPeer)` for the same reason.
+
+### Changed
+
+- Bump `@honcho-ai/sdk` floor to `^2.1.0` (adds pagination, `getMessage`, `createdAt`/`isActive` on peers/sessions, strict validation)
+- Bump `@modelcontextprotocol/sdk` floor to `^1.26.0`
+
+## [0.2.3] - 2026-03-25
+
+### Fixed
+
+- Adding peers to session with config
+- Windows compatibility for TTY, setup, and install
+- Per-host config ownership, `saveRootField`, SDK client options
+- Resilient hook lifecycle: phased session-end, cache-first user-prompt
+
 ## [0.2.2] - 2026-03-03
 
 ### Fixed
