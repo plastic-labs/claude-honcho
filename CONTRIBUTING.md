@@ -4,7 +4,7 @@ Thanks for your interest in contributing! This guide covers the development setu
 
 ## Project Structure
 
-```
+```text
 claude-honcho/
 ├── .claude-plugin/
 │   └── marketplace.json    # Claude Code marketplace manifest
@@ -60,10 +60,10 @@ The repo includes install scripts that sync your local source into Claude Code's
 
 ```bash
 # macOS / Linux
-bash plugins/honcho/scripts/install-local.sh
+bash scripts/install-local.sh
 
 # Windows (PowerShell)
-powershell -ExecutionPolicy Bypass -File plugins\honcho\scripts\install-local.ps1
+powershell -ExecutionPolicy Bypass -File scripts\install-local.ps1
 ```
 
 After running, restart Claude Code to pick up changes.
