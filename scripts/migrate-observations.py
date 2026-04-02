@@ -271,8 +271,14 @@ def main() -> None:
         print(f"  Errors:  {errors}")
 
     # ── Phase 5: Optionally delete source ────────────────────────────────
-    if args.delete_source and created > 0:
+    if args.delete_source and created == len(source_conclusions) and errors == 0:
         print(f"\nPhase 5: Deleting {len(source_conclusions)} source conclusions...")
+    elif args.delete_source and created > 0:
+        print(
+            f"\nPhase 5: Skipping deletion — only {created}/{len(source_conclusions)} "
+            f"conclusions created with {errors} error(s). Resolve failures and re-run."
+        )
+    if args.delete_source and created == len(source_conclusions) and errors == 0:
         deleted = 0
         delete_errors = 0
 
