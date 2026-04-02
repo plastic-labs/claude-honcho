@@ -749,7 +749,7 @@ export async function runMcpServer(): Promise<void> {
 
         if (name === "list_conclusions") {
           const page = (args?.page as number) ?? 1;
-          const size = (args?.size as number) ?? 20;
+          const size = Math.min((args?.size as number) ?? 20, 100);
           const result = await conclusionScope.list({ page, size });
           const items = result.items.map((c: any) => ({
             id: c.id,
