@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
 import { Spinner } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { formatVerboseBlock, formatVerboseList } from "../visual.js";
@@ -123,59 +123,63 @@ export async function handlePreCompact(): Promise<void> {
   try {
     const honcho = new Honcho(getHonchoClientOptions(config));
     const sessionName = getSessionName(cwd);
+    const observationMode = getObservationMode(config);
 
     // Get session and peers using new fluent API
     const session = await honcho.session(sessionName);
     const userPeer = await honcho.peer(config.peerName);
     const aiPeer = await honcho.peer(config.aiPeer);
 
+    // unified: user self-observations — query via userPeer.
+    // directional: ai cross-observations — query via aiPeer with target.
+    const contextPeer = observationMode === "unified" ? userPeer : aiPeer;
+    const contextTarget = observationMode === "unified" ? undefined : config.peerName;
+    const contextLabel = observationMode === "unified" ? "userPeer.context()" : `aiPeer.context(target=${config.peerName})`;
+
     if (trigger === "auto") {
       spinner.update("fetching memory context");
     }
 
-    logApiCall("peer.context", "GET", `${config.peerName} + ${config.aiPeer}`);
+    logApiCall(contextLabel, "GET", observationMode === "unified" ? "self" : `target=${config.peerName}`);
     logApiCall("session.summaries", "GET", sessionName);
     logApiCall("peer.chat", "POST", "dialectic queries x2");
 
     // Fetch ALL context in parallel - this is the RIGHT time for expensive calls
     // because the context is about to be reset anyway
-    const [userContextResult, claudeContextResult, summariesResult, userChatResult, claudeChatResult] =
+    const dialecticArgs = observationMode === "unified"
+      ? { session, reasoningLevel: config.reasoningLevel ?? "low" }
+      : { target: config.peerName, session, reasoningLevel: config.reasoningLevel ?? "low" };
+
+    const [userContextResult, summariesResult, userChatResult, claudeChatResult] =
       await Promise.allSettled([
-        // User's full context
-        userPeer.context({
+        contextPeer.context({
+          ...(contextTarget ? { target: contextTarget } : {}),
           maxConclusions: 30,
-          includeMostFrequent: true,
-        }),
-        // Claude's self-context
-        aiPeer.context({
-          maxConclusions: 20,
           includeMostFrequent: true,
         }),
         // Session summaries
         session.summaries(),
         // Fresh dialectic - ask about user (worth the cost at compaction time)
-        userPeer.chat(
+        contextPeer.chat(
           `Summarize the most important things to remember about ${config.peerName}. Focus on their preferences, working style, current projects, and any critical context that should survive a conversation summary.`,
-          { session, reasoningLevel: config.reasoningLevel ?? "low" }
+          dialecticArgs
         ),
-        // Fresh dialectic - claude self-reflection
-        aiPeer.chat(
-          `What are the most important things ${config.aiPeer} was working on with ${config.peerName}? Summarize key context that should be preserved.`,
-          { session, reasoningLevel: config.reasoningLevel ?? "low" }
+        // Fresh dialectic - what were we working on together
+        contextPeer.chat(
+          `What are the most important things that were worked on with ${config.peerName}? Summarize key context that should be preserved.`,
+          dialecticArgs
         ),
       ]);
 
     // Extract results
     const userContext = userContextResult.status === "fulfilled" ? userContextResult.value : null;
-    const claudeContext = claudeContextResult.status === "fulfilled" ? claudeContextResult.value : null;
     const summaries = summariesResult.status === "fulfilled" ? summariesResult.value : null;
 
     // Build verbose output blocks — these will be appended to stdout after the
     // memory card. PreCompact stdout is only shown in Ctrl+O, so verbose data
     // is hidden by default and visible when the user presses Ctrl+O.
     const verboseBlocks: string[] = [];
-    verboseBlocks.push(formatVerboseBlock("pre-compact peer.context(user)", (userContext as any)?.representation));
-    verboseBlocks.push(formatVerboseBlock("pre-compact peer.context(claude)", (claudeContext as any)?.representation));
+    verboseBlocks.push(formatVerboseBlock(`pre-compact ${contextLabel}`, (userContext as any)?.representation));
     verboseBlocks.push(formatVerboseList("pre-compact peerCard", (userContext as any)?.peerCard));
 
     const userDialectic =
@@ -192,7 +196,7 @@ export async function handlePreCompact(): Promise<void> {
       config,
       sessionName,
       userContext,
-      claudeContext,
+      null,
       summaries,
       userDialectic,
       claudeDialectic

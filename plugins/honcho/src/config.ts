@@ -55,6 +55,8 @@ const HONCHO_BASE_URLS = {
 
 export type HonchoHost = "cursor" | "claude_code" | "obsidian";
 
+export type ObservationMode = "unified" | "directional";
+
 export interface HostConfig {
   /** Honcho workspace name for this host */
   workspace?: string;
@@ -70,6 +72,12 @@ export interface HostConfig {
   sessionPeerPrefix?: boolean;
   /** Default reasoning level for Honcho dialectic calls (default: "medium") */
   reasoningLevel?: ReasoningLevel;
+  /**
+   * Observation mode (default: "unified").
+   * "unified": all agents write to user's self-observation collection (observer=user, observed=user).
+   * "directional": this AI keeps its own view of the user (observer=aiPeer, observed=user).
+   */
+  observationMode?: ObservationMode;
   messageUpload?: MessageUploadConfig;
   contextRefresh?: ContextRefreshConfig;
   localContext?: LocalContextConfig;
@@ -166,6 +174,8 @@ interface HonchoFileConfig {
   sessionPeerPrefix?: boolean;
   /** Default reasoning level for Honcho dialectic calls (default: "medium") */
   reasoningLevel?: ReasoningLevel;
+  /** Observation mode (default: "unified") */
+  observationMode?: ObservationMode;
   hosts?: Record<string, HostConfig>;
   /** When true, flat workspace/aiPeer fields apply to ALL hosts,
    *  ignoring host-specific blocks. When false (default), each host
@@ -200,6 +210,12 @@ export interface HonchoCLAUDEConfig {
   saveMessages?: boolean;
   /** Default reasoning level for Honcho dialectic calls (default: "medium") */
   reasoningLevel?: ReasoningLevel;
+  /**
+   * Observation mode (default: "unified").
+   * "unified": all agents write to user's self-observation collection.
+   * "directional": this AI keeps its own per-AI view of the user.
+   */
+  observationMode?: ObservationMode;
   /** Token-based upload limits */
   messageUpload?: MessageUploadConfig;
   /** Context retrieval settings */
@@ -316,6 +332,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     sessions: raw.sessions,
     saveMessages: hostBlock?.saveMessages ?? raw.saveMessages,
     reasoningLevel: hostBlock?.reasoningLevel ?? raw.reasoningLevel,
+    observationMode: hostBlock?.observationMode ?? raw.observationMode,
     messageUpload: hostBlock?.messageUpload ?? raw.messageUpload,
     contextRefresh: hostBlock?.contextRefresh ?? raw.contextRefresh,
     endpoint: hostBlock?.endpoint ?? raw.endpoint,
@@ -471,6 +488,7 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   setHostIfExplicit("sessionStrategy", config.sessionStrategy, existing.sessionStrategy);
   setHostIfExplicit("sessionPeerPrefix", config.sessionPeerPrefix, existing.sessionPeerPrefix);
   setHostIfExplicit("reasoningLevel", config.reasoningLevel, existing.reasoningLevel);
+  setHostIfExplicit("observationMode", config.observationMode, existing.observationMode);
   setHostIfExplicit("messageUpload", config.messageUpload, existing.messageUpload);
   setHostIfExplicit("contextRefresh", config.contextRefresh, existing.contextRefresh);
   setHostIfExplicit("localContext", config.localContext, existing.localContext);
@@ -751,6 +769,11 @@ export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url
 }
 
 const VALID_ENVIRONMENTS = new Set<HonchoEnvironment>(["production", "local"]);
+
+/** Returns the resolved observation mode, defaulting to "unified". */
+export function getObservationMode(config: HonchoCLAUDEConfig): ObservationMode {
+  return config.observationMode ?? "unified";
+}
 
 export function setEndpoint(environment?: HonchoEnvironment, baseUrl?: string): void {
   const config = loadConfig();

@@ -1,8 +1,7 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
 import {
   setCachedUserContext,
-  setCachedClaudeContext,
   setCachedSessionId,
   resetMessageCount,
   setClaudeInstanceId,
@@ -106,10 +105,13 @@ export async function handleSessionStart(): Promise<void> {
     // Also stores instanceId per-cwd to prevent cross-session collision
     setCachedSessionId(cwd, sessionName, session.id, claudeInstanceId);
 
-    // Step 4: Add peers with observation config (materializes session server-side)
+    // Step 4: Add peers with observation config (materializes session server-side).
+    // unified: only user self-observations (observer=user, observed=user).
+    // directional: also creates cross-observations (observer=aiPeer, observed=user).
+    const observationMode = getObservationMode(config);
     await session.addPeers([
       [userPeer, { observeMe: true, observeOthers: false }],
-      [aiPeer, { observeMe: true, observeOthers: true }],
+      [aiPeer, { observeMe: false, observeOthers: observationMode === "directional" }],
     ]);
 
     // Only persist session names for per-directory strategy (stable names).
@@ -154,51 +156,56 @@ export async function handleSessionStart(): Promise<void> {
       ? ` Working on: ${featureContext.type} - ${featureContext.description}.`
       : "";
 
-    logAsync("context-fetch", "Starting 2 parallel context fetches + 2 dialectic fire-and-forget");
+    logAsync("context-fetch", "Starting context fetch + 2 dialectic fire-and-forget");
 
     const fetchStart = Date.now();
-    const [userContextResult, claudeContextResult] =
-      await Promise.allSettled([
-        userPeer.context({
-          maxConclusions: 25,
-          includeMostFrequent: true,
-        }),
-        aiPeer.context({
-          maxConclusions: 15,
-          includeMostFrequent: true,
-        }),
-      ]);
+    const dialecticLevel = config.reasoningLevel ?? "low";
+
+    // unified: user observes self — use userPeer, no target.
+    // directional: aiPeer observes user — use aiPeer with target.
+    const contextLabel = observationMode === "unified" ? "userPeer.context()" : "aiPeer.context(target=user)";
+    const [userContextResult] = await Promise.allSettled([
+      observationMode === "unified"
+        ? userPeer.context({ maxConclusions: 25, includeMostFrequent: true })
+        : aiPeer.context({ target: config.peerName, maxConclusions: 25, includeMostFrequent: true }),
+    ]);
 
     // Dialectic: fire-and-forget. Results feed the knowledge graph;
     // we don't need them for cache or display.
-    const dialecticLevel = config.reasoningLevel ?? "low";
-    userPeer.chat(
-      `Summarize what you know about ${config.peerName}. Focus on preferences, current projects, and working style.${branchContext}${featureHint}`,
-      { session, reasoningLevel: dialecticLevel }
-    ).catch((e) => logHook("session-start", `Dialectic (user) failed: ${e}`));
+    if (observationMode === "unified") {
+      userPeer.chat(
+        `Summarize what you know about ${config.peerName}. Focus on preferences, current projects, and working style.${branchContext}${featureHint}`,
+        { session, reasoningLevel: dialecticLevel }
+      ).catch((e) => logHook("session-start", `Dialectic (user) failed: ${e}`));
 
-    aiPeer.chat(
-      `What has ${config.aiPeer} been working on recently?${branchContext}${featureHint} Summarize recent activities relevant to the current work.`,
-      { session, reasoningLevel: dialecticLevel }
-    ).catch((e) => logHook("session-start", `Dialectic (ai) failed: ${e}`));
+      userPeer.chat(
+        `What has ${config.peerName} been working on recently?${branchContext}${featureHint} Summarize recent activities relevant to the current work.`,
+        { session, reasoningLevel: dialecticLevel }
+      ).catch((e) => logHook("session-start", `Dialectic (recent work) failed: ${e}`));
+    } else {
+      aiPeer.chat(
+        `Summarize what you know about ${config.peerName}. Focus on preferences, current projects, and working style.${branchContext}${featureHint}`,
+        { target: config.peerName, session, reasoningLevel: dialecticLevel }
+      ).catch((e) => logHook("session-start", `Dialectic (user) failed: ${e}`));
+
+      aiPeer.chat(
+        `What has ${config.peerName} been working on recently?${branchContext}${featureHint} Summarize recent activities relevant to the current work.`,
+        { target: config.peerName, session, reasoningLevel: dialecticLevel }
+      ).catch((e) => logHook("session-start", `Dialectic (recent work) failed: ${e}`));
+    }
 
     const fetchDuration = Date.now() - fetchStart;
     const asyncResults = [
-      { name: "peer.context(user)", success: userContextResult.status === "fulfilled" },
-      { name: "peer.context(claude)", success: claudeContextResult.status === "fulfilled" },
+      { name: contextLabel, success: userContextResult.status === "fulfilled" },
     ];
     const successCount = asyncResults.filter(r => r.success).length;
-    logAsync("context-fetch", `Context: ${successCount}/2 succeeded in ${fetchDuration}ms (dialectic fire-and-forget)`, asyncResults);
+    logAsync("context-fetch", `Context: ${successCount}/1 succeeded in ${fetchDuration}ms (dialectic fire-and-forget)`, asyncResults);
 
     // Verbose output (file-based — ~/.honcho/verbose.log)
     if (userContextResult.status === "fulfilled" && userContextResult.value) {
       const ctx = userContextResult.value as any;
-      verboseApiResult("peer.context(user) → representation", ctx.representation);
-      verboseList("peer.context(user) → peerCard", ctx.peerCard);
-    }
-    if (claudeContextResult.status === "fulfilled" && claudeContextResult.value) {
-      const ctx = claudeContextResult.value as any;
-      verboseApiResult("peer.context(claude) → representation", ctx.representation);
+      verboseApiResult(`${contextLabel} → representation`, ctx.representation);
+      verboseList(`${contextLabel} → peerCard`, ctx.peerCard);
     }
 
     // Cache results for user-prompt hook
@@ -210,18 +217,10 @@ export async function handleSessionStart(): Promise<void> {
       logCache("write", "userContext", `${count} conclusions`);
     }
 
-    if (claudeContextResult.status === "fulfilled" && claudeContextResult.value) {
-      const context = claudeContextResult.value as any;
-      setCachedClaudeContext(context);
-      const rep = context.representation;
-      const count = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
-      logCache("write", "claudeContext", `${count} conclusions`);
-    }
-
     // Stop spinner; avoid stdout writes here to prevent UI artifacts.
     spinner.stop();
 
-    logFlow("complete", `Cache warmed: ${successCount}/2 context + 2 dialectic (fire-and-forget)`);
+    logFlow("complete", `Cache warmed: ${successCount}/1 context + 2 dialectic (fire-and-forget)`);
     process.exit(0);
   } catch (error) {
     logHook("session-start", `Error: ${error}`, { error: String(error) });

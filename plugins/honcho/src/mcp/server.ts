@@ -23,6 +23,8 @@ import {
   type SessionStrategy,
   type ReasoningLevel,
   type HonchoEnvironment,
+  type ObservationMode,
+  getObservationMode,
 } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
 import {
@@ -54,7 +56,7 @@ const DANGEROUS_FIELDS = new Set(["workspace", "endpoint.environment", "endpoint
 // Fields that affect session identity/routing — stale sessions risk cross-contamination
 const SESSION_AFFECTING_FIELDS = new Set([
   "workspace", "aiPeer", "peerName", "sessionStrategy", "sessionPeerPrefix",
-  "endpoint.environment", "endpoint.baseUrl", "globalOverride",
+  "endpoint.environment", "endpoint.baseUrl", "globalOverride", "observationMode",
 ]);
 
 // ============================================
@@ -109,6 +111,7 @@ function handleGetConfig(cwd: string) {
     messageUpload: cfg.messageUpload ?? {},
     contextRefresh: cfg.contextRefresh ?? {},
     reasoningLevel: cfg.reasoningLevel ?? "medium",
+    observationMode: cfg.observationMode ?? "unified",
     localContext: cfg.localContext ?? {},
     enabled: cfg.enabled !== false,
     logging: cfg.logging !== false,
@@ -201,6 +204,7 @@ function handleGetConfig(cwd: string) {
     ["peer", `${cfg.peerName} / ${cfg.aiPeer}`],
     ["host", hostLabel],
     ["messages", cfg.saveMessages !== false ? "saving enabled" : "saving disabled"],
+    ["obs mode", cfg.observationMode ?? "unified"],
   ], "current honcho config") : null;
 
   return {
@@ -413,6 +417,11 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.reasoningLevel = String(value) as ReasoningLevel;
       break;
 
+    case "observationMode":
+      previousValue = cfg.observationMode ?? "unified";
+      cfg.observationMode = String(value) as ObservationMode;
+      break;
+
     case "localContext.maxEntries":
       previousValue = cfg.localContext?.maxEntries;
       if (!cfg.localContext) cfg.localContext = {};
@@ -479,6 +488,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     messageUpload: cfg.messageUpload ?? {},
     contextRefresh: cfg.contextRefresh ?? {},
     reasoningLevel: cfg.reasoningLevel ?? "medium",
+    observationMode: cfg.observationMode ?? "unified",
     localContext: cfg.localContext ?? {},
     enabled: cfg.enabled !== false,
     logging: cfg.logging !== false,
@@ -632,6 +642,28 @@ export async function runMcpServer(): Promise<void> {
           },
         },
         {
+          name: "get_context",
+          description: "Retrieve the full context object (representation + peer card) from Honcho for the current user. Scoped by observation mode.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              max_conclusions: {
+                type: "number",
+                description: "Max conclusions to include (default: 25)",
+                default: 25,
+              },
+            },
+          },
+        },
+        {
+          name: "get_representation",
+          description: "Retrieve the user's representation string from Honcho. Lighter-weight than get_context.",
+          inputSchema: {
+            type: "object",
+            properties: {},
+          },
+        },
+        {
           name: "schedule_dream",
           description: "Schedule a background memory consolidation for the current session. Honcho will merge redundant conclusions and derive higher-level insights. Call this at the end of a long or productive session.",
           inputSchema: {
@@ -676,6 +708,7 @@ export async function runMcpServer(): Promise<void> {
                   "contextRefresh.ttlSeconds",
                   "contextRefresh.skipDialectic",
                   "reasoningLevel",
+                  "observationMode",
                   "localContext.maxEntries",
                   "sessions.set",
                   "sessions.remove",
@@ -715,13 +748,17 @@ export async function runMcpServer(): Promise<void> {
 
     if (name === "list_conclusions" || name === "delete_conclusion") {
       try {
-        const aiPeer = await honcho.peer(config.aiPeer);
+        const observationMode = getObservationMode(config);
+        // unified: (observer=user, observed=user); directional: (observer=aiPeer, observed=user)
+        const scopePeer = observationMode === "unified"
+          ? await honcho.peer(config.peerName)
+          : await honcho.peer(config.aiPeer);
+        const conclusionScope = scopePeer.conclusionsOf(config.peerName);
 
         if (name === "list_conclusions") {
           const page = (args?.page as number) ?? 1;
           const size = (args?.size as number) ?? 20;
-          const scope = aiPeer.conclusionsOf(config.peerName);
-          const result = await scope.list({ page, size });
+          const result = await conclusionScope.list({ page, size });
           const items = result.items.map((c: any) => ({
             id: c.id,
             content: c.content,
@@ -737,7 +774,7 @@ export async function runMcpServer(): Promise<void> {
 
         // delete_conclusion
         const id = args?.id as string;
-        await aiPeer.conclusionsOf(config.peerName).delete(id);
+        await conclusionScope.delete(id);
         return {
           content: [{ type: "text", text: `Deleted conclusion ${id}` }],
         };
@@ -755,6 +792,15 @@ export async function runMcpServer(): Promise<void> {
 
     try {
       const session = await honcho.session(sessionName);
+      const observationMode = getObservationMode(config);
+
+      // unified: user observes self — all ops go through userPeer.
+      // directional: aiPeer observes user — ops use aiPeer with target.
+      const userPeer = await honcho.peer(config.peerName);
+      const aiPeer = observationMode === "directional" ? await honcho.peer(config.aiPeer) : null;
+      const activePeer = observationMode === "unified" ? userPeer : aiPeer!;
+      const chatTarget = observationMode === "unified" ? undefined : config.peerName;
+      const contextTarget = observationMode === "unified" ? undefined : config.peerName;
 
       switch (name) {
         case "search": {
@@ -785,10 +831,9 @@ export async function runMcpServer(): Promise<void> {
         case "chat": {
           const query = args?.query as string;
           const reasoningLevel = (args?.reasoning_level as string) ?? config.reasoningLevel ?? "medium";
-          const aiPeer = await honcho.peer(config.aiPeer);
 
-          const response = await aiPeer.chat(query, {
-            target: config.peerName,
+          const response = await activePeer.chat(query, {
+            ...(chatTarget ? { target: chatTarget } : {}),
             session,
             reasoningLevel,
           });
@@ -805,9 +850,8 @@ export async function runMcpServer(): Promise<void> {
 
         case "create_conclusion": {
           const content = args?.content as string;
-          const aiPeer = await honcho.peer(config.aiPeer);
 
-          const conclusions = await aiPeer.conclusionsOf(config.peerName).create({
+          const conclusions = await activePeer.conclusionsOf(config.peerName).create({
             content,
             sessionId: session.id,
           });
@@ -822,8 +866,35 @@ export async function runMcpServer(): Promise<void> {
           };
         }
 
+        case "get_context": {
+          const maxConclusions = (args?.max_conclusions as number) ?? 25;
+
+          const ctx = await activePeer.context({
+            ...(contextTarget ? { target: contextTarget } : {}),
+            maxConclusions,
+            includeMostFrequent: true,
+          });
+
+          return {
+            content: [{ type: "text", text: JSON.stringify(ctx, null, 2) }],
+          };
+        }
+
+        case "get_representation": {
+          const rep = await activePeer.representation(
+            contextTarget ? { target: contextTarget } : undefined
+          );
+
+          return {
+            content: [{ type: "text", text: typeof rep === "string" ? rep : JSON.stringify(rep, null, 2) }],
+          };
+        }
+
         case "schedule_dream": {
-          await honcho.scheduleDream({ observer: config.aiPeer, observed: config.peerName, session });
+          const dreamArgs = observationMode === "unified"
+            ? { observer: config.peerName, session }
+            : { observer: config.aiPeer, observed: config.peerName, session };
+          await honcho.scheduleDream(dreamArgs);
           return {
             content: [{ type: "text", text: "Dream scheduled. Honcho will consolidate memory for this session in the background." }],
           };

@@ -6,16 +6,22 @@ All notable changes to claude-honcho will be documented in this file.
 
 ### Added
 
-- `list_conclusions` MCP tool — paginated list of conclusions saved about the user, with `id`, `content`, and `createdAt` fields
-- `delete_conclusion` MCP tool — remove a conclusion by ID; use `list_conclusions` to find IDs
-- `schedule_dream` MCP tool — trigger background memory consolidation for the current session; Honcho merges redundant conclusions and derives higher-level insights
-- `search` tool now accepts `scope: "session" | "workspace"` — workspace scope searches across all sessions, not just the current directory's
+- `observationMode: "unified" | "directional"` config flag — per-host with root fallback, default `"unified"`
+  - **unified** (default): all agents contribute to the user's self-observation collection (`observer=user, observed=user`); conclusions are portable across agents
+  - **directional** (opt-in): each AI maintains its own view of the user (`observer=aiPeer, observed=user`); useful for isolated multi-agent workspaces
+  - Resolves the ambiguity from issue #22 — prior code was implicitly directional with no user control; peer-call routing in all hooks and MCP tools now branches on this flag
+- `get_context` MCP tool — retrieves the full context object (representation + peer card), scoped by observation mode
+- `get_representation` MCP tool — lightweight representation string fetch, scoped by observation mode
+- `list_conclusions` MCP tool — paginated list of saved conclusions with `id`, `content`, and `createdAt`
+- `delete_conclusion` MCP tool — remove a conclusion by ID
+- `schedule_dream` MCP tool — trigger background memory consolidation; Honcho merges redundant conclusions and derives higher-level insights
+- `search` tool `scope` parameter — `"session"` (default) or `"workspace"` to search across all sessions
+- `observationMode` settable via `set_config` and visible in `get_config` output and status card
 
 ### Fixed
 
-- `chat` tool was calling `userPeer.chat()` (self-representation) instead of `aiPeer.chat({ target: userPeer })`. With conclusions stored as `observer=aiPeer, observed=userPeer`, this caused "I don't have any information" for facts that exist.
-- `create_conclusion` was creating self-conclusions (`observer=userPeer, observed=userPeer`) instead of AI-observer conclusions (`observer=aiPeer, observed=userPeer`). Stored conclusions were invisible to `chat`.
-- `list_conclusions` and `delete_conclusion` now correctly scope to `aiPeer.conclusionsOf(userPeer)` for the same reason.
+- `aiPeer` peer config: `observeMe` corrected to `false` — agent peers don't need self-representation; eliminates wasted background reasoning compute
+- `addPeers` session config: `aiPeer.observeOthers` is now `false` in unified mode and `true` in directional mode (was unconditionally `true`)
 
 ### Changed
 
