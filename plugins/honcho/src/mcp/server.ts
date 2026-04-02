@@ -664,14 +664,6 @@ export async function runMcpServer(): Promise<void> {
           },
         },
         {
-          name: "schedule_dream",
-          description: "Schedule a background memory consolidation for the current session. Honcho will merge redundant conclusions and derive higher-level insights. Call this at the end of a long or productive session.",
-          inputSchema: {
-            type: "object",
-            properties: {},
-          },
-        },
-        {
           name: "get_config",
           description: "Get the current Honcho plugin configuration, cache state, and diagnostic warnings",
           inputSchema: {
@@ -887,16 +879,6 @@ export async function runMcpServer(): Promise<void> {
 
           return {
             content: [{ type: "text", text: typeof rep === "string" ? rep : JSON.stringify(rep, null, 2) }],
-          };
-        }
-
-        case "schedule_dream": {
-          const dreamArgs = observationMode === "unified"
-            ? { observer: config.peerName, session }
-            : { observer: config.aiPeer, observed: config.peerName, session };
-          await honcho.scheduleDream(dreamArgs);
-          return {
-            content: [{ type: "text", text: "Dream scheduled. Honcho will consolidate memory for this session in the background." }],
           };
         }
 

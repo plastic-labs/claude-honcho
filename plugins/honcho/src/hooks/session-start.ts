@@ -111,7 +111,7 @@ export async function handleSessionStart(): Promise<void> {
     const observationMode = getObservationMode(config);
     await session.addPeers([
       [userPeer, { observeMe: true, observeOthers: false }],
-      [aiPeer, { observeMe: false, observeOthers: observationMode === "directional" }],
+      [aiPeer, { observeMe: true, observeOthers: observationMode === "directional" }],
     ]);
 
     // Only persist session names for per-directory strategy (stable names).
