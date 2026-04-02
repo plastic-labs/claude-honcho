@@ -270,6 +270,8 @@ Controls how Honcho stores and retrieves conclusions about you. Change it via `s
 | `unified` (default) | All agents write to your self-observation collection (`observer=you, observed=you`). Conclusions are portable — switch between Claude, Hermes, or any agent without losing memory. | Most users, when you want to build a unified context hub, agent-switching |
 | `directional` | Each AI peer keeps its own separate view of you (`observer=aiPeer, observed=you`). Claude's observations stay with Claude, Hermes' with Hermes. | Multi-peer workspaces where you want isolated per-peer(agent) representations |
 
+> **Peer defaults:** The plugin does not explicitly set `observeMe` or `observeOthers` on peers — it uses the server-side defaults. If you want to change how a peer observes (e.g., disable self-observation), update the peer's defaults via API or on [app.honcho.dev](https://app.honcho.dev). The only override the plugin applies is `observeOthers: true` on the AI peer in `directional` mode.
+
 To change:
 
 - Ask Claude: *"Set my observation mode to directional"*

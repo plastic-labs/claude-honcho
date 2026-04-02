@@ -105,14 +105,15 @@ export async function handleSessionStart(): Promise<void> {
     // Also stores instanceId per-cwd to prevent cross-session collision
     setCachedSessionId(cwd, sessionName, session.id, claudeInstanceId);
 
-    // Step 4: Add peers with observation config (materializes session server-side).
-    // unified: only user self-observations (observer=user, observed=user).
-    // directional: also creates cross-observations (observer=aiPeer, observed=user).
+    // Step 4: Add peers to session (materializes session server-side).
+    // Peer defaults (observeMe, observeOthers) are managed server-side —
+    // configure them via API or on app.honcho.dev. We only override observeOthers
+    // for the AI peer in directional mode so it can observe the user.
     const observationMode = getObservationMode(config);
-    await session.addPeers([
-      [userPeer, { observeMe: true, observeOthers: false }],
-      [aiPeer, { observeMe: true, observeOthers: observationMode === "directional" }],
-    ]);
+    const peers: Parameters<typeof session.addPeers>[0] = observationMode === "directional"
+      ? [userPeer, [aiPeer, { observeOthers: true }]]
+      : [userPeer, aiPeer];
+    await session.addPeers(peers);
 
     // Only persist session names for per-directory strategy (stable names).
     // Dynamic strategies (git-branch, chat-instance) change per session,
