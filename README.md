@@ -286,7 +286,64 @@ To change:
   }
   ```
 
-> **Note:** Switching modes doesn't migrate existing conclusions. If you switch from directional to unified, the new mode reads from a different collection. A migration script is planned for moving conclusions between collections.
+> **Note:** Switching modes doesn't automatically migrate existing conclusions. Each mode reads from a different collection. See [Migrating Observations](#migrating-observations) below to move conclusions between collections.
+
+### Migrating Observations
+
+When switching observation modes, conclusions stored under the old mode's collection won't be visible to the new mode. Use the migration script to copy them over:
+
+```bash
+# Requires: pip install honcho-ai
+# Set your API key: export HONCHO_API_KEY="hch-..."
+
+# Dry run — see what would be migrated (directional → unified)
+python scripts/migrate-observations.py \
+  --workspace agents \
+  --from-observer claude \
+  --user ajspig \
+  --dry-run
+
+# Execute the migration
+python scripts/migrate-observations.py \
+  --workspace agents \
+  --from-observer claude \
+  --user ajspig
+
+# Execute and delete the source conclusions after migration
+python scripts/migrate-observations.py \
+  --workspace agents \
+  --from-observer claude \
+  --user ajspig \
+  --delete-source
+```
+
+The script:
+- Reads all conclusions from the source collection (e.g., `observer=claude, observed=ajspig`)
+- Deduplicates by content against the destination (e.g., `observer=ajspig, observed=ajspig`)
+- Creates only the conclusions that don't already exist in the destination
+- Handles rate limiting with automatic retries
+
+To migrate in the other direction (unified → directional):
+
+```bash
+python scripts/migrate-observations.py \
+  --workspace agents \
+  --from-observer ajspig \
+  --to-observer claude \
+  --user ajspig
+```
+
+If you use multiple AI agents, run the script once per agent:
+
+```bash
+# Migrate Claude's observations to unified
+python scripts/migrate-observations.py -w agents --from-observer claude --user ajspig
+
+# Migrate Hermes' observations to unified
+python scripts/migrate-observations.py -w agents --from-observer hermes --user ajspig
+```
+
+Run with `--help` for all options.
 
 Session names are prefixed with your `peerName` by default (e.g., `alice-my-project`). Set `sessionPeerPrefix: false` if you're the only user and want shorter names.
 
