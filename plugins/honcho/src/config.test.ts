@@ -134,17 +134,16 @@ describe("matchSessionForPath", () => {
     expect(matchSessionForPath(`${HOME}/Code/abcdef`, sessions)).toBe("catch-all");
   });
 
-  test("relative glob patterns are resolved against cwd by resolve()", () => {
-    // **/name gets resolve()'d to an absolute path anchored at process.cwd(),
-    // so it won't work as a "match anywhere" pattern — use absolute paths instead
-    const sessions = { "**/my-project": "anywhere" };
+  test("relative paths are ignored", () => {
+    // config is global — relative keys are always a mistake
+    const sessions = { "**/my-project": "anywhere", "Code/foo": "bar" };
     expect(matchSessionForPath(`${HOME}/Code/my-project`, sessions)).toBeNull();
+    expect(matchSessionForPath(`${HOME}/Code/foo`, sessions)).toBeNull();
   });
 
-  test("empty string key is ignored", () => {
-    const sessions = { "": "oops", "~/Code/foo": "real" };
+  test("empty and relative keys are ignored", () => {
+    const sessions = { "": "oops", "relative/path": "nope", "~/Code/foo": "real" };
     expect(matchSessionForPath(`${HOME}/Code/foo`, sessions)).toBe("real");
-    // Empty key doesn't resolve to process.cwd() and match unexpectedly
     expect(matchSessionForPath(process.cwd(), sessions)).toBeNull();
   });
 

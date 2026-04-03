@@ -547,8 +547,10 @@ export function getClaudeSettingsDir(): string {
 export function matchSessionForPath(cwd: string, sessions: Record<string, string>): string | null {
   const normalizedCwd = normalizePath(cwd);
 
-  // Skip entries with empty keys or empty values
-  const entries = Object.entries(sessions).filter(([key, name]) => key && name);
+  // Skip empty entries and relative paths (config is global, relative keys are always a mistake)
+  const entries = Object.entries(sessions).filter(
+    ([key, name]) => key && name && (key.startsWith("/") || key.startsWith("~")),
+  );
 
   for (const [key, name] of entries) {
     if (!isGlobPattern(key) && normalizePath(key) === normalizedCwd) {
