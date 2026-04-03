@@ -1,5 +1,5 @@
 import { homedir } from "os";
-import { join, basename, resolve } from "path";
+import { join, basename, resolve, isAbsolute } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { captureGitState } from "./git.js";
 import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
@@ -549,7 +549,7 @@ export function matchSessionForPath(cwd: string, sessions: Record<string, string
 
   // Skip empty entries and relative paths (config is global, relative keys are always a mistake)
   const entries = Object.entries(sessions).filter(
-    ([key, name]) => key && name && (key.startsWith("/") || key.startsWith("~")),
+    ([key, name]) => key && name && (key === "~" || key.startsWith("~/") || isAbsolute(key)),
   );
 
   for (const [key, name] of entries) {

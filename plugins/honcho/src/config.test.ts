@@ -141,8 +141,8 @@ describe("matchSessionForPath", () => {
     expect(matchSessionForPath(`${HOME}/Code/foo`, sessions)).toBeNull();
   });
 
-  test("empty and relative keys are ignored", () => {
-    const sessions = { "": "oops", "relative/path": "nope", "~/Code/foo": "real" };
+  test("empty, relative, and ~prefixed-non-home keys are ignored", () => {
+    const sessions = { "": "oops", "relative/path": "nope", "~worktree": "nope", "~/Code/foo": "real" };
     expect(matchSessionForPath(`${HOME}/Code/foo`, sessions)).toBe("real");
     expect(matchSessionForPath(process.cwd(), sessions)).toBeNull();
   });
