@@ -4,6 +4,10 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `saveConfig()` no longer strips unknown fields from the current host's config block on every write. Previously, any field added to `hosts.<host>.*` that isn't declared on the `HostConfig` interface (e.g. the documented `linkedHosts` field) was silently removed the next time the plugin persisted config — typically on every directory change via `setSessionForPath()`. The new host entry is now seeded with unknown fields from the existing entry before the known-field write logic runs, so user-added config survives round-trips.
+
 ## [0.2.5] - 2026-06-02
 
 ### Added
@@ -24,7 +28,6 @@ All notable changes to claude-honcho will be documented in this file.
 - Spinner degrades gracefully without a TTY — Claude Code >=2.1.139 runs hooks without a controlling terminal, so `/dev/tty` fails; probe for a real terminal and fall back to a single clean line when none is available.
 - `sessionStart` hook now runs async (#43).
 - Preserve a host-scoped `apiKey` already on disk when rewriting config — no longer drops `hosts.<host>.apiKey` on save.
-
 ## [0.2.4] - 2026-04-01
 
 ### Added

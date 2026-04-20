@@ -92,6 +92,27 @@ export interface HostConfig {
   endpoint?: HonchoEndpointConfig;
 }
 
+type HostConfigOnDisk = HostConfig & Record<string, unknown>;
+
+const HOST_CONFIG_KEYS = [
+  "workspace",
+  "aiPeer",
+  "apiKey",
+  "enabled",
+  "logging",
+  "saveMessages",
+  "sessionStrategy",
+  "sessionPeerPrefix",
+  "reasoningLevel",
+  "observationMode",
+  "messageUpload",
+  "contextRefresh",
+  "localContext",
+  "endpoint",
+] as const satisfies readonly (keyof HostConfig)[];
+
+const KNOWN_HOST_KEYS: ReadonlySet<string> = new Set(HOST_CONFIG_KEYS);
+
 let _detectedHost: HonchoHost | null = null;
 
 export function setDetectedHost(host: HonchoHost): void {
@@ -131,6 +152,60 @@ export function getDefaultWorkspace(host?: HonchoHost): string {
 
 export function getDefaultAiPeer(host?: HonchoHost): string {
   return DEFAULT_AI_PEER[host ?? getDetectedHost()];
+}
+
+/**
+ * Return the canonical host key plus legacy hyphen/underscore aliases in
+ * resolve precedence order.
+ */
+function getHostConfigKeys(host: HonchoHost): string[] {
+  return Array.from(new Set([
+    host,
+    host.replace(/_/g, "-"),
+    host.replace(/-/g, "_"),
+  ]));
+}
+
+/**
+ * Resolve a host block using the same alias fallback rules for read and write
+ * paths.
+ */
+function getHostBlock(
+  hosts: Record<string, HostConfigOnDisk> | undefined,
+  host: HonchoHost
+): HostConfigOnDisk | undefined {
+  if (!hosts) return undefined;
+  for (const hostKey of getHostConfigKeys(host)) {
+    const hostBlock = hosts[hostKey];
+    if (hostBlock != null) return hostBlock;
+  }
+  return undefined;
+}
+
+/**
+ * Preserve user-defined on-disk host fields that the plugin does not parse.
+ */
+function copyUnknownHostFields(
+  target: HostConfigOnDisk,
+  source: HostConfigOnDisk | undefined
+): void {
+  if (!source) return;
+  for (const [key, value] of Object.entries(source)) {
+    if (!KNOWN_HOST_KEYS.has(key)) {
+      target[key] = value;
+    }
+  }
+}
+
+/**
+ * Assign a declared host field without hiding the surrounding on-disk shape.
+ */
+function setKnownHostField<K extends keyof HostConfig>(
+  target: HostConfig,
+  key: K,
+  value: HostConfig[K]
+): void {
+  target[key] = value;
 }
 
 // Stdin cache: entry points read stdin once via initHook(),
@@ -186,7 +261,7 @@ interface HonchoFileConfig {
   observationMode?: ObservationMode;
   /** Memory statusLine visibility: "on" (default) · "off" */
   statusline?: StatuslineMode;
-  hosts?: Record<string, HostConfig>;
+  hosts?: Record<string, HostConfigOnDisk>;
   /** When true, flat workspace/aiPeer fields apply to ALL hosts,
    *  ignoring host-specific blocks. When false (default), each host
    *  uses its own block and flat fields are fallbacks only. */
@@ -291,10 +366,11 @@ export function loadConfig(host?: HonchoHost): HonchoCLAUDEConfig | null {
   return loadConfigFromEnv(resolvedHost);
 }
 
+/**
+ * Resolve file-backed config for one host before applying runtime env toggles.
+ */
 function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDEConfig | null {
-  const hostBlock = raw.hosts?.[host]
-    ?? raw.hosts?.[host.replace(/_/g, "-")]
-    ?? raw.hosts?.[host.replace(/-/g, "_")];
+  const hostBlock = getHostBlock(raw.hosts, host);
 
   // Resolution order: env var > host-scoped apiKey > root apiKey.
   const apiKey = process.env.HONCHO_API_KEY || hostBlock?.apiKey || raw.apiKey;
@@ -456,10 +532,21 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   // into new host overrides. This preserves root fallback behavior.
   const host = getDetectedHost();
   if (!existing.hosts) existing.hosts = {};
-  const existingHost: HostConfig = existing.hosts[host] ?? {};
+  const hosts = existing.hosts;
+  const existingHost: HostConfigOnDisk = getHostBlock(hosts, host) ?? {};
 
-  const hostEntry: HostConfig = {};
+  // Seed with unknown fields from host aliases so the write below doesn't
+  // strip user-added config the plugin doesn't parse (e.g. `linkedHosts`).
+  // Alias entries are copied first so canonical host fields win conflicts.
+  const hostEntry: HostConfigOnDisk = {};
+  for (const hostKey of [...getHostConfigKeys(host)].reverse()) {
+    copyUnknownHostFields(hostEntry, hosts[hostKey]);
+  }
 
+  /**
+   * Persist a declared host field only when it is already host-local or differs
+   * from its root fallback.
+   */
   const setHostIfExplicit = <K extends keyof HostConfig>(
     key: K,
     value: HostConfig[K],
@@ -468,7 +555,7 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
     if (value === undefined) return;
     const hasHostOverride = Object.prototype.hasOwnProperty.call(existingHost, key);
     if (hasHostOverride || !deepEqual(value, rootValue)) {
-      hostEntry[key] = value;
+      setKnownHostField(hostEntry, key, value);
     }
   };
 
@@ -508,7 +595,7 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
     hostEntry.apiKey = existingHost.apiKey;
   }
 
-  existing.hosts[host] = hostEntry;
+  hosts[host] = hostEntry;
 
   writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
 }
