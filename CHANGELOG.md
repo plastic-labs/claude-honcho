@@ -28,6 +28,7 @@ All notable changes to claude-honcho will be documented in this file.
 - Spinner degrades gracefully without a TTY — Claude Code >=2.1.139 runs hooks without a controlling terminal, so `/dev/tty` fails; probe for a real terminal and fall back to a single clean line when none is available.
 - `sessionStart` hook now runs async (#43).
 - Preserve a host-scoped `apiKey` already on disk when rewriting config — no longer drops `hosts.<host>.apiKey` on save.
+
 ## [0.2.4] - 2026-04-01
 
 ### Added

@@ -112,7 +112,6 @@ const HOST_CONFIG_KEYS = [
 ] as const satisfies readonly (keyof HostConfig)[];
 
 const KNOWN_HOST_KEYS: ReadonlySet<string> = new Set(HOST_CONFIG_KEYS);
-
 let _detectedHost: HonchoHost | null = null;
 
 export function setDetectedHost(host: HonchoHost): void {
@@ -207,7 +206,6 @@ function setKnownHostField<K extends keyof HostConfig>(
 ): void {
   target[key] = value;
 }
-
 // Stdin cache: entry points read stdin once via initHook(),
 // handlers consume from cache via getCachedStdin().
 let _stdinText: string | null = null;
