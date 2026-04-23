@@ -121,7 +121,7 @@ function handleGetConfig(cwd: string) {
     ? endpointInfo.type === "production" ? "platform" : endpointInfo.type
     : null;
 
-  const sessionUrl = cfg && sessionName ? honchoSessionUrl(cfg.workspace, sessionName) : null;
+  const sessionUrl = cfg && sessionName ? honchoSessionUrl(cfg.workspace, sessionName, cfg.endpoint) : null;
 
   const current = cfg ? {
     workspace: cfg.workspace,
@@ -487,7 +487,7 @@ function handleSetConfig(args: Record<string, unknown>) {
   // Include session URL when session-affecting fields change
   const cwd = getLastActiveCwd() || process.cwd();
   const newSessionName = SESSION_AFFECTING_FIELDS.has(field) ? getSessionName(cwd) : undefined;
-  const sessionUrl = newSessionName ? honchoSessionUrl(cfg.workspace, newSessionName) : undefined;
+  const sessionUrl = newSessionName ? (honchoSessionUrl(cfg.workspace, newSessionName, cfg.endpoint) ?? undefined) : undefined;
 
   return {
     content: [{

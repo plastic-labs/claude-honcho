@@ -2,6 +2,12 @@
 
 All notable changes to claude-honcho will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- `honchoSessionUrl` no longer prints `https://app.honcho.dev/...` for local or custom self-hosted endpoints — the hosted GUI only exists for `production`, so pointing users at a cloud workspace that does not contain their sessions was misleading. The `user-prompt` hook now suppresses the "view your session in honcho GUI" line on non-production endpoints; `get_config` and `set_config` MCP responses omit `sessionUrl` in the same cases.
+
 ## [0.2.4] - 2026-04-01
 
 ### Added

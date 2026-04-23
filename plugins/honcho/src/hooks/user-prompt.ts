@@ -126,10 +126,12 @@ export async function handleUserPrompt(): Promise<void> {
   incrementMessageCount();
   const shouldShowSessionLink = messageCountBefore === 0;
 
-  // Build session link lazily — only materialized on first message
-  const sessionLink = shouldShowSessionLink
-    ? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
-    : undefined;
+  // Build session link lazily — only materialized on first message, and only
+  // when running against the hosted GUI (local/custom endpoints have none).
+  const sessionUrl = shouldShowSessionLink
+    ? honchoSessionUrl(config.workspace, sessionName, config.endpoint)
+    : null;
+  const sessionLink = sessionUrl ? formatSessionLink(sessionUrl) : undefined;
 
   // Skip trivial prompts — no context needed for "y", "ok", etc.
   if (shouldSkipContextRetrieval(prompt)) {

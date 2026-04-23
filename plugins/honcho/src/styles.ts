@@ -6,6 +6,7 @@
  * - Orange to pale light blue gradient
  * - Consistent hierarchy: headers, labels, values, dim text
  */
+import type { HonchoEndpointConfig } from "./config.js";
 
 // ANSI color codes - orange to pale light blue gradient
 export const colors = {
@@ -147,9 +148,20 @@ export function highlight(text: string): string {
 }
 
 /**
- * Build a Honcho app URL for a session
+ * Build a Honcho app URL for a session.
+ *
+ * The hosted GUI at app.honcho.dev only exists for the production endpoint.
+ * For local or custom self-hosted deployments there is no web frontend, so
+ * returning a cloud URL would point users at a workspace that does not exist
+ * in their instance. Returns null in those cases so callers can suppress the
+ * link entirely.
  */
-export function honchoSessionUrl(workspace: string, sessionName: string): string {
+export function honchoSessionUrl(
+  workspace: string,
+  sessionName: string,
+  endpoint?: HonchoEndpointConfig,
+): string | null {
+  if (endpoint?.baseUrl || endpoint?.environment === "local") return null;
   return `https://app.honcho.dev/explore?workspace=${encodeURIComponent(workspace)}&view=sessions&session=${encodeURIComponent(sessionName)}`;
 }
 
@@ -161,9 +173,15 @@ export function hyperlink(url: string, text: string): string {
 }
 
 /**
- * Styled session line with clickable hyperlink to Honcho app
+ * Styled session line with clickable hyperlink to Honcho app (when available)
  */
-export function sessionLine(workspace: string, sessionName: string): string {
-  const url = honchoSessionUrl(workspace, sessionName);
-  return `${colors.dim}Honcho session:${colors.reset} ${hyperlink(url, `${colors.skyBlue}${sessionName}${colors.reset}`)}`;
+export function sessionLine(
+  workspace: string,
+  sessionName: string,
+  endpoint?: HonchoEndpointConfig,
+): string {
+  const url = honchoSessionUrl(workspace, sessionName, endpoint);
+  const label = `${colors.dim}Honcho session:${colors.reset}`;
+  const name = `${colors.skyBlue}${sessionName}${colors.reset}`;
+  return url ? `${label} ${hyperlink(url, name)}` : `${label} ${name}`;
 }
