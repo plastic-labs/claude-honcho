@@ -181,7 +181,7 @@ export function sessionLine(
   endpoint?: HonchoEndpointConfig,
 ): string {
   const url = honchoSessionUrl(workspace, sessionName, endpoint);
-  const label = `${colors.dim}Honcho session:${colors.reset}`;
+  const labelText = `${colors.dim}Honcho session:${colors.reset}`;
   const name = `${colors.skyBlue}${sessionName}${colors.reset}`;
-  return url ? `${label} ${hyperlink(url, name)}` : `${label} ${name}`;
+  return url ? `${labelText} ${hyperlink(url, name)}` : `${labelText} ${name}`;
 }

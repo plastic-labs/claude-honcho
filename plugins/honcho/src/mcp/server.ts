@@ -121,7 +121,9 @@ function handleGetConfig(cwd: string) {
     ? endpointInfo.type === "production" ? "platform" : endpointInfo.type
     : null;
 
-  const sessionUrl = cfg && sessionName ? honchoSessionUrl(cfg.workspace, sessionName, cfg.endpoint) : null;
+  const sessionUrl = cfg && sessionName
+    ? (honchoSessionUrl(cfg.workspace, sessionName, cfg.endpoint) ?? undefined)
+    : undefined;
 
   const current = cfg ? {
     workspace: cfg.workspace,
