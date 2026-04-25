@@ -33,7 +33,7 @@ export interface LocalContextConfig {
 
 export type ReasoningLevel = "minimal" | "low" | "medium" | "high" | "max";
 
-export type SessionStrategy = "per-directory" | "git-branch" | "chat-instance";
+export type SessionStrategy = "per-directory" | "per-repo" | "git-branch" | "chat-instance";
 
 export type HonchoEnvironment = "production" | "local";
 
@@ -198,7 +198,7 @@ export interface HonchoCLAUDEConfig {
   /** AI peer name (resolved per-host, e.g. "claude" for claude-code) */
   aiPeer: string;
 
-  /** How sessions are named: per-directory, git-branch, or chat-instance */
+  /** How sessions are named: per-directory, per-repo, git-branch, or chat-instance */
   sessionStrategy?: SessionStrategy;
   /** Prefix session names with peerName (default: true, disable for solo use) */
   sessionPeerPrefix?: boolean;
@@ -537,9 +537,9 @@ export function getSessionName(cwd: string, instanceId?: string): string {
   const config = loadConfig();
   const strategy = config?.sessionStrategy ?? "per-directory";
 
-  // Manual overrides only apply to per-directory strategy.
-  // For chat-instance and git-branch, the session name is always derived dynamically.
-  if (strategy === "per-directory") {
+  // per-directory and per-repo both honor manual session-name overrides
+  // (matches hermes-agent client.py:548-551 — strict parity).
+  if (strategy === "per-directory" || strategy === "per-repo") {
     const configuredSession = getSessionForPath(cwd);
     if (configuredSession) {
       return configuredSession;
@@ -567,6 +567,36 @@ export function getSessionName(cwd: string, instanceId?: string): string {
         return usePrefix ? `${peerPart}-chat-${resolved}` : `chat-${resolved}`;
       }
       return base;
+    }
+    case "per-repo": {
+      let repoBase: string;
+      try {
+        // git rev-parse --show-toplevel with 5s timeout. Falls back to cwd
+        // basename on any failure (non-git, timeout, non-zero exit, empty
+        // stdout, thrown error). Mirrors hermes-agent's per-repo derivation.
+        const result = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
+          cwd,
+          stdout: "pipe",
+          stderr: "ignore",
+          stdin: "ignore",
+          timeout: 5000,
+        });
+        // SyncSubprocess.stdout is `Buffer | undefined`; guard against the
+        // exit-0-but-empty-stdout case so we never produce an empty session.
+        if (result.exitCode === 0 && result.stdout) {
+          const root = result.stdout.toString().trim();
+          if (root) {
+            repoBase = sanitizeForSessionName(basename(root));
+          } else {
+            repoBase = sanitizeForSessionName(basename(cwd));
+          }
+        } else {
+          repoBase = sanitizeForSessionName(basename(cwd));
+        }
+      } catch {
+        repoBase = sanitizeForSessionName(basename(cwd));
+      }
+      return usePrefix ? `${peerPart}-${repoBase}` : repoBase;
     }
     case "per-directory":
     default:

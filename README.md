@@ -259,6 +259,7 @@ Session strategy controls how Honcho maps your conversations to sessions. Change
 | `per-directory` (default) | One session per project directory. Stable across restarts. | Most users — each project accumulates its own memory |
 | `git-branch` | Session name includes the current git branch. Switching branches switches sessions. | Feature-branch workflows where context per branch matters |
 | `chat-instance` | Each Claude Code chat gets its own session. No continuity between restarts. | Ephemeral usage, experimentation, or when you want a clean slate each time |
+| `per-repo` | One session per git repo. Stable across cwd movement within a repo (uses `git rev-parse --show-toplevel`). Falls back to cwd basename outside a git repo, on git timeout (5s), or on any non-zero git exit. | Multi-tool setups where session name must match an external client's per-repo derivation (e.g., a backend writing to the same workspace from a different cwd). |
 
 ### Observation Mode
 

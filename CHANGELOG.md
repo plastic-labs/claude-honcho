@@ -2,6 +2,13 @@
 
 All notable changes to claude-honcho will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `sessionStrategy: "per-repo"` — derives the session name from `basename(git rev-parse --show-toplevel)` instead of `basename(cwd)`. Stable across cwd movement within a repo (the session resolves to the same name from any subdirectory of the repo). Useful for multi-tool setups where a separate client — e.g., a server-side memory writer in another language — needs to resolve the same session name from a different cwd within the repo. Implementation matches the per-repo logic in NousResearch/hermes-agent's Honcho client (Python) bit-for-bit: `basename(git toplevel)` with 5 s timeout, falling back to `basename(cwd)` on any failure (non-git directory, git timeout, non-zero exit, empty stdout, or thrown exception). Manual session-name override map (`sessions: {...}`) is honored for both `per-directory` and `per-repo`, matching Hermes's "manual override always wins" semantics. Uses `Bun.spawnSync` (no Node `child_process` import).
+- `strategyLabels` entry `"per-repo": "per repo"` in `mcp/server.ts` so `/honcho:status` and the `get_config` MCP tool render `mapping per repo` rather than the raw hyphenated strategy name.
+
 ## [0.2.4] - 2026-04-01
 
 ### Added
