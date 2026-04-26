@@ -70,6 +70,9 @@ function stripFencedBlocks(input: string): { prompt: string; redacted: boolean }
 }
 
 function stripUnifiedDiffBlocks(input: string): { prompt: string; redacted: boolean } {
+  const hasHunk = /^@@.*@@/m.test(input);
+  const hasPairedFileHeaders = /^---\s+a\/.*\r?\n\+\+\+\s+b\//m.test(input);
+  if (!hasHunk && !hasPairedFileHeaders) return { prompt: input, redacted: false };
   const anchorRe = /^(?:@@|---\s+a\/|\+\+\+\s+b\/)/;
   const diffBodyRe = /^(?:@@|---\s|\+\+\+\s|[+\-]| )/;
   const lines = input.split("\n");
@@ -89,6 +92,8 @@ function stripUnifiedDiffBlocks(input: string): { prompt: string; redacted: bool
 function looksLikeLongPathOutput(line: string): boolean {
   if (line.length <= 200) return false;
   if (!/\s/.test(line)) return /\//.test(line);
+  const wordCount = (line.match(/\b[A-Za-z]{3,}\b/g) || []).length;
+  if (wordCount >= 20) return false;
   return /(?:\/[A-Za-z0-9._\-]+){3,}/.test(line);
 }
 
@@ -220,6 +225,35 @@ Look for race conditions and security issues.`,
     expectRedacted: true,
     mustContain: ["[diff removed]", "option A", "option B", "option C", "Thanks"],
     mustNotContain: ["+new", "-old"],
+  },
+  {
+    name: "single-line prose mentioning '+++ b/foo.ts' — must NOT redact (anchor gate too weak before)",
+    input: "I think the path '+++ b/foo.ts' came from a stale diff. Should we ignore it?",
+    expectRedacted: false,
+    mustContain: ["I think the path", "ignore it"],
+    mustNotContain: ["[diff removed]"],
+  },
+  {
+    name: "single-line prose mentioning '--- a/foo.ts' — must NOT redact",
+    input: "The header --- a/foo.ts is what git emits for the old path.",
+    expectRedacted: false,
+    mustContain: ["The header", "old path"],
+    mustNotContain: ["[diff removed]"],
+  },
+  {
+    name: "user opinion bullets AFTER diff (Pi+DeepSeek finding) — opinions must survive",
+    input:
+      "Here's the diff:\n@@ -10,3 +10,3 @@\n-old code\n+new code\n\nMy opinion:\n+ I like this change\n- But we lost the comment",
+    expectRedacted: true,
+    mustContain: ["My opinion:", "I like this change", "But we lost the comment"],
+    mustNotContain: ["-old code", "+new code"],
+  },
+  {
+    name: "long PROSE paragraph with multiple URLs (Pi+DeepSeek finding) — must NOT redact",
+    input:
+      "Based on the documentation at https://docs.example.com/api/v2/authentication and the reference implementation at https://github.com/example/repo/blob/main/auth.py, I think we should implement OAuth2 flow first before adding API keys.",
+    expectRedacted: false,
+    mustNotContain: ["[path/output removed]"],
   },
 ];
 

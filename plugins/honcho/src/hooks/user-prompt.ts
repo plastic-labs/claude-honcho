@@ -166,16 +166,31 @@ function stripFencedBlocks(input: string): { prompt: string; redacted: boolean }
 }
 
 /**
- * Stateful unified-diff redactor. Enters "diff mode" only on a real
- * unified-diff anchor (`@@`, `--- a/`, `+++ b/`). Inside a diff block,
- * redacts every line that matches diff grammar — including `+`/`-`
- * lines, hunk headers, file headers, and space-prefixed context lines —
- * until a line that breaks diff grammar is encountered.
+ * Stateful unified-diff redactor.
  *
- * Markdown bullet lists like "- item one\n- item two\n- item three"
- * have no anchor and are passed through untouched.
+ * Two-stage gate to avoid eating prose that incidentally mentions a
+ * diff-shaped token:
+ *
+ *   1. Document-level: only run the redactor at all if the prompt
+ *      contains either a hunk header (`@@ ... @@`) OR a paired
+ *      file-header pair (`--- a/...` immediately followed by
+ *      `+++ b/...`). A single line like "the path is +++ b/foo.ts"
+ *      does NOT trigger.
+ *
+ *   2. Per-line: within an anchored prompt, redact contiguous runs of
+ *      diff-grammar lines (anchor lines + `+`/`-` content + space-
+ *      prefixed context). Exit on the first non-diff line so a
+ *      Markdown bullet list AFTER a diff in the same prompt
+ *      ("- option A") survives intact.
  */
 function stripUnifiedDiffBlocks(input: string): { prompt: string; redacted: boolean } {
+  // Document-level gate: require a real hunk OR paired file headers.
+  const hasHunk = /^@@.*@@/m.test(input);
+  const hasPairedFileHeaders = /^---\s+a\/.*\r?\n\+\+\+\s+b\//m.test(input);
+  if (!hasHunk && !hasPairedFileHeaders) {
+    return { prompt: input, redacted: false };
+  }
+
   const anchorRe = /^(?:@@|---\s+a\/|\+\+\+\s+b\/)/;
   // Lines that are part of a diff block once we're already inside one:
   // hunk header, file headers, +/- lines, space-prefixed context.
@@ -209,17 +224,24 @@ function stripUnifiedDiffBlocks(input: string): { prompt: string; redacted: bool
 
 /**
  * A line is "long path-bearing output" when it is >200 chars AND looks like
- * machine output rather than authored prose:
- *   - contains no whitespace at all (single dense token), OR
- *   - contains a contiguous run of 3+ slash-separated identifiers
- *     (path-like substring)
+ * machine output rather than authored prose. We use a word-density signal:
  *
- * Long prose paragraphs that happen to mention a URL or a fraction
- * (`and/or`, `1/2`) are not redacted under this rule.
+ *   - No whitespace at all (single dense token like a base64 blob): redact
+ *     if it contains a slash.
+ *   - Whitespace present: redact only if the line has FEW alphabetic words
+ *     (machine output / log dump pattern) AND contains a path-like run.
+ *
+ * Long prose paragraphs (URL-bearing or fraction-bearing) have many
+ * alphabetic words and are preserved.
  */
 function looksLikeLongPathOutput(line: string): boolean {
   if (line.length <= 200) return false;
   if (!/\s/.test(line)) return /\//.test(line);
+  const wordCount = (line.match(/\b[A-Za-z]{3,}\b/g) || []).length;
+  // Heuristic threshold: typical prose at >200 chars has 25+ word-like
+  // tokens. Log dumps / stack traces tend to be path-dense and word-sparse
+  // (often <15 alphabetic words even at 400+ chars).
+  if (wordCount >= 20) return false;
   return /(?:\/[A-Za-z0-9._\-]+){3,}/.test(line);
 }
 
