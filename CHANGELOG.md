@@ -2,6 +2,12 @@
 
 All notable changes to claude-honcho will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `HONCHO_PROFILE` environment variable enables per-session identity routing. When set, `resolveConfig` looks up a profile-suffixed host block (`hosts.<host>.<profile>`, e.g. `hosts.claude_code.director`) before falling back to the bare host block. The new `profile` field on `HonchoCLAUDEConfig` surfaces the active value for diagnostics (e.g. via MCP `get_config`). Setting `HONCHO_PROFILE` during a `saveConfig` call emits a stderr warning since writes always target the bare block; profile blocks are hand-curated.
+
 ## [0.2.4] - 2026-04-01
 
 ### Added

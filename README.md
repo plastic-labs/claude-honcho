@@ -424,6 +424,7 @@ Environment variables work for initial bootstrap (before a config file exists). 
 | `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
 | `HONCHO_SAVE_MESSAGES` | No       | `true`        | Set to `false` to stop saving messages                            |
 | `HONCHO_LOGGING`       | No       | `true`        | Set to `false` to disable file logging to `~/.honcho/`            |
+| `HONCHO_PROFILE`       | No       | unset         | Selects `hosts.<host>.<profile>` block; falls back to bare `hosts.<host>` when unset or no match (with stderr warning). Useful for routing different projects to different identities. |
 
 ## How It Works
 
