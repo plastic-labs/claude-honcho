@@ -2,6 +2,17 @@
 
 All notable changes to claude-honcho will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **User-prompt content stripping** — pasted code blocks, runs of unified-diff lines, and >200-char path-bearing lines are now redacted from `userPeer` messages before upload. These pastes ride `role: "user"` per the Anthropic Messages API but are not the user's authored prose; the server-side fact extractor previously read them as user statements and produced misattribution facts (e.g. `<user> changed buildOperatorPlan` from a pasted diff in an adversarial-review prompt). When anything is redacted, the queued message is tagged with `metadata.type = "user_paste_not_speech"` so server-side extraction can filter cross-peer attribution. (`src/hooks/user-prompt.ts`, `src/cache.ts`)
+- **Tool-action metadata tagging** — `aiPeer.message` uploads from `post-tool-use.ts` now carry `metadata.type = "tool_action"` and `metadata.subject = "ai_action_on_user_behalf"`. In directional observation mode (and any deployment where aiPeer cross-observes the user), this lets server-side extraction distinguish assistant-authored actions from user-authored prose and avoid folding them into the user-peer's representation. (`src/hooks/post-tool-use.ts`, `src/hooks/session-end.ts`)
+
+### Changed
+
+- `QueuedMessage` interface gains an optional `metadata` field; `queueMessage()` accepts an optional 5th argument that is forwarded to `userPeer.message()` at session-end. Backwards compatible — existing callers and queued messages without metadata continue to work. (`src/cache.ts`, `src/hooks/session-end.ts`)
+
 ## [0.2.4] - 2026-04-01
 
 ### Added

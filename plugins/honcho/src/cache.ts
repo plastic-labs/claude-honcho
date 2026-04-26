@@ -256,9 +256,16 @@ interface QueuedMessage {
   timestamp: string;
   uploaded?: boolean;
   instanceId?: string; // Claude Code instance for parallel session support
+  metadata?: Record<string, unknown>; // Extra metadata forwarded to Honcho on upload
 }
 
-export function queueMessage(content: string, peerId: string, cwd: string, instanceId?: string): void {
+export function queueMessage(
+  content: string,
+  peerId: string,
+  cwd: string,
+  instanceId?: string,
+  metadata?: Record<string, unknown>,
+): void {
   ensureCacheDir();
   const message: QueuedMessage = {
     content,
@@ -267,6 +274,7 @@ export function queueMessage(content: string, peerId: string, cwd: string, insta
     timestamp: new Date().toISOString(),
     uploaded: false,
     instanceId: instanceId || getClaudeInstanceId() || undefined,
+    ...(metadata ? { metadata } : {}),
   };
   appendFileSync(MESSAGE_QUEUE_FILE, JSON.stringify(message) + "\n");
 }

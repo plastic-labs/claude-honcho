@@ -259,6 +259,9 @@ export async function handleSessionEnd(): Promise<void> {
           metadata: {
             instance_id: msg.instanceId || undefined,
             session_affinity: sessionName,
+            // Forward queued-message metadata (e.g. type: "user_paste_not_speech")
+            // so server-side extraction can filter pastes out of user attribution.
+            ...(msg.metadata || {}),
           },
         })
       );

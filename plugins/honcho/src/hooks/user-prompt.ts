@@ -68,6 +68,48 @@ function shouldSkipContextRetrieval(prompt: string): boolean {
   return SKIP_CONTEXT_PATTERNS.some((p) => p.test(prompt.trim()));
 }
 
+/**
+ * Strip pasted code/diffs/long-output blocks from a user prompt before it
+ * is uploaded to Honcho. Pastes ride role: "user" per the Anthropic Messages
+ * API but are not the user's authored prose; the server-side fact extractor
+ * otherwise reads `+`/`-` diff lines or quoted file content as user statements
+ * and produces "<peer> changed/wrote/added X" misattribution bullets.
+ *
+ * Returns the cleaned prompt and whether any redaction fired so the caller
+ * can tag metadata.type = "user_paste_not_speech".
+ */
+function stripPastes(prompt: string): { prompt: string; redacted: boolean } {
+  let redacted = false;
+  let out = prompt;
+
+  // 1. Markdown fenced code blocks: ```...```
+  out = out.replace(/```[\s\S]*?```/g, () => {
+    redacted = true;
+    return "[code block removed]";
+  });
+
+  // 2. Runs of 3+ consecutive unified-diff lines (^[+-] at line start)
+  out = out.replace(/(?:^[+\-].*(?:\r?\n|$)){3,}/gm, () => {
+    redacted = true;
+    return "[diff removed]\n";
+  });
+
+  // 3. Lines >200 chars containing a slash-path (long file-path-bearing
+  //    output blobs — stack traces, log dumps, JSON pastes)
+  out = out
+    .split("\n")
+    .map((line) => {
+      if (line.length > 200 && /\//.test(line)) {
+        redacted = true;
+        return "[path/output removed]";
+      }
+      return line;
+    })
+    .join("\n");
+
+  return { prompt: out, redacted };
+}
+
 function formatSessionLink(sessionUrl: string): string {
   return `view your session in honcho GUI: ${sessionUrl}`;
 }
@@ -116,9 +158,14 @@ export async function handleUserPrompt(): Promise<void> {
 
   logHook("user-prompt", `Prompt received (${prompt.length} chars)`);
 
-  // Queue user prompt for upload at session-end (instant, no network)
+  // Queue user prompt for upload at session-end (instant, no network).
+  // Strip pasted code/diffs/output to keep the fact extractor from
+  // attributing them to the user. If anything is redacted, tag the message
+  // so server-side extraction can filter it from peer attribution.
   if (config.saveMessages !== false) {
-    queueMessage(prompt, config.peerName, cwd, instanceId || undefined);
+    const { prompt: queuedPrompt, redacted } = stripPastes(prompt);
+    const metadata = redacted ? { type: "user_paste_not_speech" as const } : undefined;
+    queueMessage(queuedPrompt, config.peerName, cwd, instanceId || undefined, metadata);
   }
 
   // Track message count for threshold-based refresh

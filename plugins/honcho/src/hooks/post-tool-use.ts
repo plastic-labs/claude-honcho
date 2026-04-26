@@ -248,11 +248,17 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
   logApiCall("session.addMessages", "POST", `tool: ${summary.slice(0, 50)}`);
   const instanceId = getClaudeInstanceId();
 
+  // Tag tool-action messages explicitly so server-side fact extraction
+  // does not fold them into the user-peer's representation as "<user> did X".
+  // The aiPeer authored the action on the user's behalf; cross-observation
+  // mode would otherwise produce misattribution bullets from these.
   await session.addMessages([
     aiPeer.message(`[Tool] ${summary}`, {
       metadata: {
         instance_id: instanceId || undefined,
         session_affinity: sessionName,
+        type: "tool_action",
+        subject: "ai_action_on_user_behalf",
       },
     }),
   ]);
