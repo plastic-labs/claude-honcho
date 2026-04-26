@@ -22,10 +22,19 @@ function stripPastes(prompt: string): { prompt: string; redacted: boolean } {
     return "[code block removed]";
   });
 
-  out = out.replace(/(?:^[+\-].*(?:\r?\n|$)){3,}/gm, () => {
-    redacted = true;
-    return "[diff removed]\n";
-  });
+  const looksLikeUnifiedDiff = /^(?:@@|---\s+a\/|\+\+\+\s+b\/)/m.test(out);
+  if (looksLikeUnifiedDiff) {
+    let diffRedacted = false;
+    out = out.replace(/^(?:@@.*|---\s.*|\+\+\+\s.*|[+\-].*)(?:\r?\n|$)/gm, () => {
+      diffRedacted = true;
+      return "";
+    });
+    if (diffRedacted) {
+      redacted = true;
+      out = out.replace(/(?:\r?\n){2,}/g, "\n").replace(/^(\s*\n)+/, "");
+      out = "[diff removed]\n" + out;
+    }
+  }
 
   out = out
     .split("\n")
@@ -63,10 +72,10 @@ const cases: Case[] = [
     mustNotContain: ["const x"],
   },
   {
-    name: "unified diff — must redact",
+    name: "+/- lines without diff anchor (ambiguous, treated as prose) — must NOT redact",
     input: "Review this diff:\n+const a = 1;\n-const b = 2;\n+const c = 3;\nThanks.",
-    expectRedacted: true,
-    mustContain: ["[diff removed]"],
+    expectRedacted: false,
+    mustNotContain: ["[diff removed]"],
   },
   {
     name: "long path-bearing line — must redact",
@@ -105,6 +114,34 @@ Look for race conditions and security issues.`,
     name: "only a single +/- line (not a runs-of-3+ diff) — must NOT redact",
     input: "Note: + means added, - means removed.",
     expectRedacted: false,
+  },
+  {
+    name: "markdown bullet list (3+ items) — must NOT redact (no diff anchor)",
+    input: "Things to consider:\n- auth flow\n- rate limiting\n- error handling\nThoughts?",
+    expectRedacted: false,
+    mustContain: ["auth flow", "rate limiting", "error handling"],
+    mustNotContain: ["[diff removed]"],
+  },
+  {
+    name: "mixed +/- bullet list (no diff anchor) — must NOT redact",
+    input: "Pros and cons:\n+ ships fast\n+ small diff\n- adds dependency\n- breaks API\nDecide?",
+    expectRedacted: false,
+    mustContain: ["ships fast", "breaks API"],
+    mustNotContain: ["[diff removed]"],
+  },
+  {
+    name: "raw unfenced unified diff with --- a/ +++ b/ anchors — must redact",
+    input:
+      "Look at this:\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1,3 +1,3 @@\n-const x = 1;\n+const x = 2;\n const y = 3;\nWhat do you think?",
+    expectRedacted: true,
+    mustContain: ["[diff removed]"],
+    mustNotContain: ["const x = 2"],
+  },
+  {
+    name: "raw unfenced unified diff with @@ hunk header only — must redact",
+    input: "@@ -10,3 +10,3 @@\n-old line\n+new line\n unchanged",
+    expectRedacted: true,
+    mustContain: ["[diff removed]"],
   },
 ];
 

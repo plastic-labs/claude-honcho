@@ -88,11 +88,26 @@ function stripPastes(prompt: string): { prompt: string; redacted: boolean } {
     return "[code block removed]";
   });
 
-  // 2. Runs of 3+ consecutive unified-diff lines (^[+-] at line start)
-  out = out.replace(/(?:^[+\-].*(?:\r?\n|$)){3,}/gm, () => {
-    redacted = true;
-    return "[diff removed]\n";
-  });
+  // 2. Unified-diff content. Gate on a real unified-diff anchor (`@@` hunk
+  //    header, `--- a/`, or `+++ b/`) to avoid eating markdown bullet lists
+  //    like "- item one\n- item two\n- item three". Once we know it's a
+  //    diff, redact every +/- line and the diff metadata lines individually.
+  //    Fenced ```diff blocks are already redacted by rule 1 above; this rule
+  //    fires for raw unfenced unified-diff pastes.
+  const looksLikeUnifiedDiff = /^(?:@@|---\s+a\/|\+\+\+\s+b\/)/m.test(out);
+  if (looksLikeUnifiedDiff) {
+    let diffRedacted = false;
+    out = out.replace(/^(?:@@.*|---\s.*|\+\+\+\s.*|[+\-].*)(?:\r?\n|$)/gm, () => {
+      diffRedacted = true;
+      return "";
+    });
+    if (diffRedacted) {
+      redacted = true;
+      // Collapse the empty-line residue and prepend a single marker
+      out = out.replace(/(?:\r?\n){2,}/g, "\n").replace(/^(\s*\n)+/, "");
+      out = "[diff removed]\n" + out;
+    }
+  }
 
   // 3. Lines >200 chars containing a slash-path (long file-path-bearing
   //    output blobs — stack traces, log dumps, JSON pastes)

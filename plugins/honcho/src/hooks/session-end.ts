@@ -257,11 +257,14 @@ export async function handleSessionEnd(): Promise<void> {
         userPeer.message(chunk, {
           createdAt: msg.timestamp,
           metadata: {
-            instance_id: msg.instanceId || undefined,
-            session_affinity: sessionName,
             // Forward queued-message metadata (e.g. type: "user_paste_not_speech")
             // so server-side extraction can filter pastes out of user attribution.
+            // Spread first so per-upload values below take precedence over any
+            // future caller that might happen to put instance_id/session_affinity
+            // in queued metadata.
             ...(msg.metadata || {}),
+            instance_id: msg.instanceId || undefined,
+            session_affinity: sessionName,
           },
         })
       );
