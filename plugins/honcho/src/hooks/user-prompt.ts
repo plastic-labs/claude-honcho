@@ -77,44 +77,45 @@ function shouldSkipContextRetrieval(prompt: string): boolean {
  *
  * Returns the cleaned prompt and whether any redaction fired so the caller
  * can tag metadata.type = "user_paste_not_speech".
+ *
+ * Implementation notes (post-review hardening, 2026-04-26):
+ *   - Fenced code blocks: scanner that supports 3+ backticks or tildes and
+ *     fails closed on EOF without a matching closer (the user almost
+ *     certainly pasted code without remembering to close the fence).
+ *   - Unified diffs: stateful line-by-line redactor entered only on a real
+ *     diff anchor (`@@`, `--- a/`, `+++ b/`). Inside the block, also redacts
+ *     space-prefixed context lines so leaked function names cannot survive.
+ *     Exits the block on the first line that doesn't match diff grammar.
+ *   - Long path-bearing lines: tightened heuristic. A line >200 chars is
+ *     redacted only if it has no internal whitespace at all OR contains a
+ *     dense slash-separated identifier run; long prose paragraphs with a
+ *     URL/fraction pass through.
  */
 function stripPastes(prompt: string): { prompt: string; redacted: boolean } {
+  if (!prompt) return { prompt, redacted: false };
+
   let redacted = false;
   let out = prompt;
 
-  // 1. Markdown fenced code blocks: ```...```
-  out = out.replace(/```[\s\S]*?```/g, () => {
+  // 1. Fenced code blocks (` ``` ` or ` ~~~ ` with 3+ chars; fail-closed)
+  const fenced = stripFencedBlocks(out);
+  if (fenced.redacted) {
     redacted = true;
-    return "[code block removed]";
-  });
-
-  // 2. Unified-diff content. Gate on a real unified-diff anchor (`@@` hunk
-  //    header, `--- a/`, or `+++ b/`) to avoid eating markdown bullet lists
-  //    like "- item one\n- item two\n- item three". Once we know it's a
-  //    diff, redact every +/- line and the diff metadata lines individually.
-  //    Fenced ```diff blocks are already redacted by rule 1 above; this rule
-  //    fires for raw unfenced unified-diff pastes.
-  const looksLikeUnifiedDiff = /^(?:@@|---\s+a\/|\+\+\+\s+b\/)/m.test(out);
-  if (looksLikeUnifiedDiff) {
-    let diffRedacted = false;
-    out = out.replace(/^(?:@@.*|---\s.*|\+\+\+\s.*|[+\-].*)(?:\r?\n|$)/gm, () => {
-      diffRedacted = true;
-      return "";
-    });
-    if (diffRedacted) {
-      redacted = true;
-      // Collapse the empty-line residue and prepend a single marker
-      out = out.replace(/(?:\r?\n){2,}/g, "\n").replace(/^(\s*\n)+/, "");
-      out = "[diff removed]\n" + out;
-    }
+    out = fenced.prompt;
   }
 
-  // 3. Lines >200 chars containing a slash-path (long file-path-bearing
-  //    output blobs — stack traces, log dumps, JSON pastes)
+  // 2. Unified-diff blocks (anchor-gated, stateful)
+  const diffed = stripUnifiedDiffBlocks(out);
+  if (diffed.redacted) {
+    redacted = true;
+    out = diffed.prompt;
+  }
+
+  // 3. Long path-bearing output lines
   out = out
     .split("\n")
     .map((line) => {
-      if (line.length > 200 && /\//.test(line)) {
+      if (looksLikeLongPathOutput(line)) {
         redacted = true;
         return "[path/output removed]";
       }
@@ -123,6 +124,103 @@ function stripPastes(prompt: string): { prompt: string; redacted: boolean } {
     .join("\n");
 
   return { prompt: out, redacted };
+}
+
+/**
+ * Scan-and-redact fenced code blocks. Supports 3+ backtick or 3+ tilde
+ * fences. Fails closed: if a fence is opened and never closed, the rest of
+ * the input is treated as inside the fence and redacted.
+ */
+function stripFencedBlocks(input: string): { prompt: string; redacted: boolean } {
+  const lines = input.split("\n");
+  const out: string[] = [];
+  const openRe = /^(\s*)([`~]{3,})/;
+  let i = 0;
+  let redacted = false;
+
+  while (i < lines.length) {
+    const m = openRe.exec(lines[i]);
+    if (!m) {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+    const opener = m[2];
+    const fenceChar = opener[0];
+    const minLen = opener.length;
+    redacted = true;
+    out.push("[code block removed]");
+    i++;
+    while (i < lines.length) {
+      const cm = /^\s*([`~]{3,})\s*$/.exec(lines[i]);
+      if (cm && cm[1][0] === fenceChar && cm[1].length >= minLen) {
+        i++;
+        break;
+      }
+      i++;
+    }
+    // EOF without closer: fail-closed. Already emitted marker, just exit.
+  }
+
+  return { prompt: out.join("\n"), redacted };
+}
+
+/**
+ * Stateful unified-diff redactor. Enters "diff mode" only on a real
+ * unified-diff anchor (`@@`, `--- a/`, `+++ b/`). Inside a diff block,
+ * redacts every line that matches diff grammar — including `+`/`-`
+ * lines, hunk headers, file headers, and space-prefixed context lines —
+ * until a line that breaks diff grammar is encountered.
+ *
+ * Markdown bullet lists like "- item one\n- item two\n- item three"
+ * have no anchor and are passed through untouched.
+ */
+function stripUnifiedDiffBlocks(input: string): { prompt: string; redacted: boolean } {
+  const anchorRe = /^(?:@@|---\s+a\/|\+\+\+\s+b\/)/;
+  // Lines that are part of a diff block once we're already inside one:
+  // hunk header, file headers, +/- lines, space-prefixed context.
+  const diffBodyRe = /^(?:@@|---\s|\+\+\+\s|[+\-]| )/;
+  const lines = input.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  let redacted = false;
+
+  while (i < lines.length) {
+    if (!anchorRe.test(lines[i])) {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+    // Enter diff block. Replace the entire contiguous diff with a single
+    // marker. Consume the anchor line plus any following diff-grammar lines.
+    redacted = true;
+    out.push("[diff removed]");
+    while (i < lines.length && diffBodyRe.test(lines[i])) {
+      i++;
+    }
+    // Consume residual blank lines so we don't leave gaps in the prose.
+    while (i < lines.length && lines[i].trim() === "") {
+      i++;
+    }
+  }
+
+  return { prompt: out.join("\n"), redacted };
+}
+
+/**
+ * A line is "long path-bearing output" when it is >200 chars AND looks like
+ * machine output rather than authored prose:
+ *   - contains no whitespace at all (single dense token), OR
+ *   - contains a contiguous run of 3+ slash-separated identifiers
+ *     (path-like substring)
+ *
+ * Long prose paragraphs that happen to mention a URL or a fraction
+ * (`and/or`, `1/2`) are not redacted under this rule.
+ */
+function looksLikeLongPathOutput(line: string): boolean {
+  if (line.length <= 200) return false;
+  if (!/\s/.test(line)) return /\//.test(line);
+  return /(?:\/[A-Za-z0-9._\-]+){3,}/.test(line);
 }
 
 function formatSessionLink(sessionUrl: string): string {

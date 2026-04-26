@@ -14,32 +14,27 @@
  */
 
 function stripPastes(prompt: string): { prompt: string; redacted: boolean } {
+  if (!prompt) return { prompt, redacted: false };
+
   let redacted = false;
   let out = prompt;
 
-  out = out.replace(/```[\s\S]*?```/g, () => {
+  const fenced = stripFencedBlocks(out);
+  if (fenced.redacted) {
     redacted = true;
-    return "[code block removed]";
-  });
+    out = fenced.prompt;
+  }
 
-  const looksLikeUnifiedDiff = /^(?:@@|---\s+a\/|\+\+\+\s+b\/)/m.test(out);
-  if (looksLikeUnifiedDiff) {
-    let diffRedacted = false;
-    out = out.replace(/^(?:@@.*|---\s.*|\+\+\+\s.*|[+\-].*)(?:\r?\n|$)/gm, () => {
-      diffRedacted = true;
-      return "";
-    });
-    if (diffRedacted) {
-      redacted = true;
-      out = out.replace(/(?:\r?\n){2,}/g, "\n").replace(/^(\s*\n)+/, "");
-      out = "[diff removed]\n" + out;
-    }
+  const diffed = stripUnifiedDiffBlocks(out);
+  if (diffed.redacted) {
+    redacted = true;
+    out = diffed.prompt;
   }
 
   out = out
     .split("\n")
     .map((line) => {
-      if (line.length > 200 && /\//.test(line)) {
+      if (looksLikeLongPathOutput(line)) {
         redacted = true;
         return "[path/output removed]";
       }
@@ -48,6 +43,53 @@ function stripPastes(prompt: string): { prompt: string; redacted: boolean } {
     .join("\n");
 
   return { prompt: out, redacted };
+}
+
+function stripFencedBlocks(input: string): { prompt: string; redacted: boolean } {
+  const lines = input.split("\n");
+  const out: string[] = [];
+  const openRe = /^(\s*)([`~]{3,})/;
+  let i = 0;
+  let redacted = false;
+  while (i < lines.length) {
+    const m = openRe.exec(lines[i]);
+    if (!m) { out.push(lines[i]); i++; continue; }
+    const opener = m[2];
+    const fenceChar = opener[0];
+    const minLen = opener.length;
+    redacted = true;
+    out.push("[code block removed]");
+    i++;
+    while (i < lines.length) {
+      const cm = /^\s*([`~]{3,})\s*$/.exec(lines[i]);
+      if (cm && cm[1][0] === fenceChar && cm[1].length >= minLen) { i++; break; }
+      i++;
+    }
+  }
+  return { prompt: out.join("\n"), redacted };
+}
+
+function stripUnifiedDiffBlocks(input: string): { prompt: string; redacted: boolean } {
+  const anchorRe = /^(?:@@|---\s+a\/|\+\+\+\s+b\/)/;
+  const diffBodyRe = /^(?:@@|---\s|\+\+\+\s|[+\-]| )/;
+  const lines = input.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  let redacted = false;
+  while (i < lines.length) {
+    if (!anchorRe.test(lines[i])) { out.push(lines[i]); i++; continue; }
+    redacted = true;
+    out.push("[diff removed]");
+    while (i < lines.length && diffBodyRe.test(lines[i])) i++;
+    while (i < lines.length && lines[i].trim() === "") i++;
+  }
+  return { prompt: out.join("\n"), redacted };
+}
+
+function looksLikeLongPathOutput(line: string): boolean {
+  if (line.length <= 200) return false;
+  if (!/\s/.test(line)) return /\//.test(line);
+  return /(?:\/[A-Za-z0-9._\-]+){3,}/.test(line);
 }
 
 interface Case {
@@ -72,16 +114,44 @@ const cases: Case[] = [
     mustNotContain: ["const x"],
   },
   {
+    name: "unclosed fence (fail-closed) — must redact and not leak content",
+    input: "Review:\n```ts\nconst secret = buildOperatorPlan();\n",
+    expectRedacted: true,
+    mustContain: ["[code block removed]"],
+    mustNotContain: ["const secret", "buildOperatorPlan"],
+  },
+  {
+    name: "four-backtick fence with inner triple-backtick — must redact whole block",
+    input: "Outer:\n````md\nSee:\n```ts\nleak();\n```\nMore.\n````\nDone.",
+    expectRedacted: true,
+    mustContain: ["[code block removed]", "Done."],
+    mustNotContain: ["leak()"],
+  },
+  {
+    name: "tilde-fence — must redact",
+    input: "Look:\n~~~\nleaked stuff\n~~~\nThanks.",
+    expectRedacted: true,
+    mustContain: ["[code block removed]"],
+    mustNotContain: ["leaked stuff"],
+  },
+  {
     name: "+/- lines without diff anchor (ambiguous, treated as prose) — must NOT redact",
     input: "Review this diff:\n+const a = 1;\n-const b = 2;\n+const c = 3;\nThanks.",
     expectRedacted: false,
     mustNotContain: ["[diff removed]"],
   },
   {
-    name: "long path-bearing line — must redact",
-    input: "Look:\n" + "x ".repeat(110) + "/Users/foo/path/to/file.ts:123:error\nFix it.",
+    name: "long path-bearing line that looks like a stack trace — must redact",
+    input: "Look:\n/Users/foo/" + "a/".repeat(110) + "file.ts:123\nFix it.",
     expectRedacted: true,
     mustContain: ["[path/output removed]"],
+  },
+  {
+    name: "long PROSE paragraph with URL/fraction — must NOT redact (silent-loss guard)",
+    input:
+      "I think the auth middleware should fail closed by default and we should also tighten rate limiting because the current 1/2 per second budget is too generous; we should look at https://example.com/docs for prior art and run the experiment with logging enabled. Want to discuss?",
+    expectRedacted: false,
+    mustNotContain: ["[path/output removed]"],
   },
   {
     name: "short path-bearing line — must NOT redact",
@@ -130,18 +200,26 @@ Look for race conditions and security issues.`,
     mustNotContain: ["[diff removed]"],
   },
   {
-    name: "raw unfenced unified diff with --- a/ +++ b/ anchors — must redact",
+    name: "raw unfenced unified diff with --- a/ +++ b/ anchors — must redact code AND context lines",
     input:
-      "Look at this:\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1,3 +1,3 @@\n-const x = 1;\n+const x = 2;\n const y = 3;\nWhat do you think?",
+      "Look at this:\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1,3 +1,3 @@\n-const x = 1;\n+const x = 2;\n function buildOperatorPlan() {}\nWhat do you think?",
     expectRedacted: true,
-    mustContain: ["[diff removed]"],
-    mustNotContain: ["const x = 2"],
+    mustContain: ["[diff removed]", "Look at this", "What do you think"],
+    mustNotContain: ["const x = 2", "buildOperatorPlan"],
   },
   {
     name: "raw unfenced unified diff with @@ hunk header only — must redact",
     input: "@@ -10,3 +10,3 @@\n-old line\n+new line\n unchanged",
     expectRedacted: true,
     mustContain: ["[diff removed]"],
+  },
+  {
+    name: "diff followed by markdown bullet list later in prompt — bullets survive (no cross-contamination)",
+    input:
+      "Review:\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@\n-old\n+new\n\nThen also consider:\n- option A\n- option B\n- option C\nThanks.",
+    expectRedacted: true,
+    mustContain: ["[diff removed]", "option A", "option B", "option C", "Thanks"],
+    mustNotContain: ["+new", "-old"],
   },
 ];
 
