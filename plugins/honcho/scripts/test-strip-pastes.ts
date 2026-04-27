@@ -186,7 +186,7 @@ Look for race conditions and security issues.`,
     expectRedacted: false,
   },
   {
-    name: "only a single +/- line (not a runs-of-3+ diff) — must NOT redact",
+    name: "stray +/- chars in prose (no diff anchor) — must NOT redact",
     input: "Note: + means added, - means removed.",
     expectRedacted: false,
   },
