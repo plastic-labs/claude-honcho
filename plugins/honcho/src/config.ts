@@ -183,6 +183,13 @@ interface HonchoFileConfig {
   // Legacy flat fields (read-only fallbacks when no hosts block)
   cursorPeer?: string;
   claudePeer?: string;
+  /**
+   * HTTP client timeout in milliseconds for all Honcho API requests.
+   * Default: 8000 (8 seconds). Self-hosted instances with large knowledge
+   * graphs or Tailscale routing should use 20000–30000.
+   * Can also be set via HONCHO_CLIENT_TIMEOUT_MS env var.
+   */
+  clientTimeoutMs?: number;
 }
 
 /** Resolved runtime config consumed by all other code.
@@ -228,6 +235,13 @@ export interface HonchoCLAUDEConfig {
   logging?: boolean;
   /** When true, flat workspace/aiPeer fields apply to ALL hosts */
   globalOverride?: boolean;
+  /**
+   * HTTP client timeout in milliseconds for all Honcho API requests.
+   * Default: 8000 (8 seconds). Self-hosted instances with large knowledge
+   * graphs or Tailscale/VPN routing should use 20000–30000.
+   * Can also be set via HONCHO_CLIENT_TIMEOUT_MS env var.
+   */
+  clientTimeoutMs?: number;
 }
 
 function deepEqual(a: unknown, b: unknown): boolean {
@@ -334,6 +348,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     enabled: hostBlock?.enabled ?? raw.enabled,
     logging: hostBlock?.logging ?? raw.logging,
     globalOverride: raw.globalOverride,
+    clientTimeoutMs: raw.clientTimeoutMs,
   };
 
   return mergeWithEnvVars(config);
@@ -367,6 +382,7 @@ export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null 
     saveMessages: process.env.HONCHO_SAVE_MESSAGES !== "false",
     enabled: process.env.HONCHO_ENABLED !== "false",
     logging: process.env.HONCHO_LOGGING !== "false",
+    ...(process.env.HONCHO_CLIENT_TIMEOUT_MS && { clientTimeoutMs: parseInt(process.env.HONCHO_CLIENT_TIMEOUT_MS, 10) || undefined }),
   };
 
   if (endpoint) {
@@ -400,6 +416,10 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   }
   if (process.env.HONCHO_LOGGING === "false") {
     config.logging = false;
+  }
+  if (process.env.HONCHO_CLIENT_TIMEOUT_MS) {
+    const parsed = parseInt(process.env.HONCHO_CLIENT_TIMEOUT_MS, 10);
+    if (!isNaN(parsed) && parsed > 0) config.clientTimeoutMs = parsed;
   }
   return config;
 }
@@ -697,7 +717,7 @@ export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClient
     apiKey: config.apiKey,
     baseURL: getHonchoBaseUrl(config),
     workspaceId: config.workspace,
-    timeout: 8000,
+    timeout: config.clientTimeoutMs ?? 8000,
     maxRetries: 1,
   };
 }

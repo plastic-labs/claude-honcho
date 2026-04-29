@@ -47,6 +47,7 @@ const ENV_SHADOW_MAP: Record<string, string> = {
   saveMessages: "HONCHO_SAVE_MESSAGES",
   "endpoint.baseUrl": "HONCHO_ENDPOINT",
   "endpoint.environment": "HONCHO_ENDPOINT",
+  clientTimeoutMs: "HONCHO_CLIENT_TIMEOUT_MS",
 };
 
 // Fields that require confirm=true to change

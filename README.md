@@ -424,6 +424,7 @@ Environment variables work for initial bootstrap (before a config file exists). 
 | `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
 | `HONCHO_SAVE_MESSAGES` | No       | `true`        | Set to `false` to stop saving messages                            |
 | `HONCHO_LOGGING`       | No       | `true`        | Set to `false` to disable file logging to `~/.honcho/`            |
+| `HONCHO_CLIENT_TIMEOUT_MS` | No   | `8000`        | HTTP client timeout in milliseconds. Increase to `20000`–`30000` for self-hosted instances with large knowledge graphs or VPN/Tailscale routing. |
 
 ## How It Works
 
@@ -496,6 +497,17 @@ Or via env var:
 export HONCHO_ENDPOINT="local"  # Uses localhost:8000
 # or
 export HONCHO_ENDPOINT="http://your-server:8000/v3"
+```
+
+**Tip for self-hosted instances:** Large knowledge graphs (100k+ documents) or VPN/Tailscale routing can cause `context()` fetches to exceed the default 8-second timeout, resulting in sessions starting without memory context. Increase the client timeout:
+
+```bash
+export HONCHO_CLIENT_TIMEOUT_MS="20000"  # 20 seconds
+```
+
+Or in `~/.honcho/config.json`:
+```json
+{ "clientTimeoutMs": 20000 }
 ```
 
 ### Temporarily disabling memory
