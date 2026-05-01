@@ -155,7 +155,7 @@ export async function initHook(): Promise<void> {
 // ============================================
 
 /** Raw shape of ~/.honcho/config.json on disk */
-interface HonchoFileConfig {
+export interface HonchoFileConfig {
   apiKey?: string;
   peerName?: string;
   workspace?: string;
@@ -228,6 +228,14 @@ export interface HonchoCLAUDEConfig {
   logging?: boolean;
   /** When true, flat workspace/aiPeer fields apply to ALL hosts */
   globalOverride?: boolean;
+  /** Active honcho profile from HONCHO_PROFILE env var, or undefined when
+   *  unset. Useful for diagnostics; the host-block lookup already factors
+   *  this in. */
+  profile?: string;
+  /** Resolved session pin from HONCHO_SESSION env var (sanitized). Undefined when env unset. */
+  session?: string;
+  /** Provenance of `session`. 'env' = HONCHO_SESSION-derived. Future: 'manual'/'computed' (deferred). */
+  sessionSource?: "env" | "manual" | "computed";
 }
 
 function deepEqual(a: unknown, b: unknown): boolean {
@@ -278,7 +286,18 @@ export function loadConfig(host?: HonchoHost): HonchoCLAUDEConfig | null {
   return loadConfigFromEnv(resolvedHost);
 }
 
-function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDEConfig | null {
+// Module-scoped dedupe for the missing-profile stderr warning. Lifetime
+// matches the hook process (one Claude Code hook invocation = one process),
+// so the Set effectively warns once per (host, profile) per hook firing.
+const _warnedMissingProfile = new Set<string>();
+
+// Test-only: drop the dedupe cache between assertions that exercise the
+// warning path. Not part of the public API; underscore-prefixed by convention.
+export function _resetProfileWarnCacheForTests(): void {
+  _warnedMissingProfile.clear();
+}
+
+export function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDEConfig | null {
   const apiKey = process.env.HONCHO_API_KEY || raw.apiKey;
   if (!apiKey) return null;
 
@@ -288,9 +307,68 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
   let workspace: string;
   let aiPeer: string;
 
-  const hostBlock = raw.hosts?.[host]
-    ?? raw.hosts?.[host.replace(/_/g, "-")]
-    ?? raw.hosts?.[host.replace(/-/g, "_")];
+  // Profile-aware host block lookup. HONCHO_PROFILE env var (set by `cl`
+  // wrapper or caller) selects a profile-suffixed block; falls back to
+  // bare host block when profile unset, missing, or empty after
+  // sanitization.
+  //
+  // Sanitization uses replace-with-`-` (matching `cl`'s `tr -c ... '-'`)
+  // so direct env settings like HONCHO_PROFILE=director.7stars yield the
+  // same lookup key (`director-7stars`) regardless of whether `cl`
+  // exported it or the user set it inline.
+  const profile = (process.env.HONCHO_PROFILE ?? "")
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  // Alias the HOST PORTION only ("claude_code" ↔ "claude-code"). The
+  // profile suffix must stay byte-exact — a blanket `replace(/-/g, "_")`
+  // on the full `${host}.${profile}` string would also rewrite the
+  // profile (e.g. `director-7stars` → `director_7stars`), pointing at
+  // a different profile.
+  const hostAliases = Array.from(new Set([
+    host,
+    host.replace(/_/g, "-"),
+    host.replace(/-/g, "_"),
+  ]));
+
+  let hostBlock: HostConfig | undefined;
+  let profileMatched = false;
+
+  if (profile) {
+    for (const h of hostAliases) {
+      const key = `${h}.${profile}`;
+      if (raw.hosts?.[key]) {
+        hostBlock = raw.hosts[key];
+        profileMatched = true;
+        break;
+      }
+    }
+  }
+
+  if (!hostBlock) {
+    for (const h of hostAliases) {
+      if (raw.hosts?.[h]) {
+        hostBlock = raw.hosts[h];
+        break;
+      }
+    }
+  }
+
+  if (profile && !profileMatched) {
+    // Profile requested but no matching block — log and fall back.
+    // Logger may not be initialized in early hooks; use stderr directly.
+    // Dedupe per (host, profile) per process: loadConfig() is called from
+    // many helpers per hook invocation, so a naive write produces N
+    // duplicate lines that drown real diagnostics.
+    const warnKey = `${host}.${profile}`;
+    if (!_warnedMissingProfile.has(warnKey)) {
+      _warnedMissingProfile.add(warnKey);
+      process.stderr.write(
+        `[honcho] HONCHO_PROFILE=${profile} but hosts.${host}.${profile} missing — using bare ${host}\n`
+      );
+    }
+  }
 
   if (raw.globalOverride === true) {
     // Global override: flat fields apply to ALL hosts
@@ -334,7 +412,16 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     enabled: hostBlock?.enabled ?? raw.enabled,
     logging: hostBlock?.logging ?? raw.logging,
     globalOverride: raw.globalOverride,
+    profile: profile || undefined,
   };
+
+  const sessionEnv = (process.env.HONCHO_SESSION ?? "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (sessionEnv) {
+    config.session = sessionEnv;
+    config.sessionSource = "env";
+  }
 
   return mergeWithEnvVars(config);
 }
@@ -405,6 +492,25 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
 }
 
 /**
+ * Emit a stderr warning when saveConfig is called while HONCHO_PROFILE
+ * is set. Profile-routed sessions read from hosts.<host>.<profile> but
+ * saveConfig always writes to the bare hosts.<host> block — profile
+ * blocks are hand-curated, not runtime-mutable. Fires for any saveConfig
+ * caller (set_config, setSessionForPath, setPluginEnabled, setEndpoint,
+ * etc.) so the silent divergence is visible.
+ */
+export function warnIfProfileRoutedSave(host: HonchoHost): void {
+  if (process.env.HONCHO_PROFILE?.trim()) {
+    process.stderr.write(
+      `[honcho] saveConfig() writing to bare hosts.${host} while ` +
+      `HONCHO_PROFILE=${process.env.HONCHO_PROFILE} — profile blocks ` +
+      `are hand-curated; edit ~/.honcho/config.json directly to change ` +
+      `the profile block.\n`
+    );
+  }
+}
+
+/**
  * Write-back: read-merge-write to avoid clobbering other hosts' config.
  *
  * Convention:
@@ -441,6 +547,7 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   // Keep workspace/aiPeer host-local, but avoid materializing root defaults
   // into new host overrides. This preserves root fallback behavior.
   const host = getDetectedHost();
+  warnIfProfileRoutedSave(host);
   if (!existing.hosts) existing.hosts = {};
   const existingHost: HostConfig = existing.hosts[host] ?? {};
 
@@ -534,6 +641,14 @@ export function getSessionForPath(cwd: string): string | null {
  *                      when available to avoid cross-session collision from the global cache.
  */
 export function getSessionName(cwd: string, instanceId?: string): string {
+  // Env var override — highest priority, mirrors HONCHO_PROFILE pattern.
+  // Sits above the manual sessions[cwd] map and the strategy switch so an
+  // operator can pin the session at launch without editing config.json.
+  const envSession = (process.env.HONCHO_SESSION ?? "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (envSession) return envSession;
+
   const config = loadConfig();
   const strategy = config?.sessionStrategy ?? "per-directory";
 
@@ -575,6 +690,24 @@ export function getSessionName(cwd: string, instanceId?: string): string {
 }
 
 export function setSessionForPath(cwd: string, sessionName: string): void {
+  // Warn at this writer (not at saveConfig) so HONCHO_SESSION's silent
+  // shadowing of sessions[cwd] is visible without false-positives from
+  // setEndpoint, setPluginEnabled, setMessageUploadConfig, etc. — those
+  // call saveConfig but don't touch the sessions field, so they are
+  // unaffected by the env var. DO NOT move this warning to saveConfig.
+  // (warnIfProfileRoutedSave at config.ts:490 lives at saveConfig because
+  // the entire host block is profile-routed; HONCHO_SESSION's narrower
+  // scope warrants a narrower placement.)
+  const envPin = (process.env.HONCHO_SESSION ?? "").trim();
+  if (envPin) {
+    process.stderr.write(
+      `[honcho] setSessionForPath(${cwd}=${sessionName}) while ` +
+      `HONCHO_SESSION=${process.env.HONCHO_SESSION} — env var routes ` +
+      `session reads past sessions[cwd]; this entry is dormant until ` +
+      `HONCHO_SESSION is unset.\n`
+    );
+  }
+
   const config = loadConfig();
   if (!config) return;
   if (!config.sessions) {
