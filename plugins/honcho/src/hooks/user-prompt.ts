@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, isLoggingEnabled } from "../config.js";
 import {
   getCachedUserContext,
   getStaleCachedUserContext,
@@ -11,9 +11,12 @@ import {
   markKnowledgeGraphRefreshed,
   getInstanceIdForCwd,
   queueMessage,
+  getInjectedHashesForSession,
+  recordInjectedHashes,
 } from "../cache.js";
 import { logHook, logApiCall, logCache, setLogContext } from "../log.js";
 import { visContextLine, visSkipMessage, addSystemMessage, verboseApiResult, verboseList } from "../visual.js";
+import { pickFresh } from "../dedup.js";
 import { honchoSessionUrl } from "../styles.js";
 
 interface HookInput {
@@ -106,6 +109,7 @@ export async function handleUserPrompt(): Promise<void> {
   const prompt = hookInput.prompt || "";
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
+  const dedupSessionId = hookInput.session_id;
   const sessionName = getSessionName(cwd, instanceId || undefined);
 
   setLogContext(cwd, sessionName);
@@ -149,7 +153,7 @@ export async function handleUserPrompt(): Promise<void> {
     verboseApiResult("peer.context() -> representation (cached)", cachedContext?.representation);
     verboseList("peer.context() -> peerCard (cached)", cachedContext?.peerCard);
 
-    serveContext(config.peerName, cachedContext, true, sessionLink);
+    serveContext(config.peerName, cachedContext, true, sessionLink, dedupSessionId);
     process.exit(0);
   }
 
@@ -167,7 +171,7 @@ export async function handleUserPrompt(): Promise<void> {
       markKnowledgeGraphRefreshed();
     }
     if (context) {
-      serveContext(config.peerName, context, false, sessionLink);
+      serveContext(config.peerName, context, false, sessionLink, dedupSessionId);
       process.exit(0);
     }
   }
@@ -176,7 +180,7 @@ export async function handleUserPrompt(): Promise<void> {
   const staleContext = getStaleCachedUserContext();
   if (staleContext) {
     logHook("user-prompt", "Serving stale cache after timeout");
-    serveContext(config.peerName, staleContext, true, sessionLink);
+    serveContext(config.peerName, staleContext, true, sessionLink, dedupSessionId);
   }
   // No cache at all — exit silently, context will arrive after session-start completes
 
@@ -191,8 +195,9 @@ function serveContext(
   context: any,
   cached: boolean,
   sessionLink?: string,
+  dedupSessionId?: string,
 ): void {
-  const { parts: contextParts } = formatCachedContext(context, peerName);
+  const { parts: contextParts } = formatCachedContext(context, peerName, dedupSessionId);
   if (contextParts.length === 0) return;
 
   const visMsg = visContextLine("user-prompt", { cached });
@@ -255,22 +260,56 @@ async function fetchFreshContext(config: any, prompt: string): Promise<{ context
   return { context: contextResult };
 }
 
-function formatCachedContext(context: any, peerName: string): { parts: string[]; conclusionCount: number } {
+function formatCachedContext(context: any, peerName: string, dedupSessionId?: string): { parts: string[]; conclusionCount: number } {
   const parts: string[] = [];
   let conclusionCount = 0;
+  let totalDropped = 0;
   const rep = context?.representation;
 
   if (typeof rep === "string" && rep.trim()) {
     const lines = rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
-    const selected = lines.slice(0, 5);
-    conclusionCount = selected.length;
+    let selected: string[];
+    if (dedupSessionId) {
+      const alreadyHashed = getInjectedHashesForSession(dedupSessionId);
+      const result = pickFresh(lines, alreadyHashed, 5);
+      selected = result.fresh;
+      conclusionCount = result.fresh.length;
+      totalDropped = totalDropped + result.droppedCount;
+      if (result.freshHashes.length > 0) {
+        recordInjectedHashes(dedupSessionId, result.freshHashes);
+      }
+      for (const h of result.freshHashes) {
+        alreadyHashed.add(h);
+      }
+    } else {
+      selected = lines.slice(0, 5);
+      conclusionCount = selected.length;
+    }
     const summary = selected.map((l: string) => l.replace(/^\[.*?\]\s*/, "").replace(/^- /, "")).join("; ");
     if (summary) parts.push(`Relevant conclusions: ${summary}`);
   }
 
   const peerCard = context?.peerCard;
   if (peerCard?.length) {
-    parts.push(`Profile: ${peerCard.join("; ")}`);
+    let selectedPeerCard: string[];
+    if (dedupSessionId) {
+      const alreadyHashed = getInjectedHashesForSession(dedupSessionId);
+      const result = pickFresh(peerCard, alreadyHashed, peerCard.length);
+      selectedPeerCard = result.fresh;
+      totalDropped = totalDropped + result.droppedCount;
+      if (result.freshHashes.length > 0) {
+        recordInjectedHashes(dedupSessionId, result.freshHashes);
+      }
+    } else {
+      selectedPeerCard = peerCard;
+    }
+    if (selectedPeerCard.length > 0) {
+      parts.push(`Profile: ${selectedPeerCard.join("; ")}`);
+    }
+  }
+
+  if (totalDropped > 0 && isLoggingEnabled()) {
+    logHook("user-prompt", `Dedup dropped ${totalDropped} already-injected line(s) for session ${dedupSessionId}`);
   }
 
   return { parts, conclusionCount };
