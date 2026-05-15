@@ -8,6 +8,7 @@ import {
   getCachedGitState,
   setCachedGitState,
   detectGitChanges,
+  clearInjectedHashesForSession,
 } from "../cache.js";
 import { Spinner } from "../spinner.js";
 import { captureGitState, getRecentCommits, isGitRepo, inferFeatureContext } from "../git.js";
@@ -63,6 +64,7 @@ export async function handleSessionStart(): Promise<void> {
 
   // Reset message count for this session (for threshold-based knowledge graph refresh)
   resetMessageCount();
+  if (claudeInstanceId) clearInjectedHashesForSession(claudeInstanceId);
 
   // Capture git state (before any API calls for speed)
   const previousGitState = getCachedGitState(cwd);

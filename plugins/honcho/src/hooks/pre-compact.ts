@@ -1,5 +1,6 @@
 import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
+import { clearInjectedHashesForSession } from "../cache.js";
 import { Spinner } from "../spinner.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { formatVerboseBlock, formatVerboseList } from "../visual.js";
@@ -107,6 +108,7 @@ export async function handlePreCompact(): Promise<void> {
   }
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
+  const claudeInstanceId = hookInput.session_id;
   const trigger = hookInput.trigger || "auto";
 
   // Set log context
@@ -121,6 +123,8 @@ export async function handlePreCompact(): Promise<void> {
   }
 
   try {
+    if (claudeInstanceId) clearInjectedHashesForSession(claudeInstanceId);
+
     const honcho = new Honcho(getHonchoClientOptions(config));
     const sessionName = getSessionName(cwd);
     const observationMode = getObservationMode(config);
