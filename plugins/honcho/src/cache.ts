@@ -123,6 +123,7 @@ interface ContextCache {
   summaries?: { data: any; fetchedAt: number };
   messageCount?: number; // Track messages since last refresh
   lastRefreshMessageCount?: number; // Message count at last knowledge graph refresh
+  injectedHashesBySession?: Record<string, { hashes: string[]; turnCount: number; updatedAt: string }>;
 }
 
 // These are now configurable via config.json, with defaults in getContextRefreshConfig()
@@ -138,7 +139,7 @@ function getMessageRefreshThreshold(): number {
 
 // Known keys in ContextCache — anything else is a ghost from older versions
 const CONTEXT_CACHE_KNOWN_KEYS = new Set([
-  "userContext", "claudeContext", "summaries", "messageCount", "lastRefreshMessageCount",
+  "userContext", "claudeContext", "summaries", "messageCount", "lastRefreshMessageCount", "injectedHashesBySession",
 ]);
 
 export function loadContextCache(): ContextCache {
@@ -243,6 +244,57 @@ export function resetMessageCount(): void {
   cache.messageCount = 0;
   cache.lastRefreshMessageCount = 0;
   saveContextCache(cache);
+}
+
+export function getInjectedHashesForSession(sessionId: string): Set<string> {
+  const cache = loadContextCache();
+  const entry = cache.injectedHashesBySession?.[sessionId];
+  if (!entry) {
+    return new Set();
+  }
+  return new Set(entry.hashes);
+}
+
+export function recordInjectedHashes(sessionId: string, newHashes: string[]): void {
+  const cache = loadContextCache();
+  if (!cache.injectedHashesBySession) {
+    cache.injectedHashesBySession = {};
+  }
+  const existing = cache.injectedHashesBySession[sessionId];
+  const mergedHashes = existing
+    ? [...new Set([...existing.hashes, ...newHashes])]
+    : [...newHashes];
+  cache.injectedHashesBySession[sessionId] = {
+    hashes: mergedHashes,
+    turnCount: (existing?.turnCount || 0) + 1,
+    updatedAt: new Date().toISOString(),
+  };
+
+  // Inline GC: drop >20 sessions (LRU by updatedAt) and any older than 7 days
+  const entries = Object.entries(cache.injectedHashesBySession);
+  if (entries.length > 20) {
+    entries.sort((a, b) => a[1].updatedAt.localeCompare(b[1].updatedAt));
+    const toDrop = entries.length - 20;
+    for (let i = 0; i < toDrop; i = i + 1) {
+      delete cache.injectedHashesBySession[entries[i][0]];
+    }
+  }
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  for (const [id, data] of Object.entries(cache.injectedHashesBySession)) {
+    if (new Date(data.updatedAt).getTime() < sevenDaysAgo) {
+      delete cache.injectedHashesBySession[id];
+    }
+  }
+
+  saveContextCache(cache);
+}
+
+export function clearInjectedHashesForSession(sessionId: string): void {
+  const cache = loadContextCache();
+  if (cache.injectedHashesBySession) {
+    delete cache.injectedHashesBySession[sessionId];
+    saveContextCache(cache);
+  }
 }
 
 // ============================================
