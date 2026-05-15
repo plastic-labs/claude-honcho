@@ -19,16 +19,18 @@ export function pickFresh(
   const fresh: string[] = [];
   const freshHashes: string[] = [];
   let droppedCount = 0;
+  const seen = new Set(alreadyHashed);
 
   for (const line of lines) {
     const normalized = normalizeLine(line);
     const hash = hashLine(normalized);
-    if (alreadyHashed.has(hash)) {
+    if (seen.has(hash)) {
       droppedCount = droppedCount + 1;
       continue;
     }
     fresh.push(line);
     freshHashes.push(hash);
+    seen.add(hash);
     if (fresh.length >= limit) {
       break;
     }
