@@ -8,6 +8,45 @@ function sanitizeForSessionName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
+/** A cwd-based workspace routing rule.
+ *  Used when one Claude Code install spans multiple Honcho workspaces (e.g.
+ *  work projects vs personal projects vs experiments), and which workspace
+ *  to use depends on which directory you're working in. */
+export interface WorkspaceRule {
+  /** cwd prefix that triggers this rule. Supports leading `~` for $HOME.
+   *  Matched as a prefix (full path or path + `/`), not a glob. */
+  cwdPrefix: string;
+  /** Workspace name to use when this rule's cwdPrefix matches the active cwd. */
+  workspace: string;
+}
+
+function expandHome(p: string): string {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
+  return p;
+}
+
+/** Resolve the active workspace from cwd-based rules.
+ *  Rules are checked in order; first matching `cwdPrefix` wins.
+ *  Returns `null` when no rule matches, so callers can fall through to
+ *  the existing host/env/default workspace resolution chain. */
+export function resolveWorkspaceFromCwd(
+  cwd: string,
+  rules?: WorkspaceRule[],
+): string | null {
+  if (!rules || rules.length === 0) return null;
+  const normalized = cwd.replace(/\\/g, "/").replace(/\/+$/, "");
+  for (const rule of rules) {
+    const prefix = expandHome(rule.cwdPrefix)
+      .replace(/\\/g, "/")
+      .replace(/\/+$/, "");
+    if (normalized === prefix || normalized.startsWith(prefix + "/")) {
+      return rule.workspace;
+    }
+  }
+  return null;
+}
+
 export interface MessageUploadConfig {
   /** Truncate user messages to this many tokens (undefined = no limit) */
   maxUserTokens?: number;
@@ -180,6 +219,10 @@ interface HonchoFileConfig {
    *  ignoring host-specific blocks. When false (default), each host
    *  uses its own block and flat fields are fallbacks only. */
   globalOverride?: boolean;
+  /** cwd-based workspace routing rules. Checked in order; first match wins.
+   *  Takes precedence over globalOverride, hostBlock, env, and defaults.
+   *  When no rule matches, falls through to the existing resolution chain. */
+  workspaceRules?: WorkspaceRule[];
   // Legacy flat fields (read-only fallbacks when no hosts block)
   cursorPeer?: string;
   claudePeer?: string;
@@ -292,7 +335,14 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     ?? raw.hosts?.[host.replace(/_/g, "-")]
     ?? raw.hosts?.[host.replace(/-/g, "_")];
 
-  if (raw.globalOverride === true) {
+  // cwd-based routing has highest priority. Falls through to the existing
+  // chain when no rule matches (so single-workspace setups are unaffected).
+  const cwdWorkspace = resolveWorkspaceFromCwd(process.cwd(), raw.workspaceRules);
+
+  if (cwdWorkspace !== null) {
+    workspace = cwdWorkspace;
+    aiPeer = hostBlock?.aiPeer ?? raw.aiPeer ?? DEFAULT_AI_PEER[host];
+  } else if (raw.globalOverride === true) {
     // Global override: flat fields apply to ALL hosts
     workspace = raw.workspace ?? DEFAULT_WORKSPACE[host];
     aiPeer = raw.aiPeer ?? hostBlock?.aiPeer ?? DEFAULT_AI_PEER[host];
