@@ -2,15 +2,18 @@
 
 All notable changes to claude-honcho will be documented in this file.
 
-## [Unreleased]
+## [0.2.5] - 2026-05-26
 
 ### Changed
 
-- User prompts are now written to Honcho in real time on `UserPromptSubmit` instead of being queued for `SessionEnd` flush. Mirrors the existing fire-and-forget pattern used by `PostToolUse` and `Stop`.
+- User prompts are now written to Honcho in real time on `UserPromptSubmit` instead of being queued for `SessionEnd` flush.
+- The `SessionStart` hook now runs asynchronously, so session startup no longer blocks on Honcho cache warming. First-turn context may be empty and arrives on the following turn.
+- User-prompt upload is now best-effort: a single attempt with no SDK retries (`maxRetries: 0`). Transient failures are logged and dropped rather than retried or persisted.
 
 ### Fixed
 
 - Eliminated a duplication bug where repeated `SessionEnd` failures (12s timeout, double-fire) caused queued prompts to be re-uploaded indefinitely.
+- Hardened the `UserPromptSubmit` upload path: the full Honcho SDK interaction (session/peer setup + `addMessages`) is wrapped in try/catch so a transient failure can no longer abort context retrieval for that turn.
 
 ### Removed
 

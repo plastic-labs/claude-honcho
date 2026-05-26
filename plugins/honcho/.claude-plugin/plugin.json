@@ -1,6 +1,6 @@
 {
   "name": "honcho",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Persistent memory for Claude Code sessions using Honcho by Plastic Labs",
   "author": {
     "name": "Plastic Labs",
