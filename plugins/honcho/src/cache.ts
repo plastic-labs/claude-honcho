@@ -1,12 +1,11 @@
 import { homedir } from "os";
 import { join } from "path";
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { getContextRefreshConfig, getLocalContextConfig } from "./config.js";
 
 const CACHE_DIR = join(homedir(), ".honcho");
 const ID_CACHE_FILE = join(CACHE_DIR, "cache.json");
 const CONTEXT_CACHE_FILE = join(CACHE_DIR, "context-cache.json");
-const MESSAGE_QUEUE_FILE = join(CACHE_DIR, "message-queue.jsonl");
 const CLAUDE_CONTEXT_FILE = join(CACHE_DIR, "claude-context.md");
 
 // Ensure cache directory exists
@@ -243,82 +242,6 @@ export function resetMessageCount(): void {
   cache.messageCount = 0;
   cache.lastRefreshMessageCount = 0;
   saveContextCache(cache);
-}
-
-// ============================================
-// Message Queue - local file for reliability
-// ============================================
-
-interface QueuedMessage {
-  content: string;
-  peerId: string;
-  cwd: string;
-  timestamp: string;
-  uploaded?: boolean;
-  instanceId?: string; // Claude Code instance for parallel session support
-}
-
-export function queueMessage(content: string, peerId: string, cwd: string, instanceId?: string): void {
-  ensureCacheDir();
-  const message: QueuedMessage = {
-    content,
-    peerId,
-    cwd,
-    timestamp: new Date().toISOString(),
-    uploaded: false,
-    instanceId: instanceId || getClaudeInstanceId() || undefined,
-  };
-  appendFileSync(MESSAGE_QUEUE_FILE, JSON.stringify(message) + "\n");
-}
-
-export function getQueuedMessages(forCwd?: string): QueuedMessage[] {
-  ensureCacheDir();
-  if (!existsSync(MESSAGE_QUEUE_FILE)) {
-    return [];
-  }
-  try {
-    const content = readFileSync(MESSAGE_QUEUE_FILE, "utf-8");
-    const lines = content.split("\n").filter((line) => line.trim());
-    const messages = lines.map((line) => JSON.parse(line)).filter((msg) => !msg.uploaded);
-    // Filter by cwd if specified
-    if (forCwd) {
-      return messages.filter((msg) => msg.cwd === forCwd);
-    }
-    return messages;
-  } catch {
-    return [];
-  }
-}
-
-export function clearMessageQueue(): void {
-  ensureCacheDir();
-  writeFileSync(MESSAGE_QUEUE_FILE, "");
-}
-
-export function markMessagesUploaded(forCwd?: string): void {
-  if (!forCwd) {
-    // Clear all
-    clearMessageQueue();
-    return;
-  }
-  // Only remove messages for the specified cwd, keep others
-  ensureCacheDir();
-  if (!existsSync(MESSAGE_QUEUE_FILE)) return;
-  try {
-    const content = readFileSync(MESSAGE_QUEUE_FILE, "utf-8");
-    const lines = content.split("\n").filter((line) => line.trim());
-    const remaining = lines.filter((line) => {
-      try {
-        const msg = JSON.parse(line);
-        return msg.cwd !== forCwd;
-      } catch {
-        return false;
-      }
-    });
-    writeFileSync(MESSAGE_QUEUE_FILE, remaining.join("\n") + (remaining.length ? "\n" : ""));
-  } catch {
-    // ignore
-  }
 }
 
 // ============================================
@@ -571,7 +494,6 @@ export function clearAllCaches(): void {
   ensureCacheDir();
   if (existsSync(ID_CACHE_FILE)) writeFileSync(ID_CACHE_FILE, "{}");
   if (existsSync(CONTEXT_CACHE_FILE)) writeFileSync(CONTEXT_CACHE_FILE, "{}");
-  if (existsSync(MESSAGE_QUEUE_FILE)) writeFileSync(MESSAGE_QUEUE_FILE, "");
   if (existsSync(GIT_STATE_FILE)) writeFileSync(GIT_STATE_FILE, "{}");
   // Don't clear claude-context.md - that's valuable history
 }

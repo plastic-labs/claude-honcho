@@ -2,6 +2,20 @@
 
 All notable changes to claude-honcho will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- User prompts are now written to Honcho in real time on `UserPromptSubmit` instead of being queued for `SessionEnd` flush. Mirrors the existing fire-and-forget pattern used by `PostToolUse` and `Stop`.
+
+### Fixed
+
+- Eliminated a duplication bug where repeated `SessionEnd` failures (12s timeout, double-fire) caused queued prompts to be re-uploaded indefinitely.
+
+### Removed
+
+- The local `~/.honcho/message-queue.jsonl` queue file is no longer used and can be deleted from user machines to reclaim disk. The plugin will not auto-delete it.
+
 ## [0.2.4] - 2026-04-01
 
 ### Added
