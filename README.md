@@ -190,6 +190,84 @@ The honcho plugin provides these tools via MCP:
 
 All configuration lives in a single global file at `~/.honcho/config.json`. You can edit it directly, use the `/honcho:config` skill, or use the `set_config` MCP tool. Environment variables work for initial setup but the config file takes precedence once it exists.
 
+### Per-Project Config (repo-local `.honcho/`)
+
+Drop a `.honcho/config.json` inside a repository to override the global config **for that project only** — useful when you keep separate Honcho workspaces per project and don't want unrelated work mixing into the same memory.
+
+The repo-local file uses the same schema as the global one, and **only the fields you set are overridden** — everything else (your `apiKey`, `endpoint`, `peerName`, …) is inherited from `~/.honcho/config.json`. The common case is just the workspace:
+
+```jsonc
+// <your-repo>/.honcho/config.json
+{ "workspace": "my-research-project" }
+```
+
+With this in place, every session you run inside that repo (and its subfolders) records its memory in `my-research-project` instead of your default workspace. Notes:
+
+- **Subfolders are covered automatically.** You only need **one** `.honcho/` at the project root — the plugin walks up from the working directory to find it. Even when Claude Code's working directory is a subfolder (e.g. `…/research/branding-research`), the whole project records to one session named after the project root, instead of a separate session per subfolder. Want a specific session name? Add `"sessionName": "my-project"`. Need a subtree to be its own workspace/session? Drop another `.honcho/` there — the nearest one wins.
+- **Nested git submodules can split out.** If your project has submodules (nested git repos) and you want each tracked as its own session, add `"splitSubmodules": true` to the project-root `.honcho/config.json`. Each submodule then gets its own session (named after the submodule folder) while **inheriting the project's workspace** — no `.honcho` needed inside the submodules. A submodule that *does* have its own `.honcho/` keeps full control (its own workspace and session).
+- **Secrets stay global.** Keep your `apiKey` in `~/.honcho/config.json` so it never lands in a repo. The repo file only needs the overrides — which means it's safe to commit and share across machines.
+- **Read-only to the plugin.** The plugin never writes to the repo file — you manage it. `/honcho:status` shows when a repo-local config is active; while one is active, `set_config` won't modify it and points you to edit the repo file directly.
+- **Caches are shared** in `~/.honcho/` — context hints are keyed by workspace, and per-project session/git state by directory — so nothing collides between projects.
+
+**Full example — every repo-local setting.** All fields are optional; anything you omit is inherited from `~/.honcho/config.json`. The common case is just `{ "workspace": "my-project" }` — this kitchen-sink version exists only to show everything that can be overridden per project:
+
+```jsonc
+// <your-repo>/.honcho/config.json
+{
+  // --- Identity & routing (the usual reason for a repo-local config) ---
+  "workspace": "my-research-project",   // record this project's memory in its own workspace
+  "peerName": "alice",                  // your identity (usually inherited from global)
+  "aiPeer": "claude",                   // the AI's identity in this workspace
+
+  // --- Session shaping ---
+  "sessionStrategy": "per-directory",   // "per-directory" | "git-branch" | "chat-instance"
+  "sessionPeerPrefix": true,            // prefix session names with peerName
+  "sessionName": "my-research-project", // pin ONE session name for the whole project tree
+                                        //   (if set, this wins over splitSubmodules below)
+  "splitSubmodules": true,              // nested git submodules each get their own session
+                                        //   (ignored when sessionName is set)
+
+  // --- Behavior ---
+  "observationMode": "unified",         // "unified" | "directional"
+  "reasoningLevel": "low",              // "minimal" | "low" | "medium" | "high" | "max"
+  "saveMessages": true,                 // set false to stop saving messages for this project
+  "enabled": true,                      // set false to disable the plugin in this project
+  "logging": true,                      // file logging to ~/.honcho/
+
+  // --- Message upload limits ---
+  "messageUpload": {
+    "maxUserTokens": null,              // truncate user messages (null = no limit)
+    "maxAssistantTokens": null,         // truncate assistant messages (null = no limit)
+    "summarizeAssistant": false         // summarize instead of sending full assistant text
+  },
+
+  // --- Context retrieval ---
+  "contextRefresh": {
+    "messageThreshold": 30,             // refresh injected context every N messages
+    "ttlSeconds": 300,                  // cache TTL for injected context
+    "skipDialectic": false              // skip dialectic chat() calls in the user-prompt hook
+  },
+
+  // --- Local context file ---
+  "localContext": { "maxEntries": 50 },
+
+  // --- Point this project at a different Honcho instance ---
+  "endpoint": { "environment": "production" }, // or { "baseUrl": "http://your-server:8000" }
+
+  // --- Secret (optional) ---
+  // Prefer leaving apiKey OUT so it's inherited from ~/.honcho/config.json and never
+  // committed. Only set it here for a fully self-contained, instance-specific config.
+  // "apiKey": "hch-..."
+}
+```
+
+> **Enabling the per-project workspace + submodule split** (the headline use case) needs only:
+> ```jsonc
+> // <project-root>/.honcho/config.json
+> { "workspace": "my-research-project", "splitSubmodules": true }
+> ```
+> Everything in that tree records to `my-research-project`, and each nested git submodule gets its own session within it.
+
 ### Config File Reference
 
 ```jsonc

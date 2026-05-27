@@ -18,6 +18,9 @@ import {
   getEndpointInfo,
   getKnownHosts,
   setDetectedHost,
+  setLocalConfigContext,
+  hasLocalConfig,
+  getLocalConfigPath,
   type HonchoCLAUDEConfig,
   type SessionStrategy,
   type ReasoningLevel,
@@ -175,6 +178,11 @@ function handleGetConfig(cwd: string) {
     warnings.push("Config has flat 'workspace' alongside hosts block but no 'globalOverride' set. The flat field is unused. Set globalOverride=true to apply it globally, or remove it.");
   }
 
+  // Repo-local override notice — the resolved values above already reflect it.
+  if (hasLocalConfig()) {
+    warnings.push(`Repo-local config active at ${getLocalConfigPath()} — its settings override the global config for this project. Edit that file to change project settings.`);
+  }
+
   // Pre-render the status card
   const strategyLabels: Record<string, string> = {
     "per-directory": "per directory",
@@ -203,7 +211,7 @@ function handleGetConfig(cwd: string) {
   return {
     content: [{
       type: "text",
-      text: JSON.stringify({ card, resolved, current, host: hostInfo, warnings, configPath: cfgPath, configExists: cfgExists }, null, 2),
+      text: JSON.stringify({ card, resolved, current, host: hostInfo, warnings, configPath: cfgPath, configExists: cfgExists, localConfig: { active: hasLocalConfig(), path: getLocalConfigPath() } }, null, 2),
     }],
   };
 }
@@ -709,6 +717,18 @@ export async function runMcpServer(): Promise<void> {
     const { name, arguments: args } = request.params;
     const cwd = getLastActiveCwd() || process.cwd();
 
+    // Honor a repo-local .honcho/config.json for this request, if present.
+    // Resolved synchronously (no await) so a concurrent request cannot change
+    // the module-level local-config context before we capture activeConfig.
+    // Default path (no repo-local config) reuses the startup config + client,
+    // so original behavior is unchanged.
+    setLocalConfigContext(cwd);
+    const localActive = hasLocalConfig();
+    const activeConfig = localActive ? (loadConfig() ?? config) : config;
+    const activeHoncho = localActive
+      ? new Honcho(getHonchoClientOptions(activeConfig))
+      : honcho;
+
     // ── Config tools (no Honcho session needed) ──
 
     if (name === "get_config") {
@@ -716,6 +736,20 @@ export async function runMcpServer(): Promise<void> {
     }
 
     if (name === "set_config") {
+      // Repo-local config is user-managed and read-only to the plugin.
+      if (localActive) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: false,
+              localConfig: true,
+              configPath: getLocalConfigPath(),
+              message: "A repo-local Honcho config is active for this project; the plugin treats it as read-only, so set_config made no change. Edit this repo's .honcho/config.json directly to change its settings.",
+            }, null, 2),
+          }],
+        };
+      }
       return handleSetConfig(args as Record<string, unknown>);
     }
 
@@ -723,12 +757,12 @@ export async function runMcpServer(): Promise<void> {
 
     if (name === "list_conclusions" || name === "delete_conclusion") {
       try {
-        const observationMode = getObservationMode(config);
+        const observationMode = getObservationMode(activeConfig);
         // unified: (observer=user, observed=user); directional: (observer=aiPeer, observed=user)
         const scopePeer = observationMode === "unified"
-          ? await honcho.peer(config.peerName)
-          : await honcho.peer(config.aiPeer);
-        const conclusionScope = scopePeer.conclusionsOf(config.peerName);
+          ? await activeHoncho.peer(activeConfig.peerName)
+          : await activeHoncho.peer(activeConfig.aiPeer);
+        const conclusionScope = scopePeer.conclusionsOf(activeConfig.peerName);
 
         if (name === "list_conclusions") {
           const page = (args?.page as number) ?? 1;
@@ -766,16 +800,16 @@ export async function runMcpServer(): Promise<void> {
     const sessionName = getSessionName(cwd);
 
     try {
-      const session = await honcho.session(sessionName);
-      const observationMode = getObservationMode(config);
+      const session = await activeHoncho.session(sessionName);
+      const observationMode = getObservationMode(activeConfig);
 
       // unified: user observes self — all ops go through userPeer.
       // directional: aiPeer observes user — ops use aiPeer with target.
-      const userPeer = await honcho.peer(config.peerName);
-      const aiPeer = observationMode === "directional" ? await honcho.peer(config.aiPeer) : null;
+      const userPeer = await activeHoncho.peer(activeConfig.peerName);
+      const aiPeer = observationMode === "directional" ? await activeHoncho.peer(activeConfig.aiPeer) : null;
       const activePeer = observationMode === "unified" ? userPeer : aiPeer!;
-      const chatTarget = observationMode === "unified" ? undefined : config.peerName;
-      const contextTarget = observationMode === "unified" ? undefined : config.peerName;
+      const chatTarget = observationMode === "unified" ? undefined : activeConfig.peerName;
+      const contextTarget = observationMode === "unified" ? undefined : activeConfig.peerName;
 
       switch (name) {
         case "search": {
@@ -784,7 +818,7 @@ export async function runMcpServer(): Promise<void> {
           const scope = (args?.scope as string) ?? "session";
 
           const messages = scope === "workspace"
-            ? await honcho.search(query, { limit })
+            ? await activeHoncho.search(query, { limit })
             : await session.search(query, { limit });
 
           const results = messages.map((msg: any) => ({
@@ -805,7 +839,7 @@ export async function runMcpServer(): Promise<void> {
 
         case "chat": {
           const query = args?.query as string;
-          const reasoningLevel = (args?.reasoning_level as string) ?? config.reasoningLevel ?? "medium";
+          const reasoningLevel = (args?.reasoning_level as string) ?? activeConfig.reasoningLevel ?? "medium";
 
           const response = await activePeer.chat(query, {
             ...(chatTarget ? { target: chatTarget } : {}),
@@ -826,7 +860,7 @@ export async function runMcpServer(): Promise<void> {
         case "create_conclusion": {
           const content = args?.content as string;
 
-          const conclusions = await activePeer.conclusionsOf(config.peerName).create({
+          const conclusions = await activePeer.conclusionsOf(activeConfig.peerName).create({
             content,
             sessionId: session.id,
           });

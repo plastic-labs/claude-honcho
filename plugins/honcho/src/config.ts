@@ -1,5 +1,5 @@
 import { homedir } from "os";
-import { join, basename } from "path";
+import { join, basename, dirname, resolve } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { captureGitState } from "./git.js";
 import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
@@ -148,6 +148,14 @@ export async function initHook(): Promise<void> {
   try { input = JSON.parse(stdinText || "{}"); } catch { process.exit(0); }
   if (input.cursor_version) process.exit(0);
   setDetectedHost(detectHost(input));
+
+  // Register repo-local config (if the working tree has a .honcho/config.json),
+  // mirroring the cwd resolution used by the hook handlers. No-op when absent.
+  const wsRoots = input.workspace_roots;
+  const cwd = (Array.isArray(wsRoots) && typeof wsRoots[0] === "string" ? wsRoots[0] : undefined)
+    ?? (typeof input.cwd === "string" ? input.cwd : undefined)
+    ?? process.cwd();
+  setLocalConfigContext(cwd);
 }
 
 // ============================================
@@ -171,6 +179,10 @@ interface HonchoFileConfig {
   sessionStrategy?: SessionStrategy;
   /** Prefix session names with peerName (default: true, disable for solo use) */
   sessionPeerPrefix?: boolean;
+  /** Repo-local only: pin every session in this project tree to one fixed name. */
+  sessionName?: string;
+  /** Repo-local only: give each nested git repo (submodule) its own session. */
+  splitSubmodules?: boolean;
   /** Default reasoning level for Honcho dialectic calls (default: "medium") */
   reasoningLevel?: ReasoningLevel;
   /** Observation mode (default: "unified") */
@@ -202,6 +214,10 @@ export interface HonchoCLAUDEConfig {
   sessionStrategy?: SessionStrategy;
   /** Prefix session names with peerName (default: true, disable for solo use) */
   sessionPeerPrefix?: boolean;
+  /** Repo-local only: pin every session in this project tree to one fixed name. */
+  sessionName?: string;
+  /** Repo-local only: give each nested git repo (submodule) its own session (inherits workspace). */
+  splitSubmodules?: boolean;
   /** Map of directory path -> session name overrides */
   sessions?: Record<string, string>;
   /** Save messages to Honcho (default: true) */
@@ -270,12 +286,12 @@ export function loadConfig(host?: HonchoHost): HonchoCLAUDEConfig | null {
     try {
       const content = readFileSync(CONFIG_FILE, "utf-8");
       const raw = JSON.parse(content) as HonchoFileConfig;
-      return resolveConfig(raw, resolvedHost);
+      return applyLocalConfigOverrides(resolveConfig(raw, resolvedHost), resolvedHost);
     } catch {
       // Fall through to env-only config
     }
   }
-  return loadConfigFromEnv(resolvedHost);
+  return applyLocalConfigOverrides(loadConfigFromEnv(resolvedHost), resolvedHost);
 }
 
 function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDEConfig | null {
@@ -404,6 +420,167 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   return config;
 }
 
+// ============================================
+// Repo-local config overlay (extension)
+//
+// If a repository contains a `.honcho/config.json`, its fields override the
+// global ~/.honcho/config.json for that working tree. This is purely additive:
+// when no repo-local config is registered/found, every function below is a
+// no-op and global resolution is unchanged.
+//
+// The repo-local file is treated as READ-ONLY by the plugin — it is never
+// written to, and while it is active the plugin does not persist config to the
+// global file either (see saveConfig / setSessionForPath). An override can
+// therefore never leak into or corrupt the global config. Caches/logs continue
+// to live in ~/.honcho and are keyed by cwd, so they do not collide.
+// ============================================
+
+const LOCAL_CONFIG_FLAG = Symbol("honchoLocalConfig");
+
+/** cwd-derived path to the active repo-local `.honcho` dir, or null. */
+let _localConfigDir: string | null = null;
+
+/**
+ * Walk up from `startCwd` to find the nearest repo-local `.honcho/config.json`.
+ * Never matches the global `~/.honcho` directory.
+ */
+export function findLocalConfigDir(startCwd: string): string | null {
+  try {
+    const home = homedir();
+    let dir = resolve(startCwd);
+    for (let i = 0; i < 64; i++) {
+      // Never treat the global ~/.honcho as a repo-local config.
+      if (dir !== home && existsSync(join(dir, ".honcho", "config.json"))) {
+        return join(dir, ".honcho");
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break; // reached filesystem root
+      dir = parent;
+    }
+  } catch {
+    // ignore — fall back to global config
+  }
+  return null;
+}
+
+/**
+ * Walk up from `startCwd` to find the nearest git repository root (a dir with a
+ * `.git` file or directory — submodules use a `.git` file), without going above
+ * `stopAtDir` (the project root). Returns null if none is found within bounds.
+ * Used by `splitSubmodules` to anchor each nested git repo to its own session.
+ */
+export function findNearestGitRoot(startCwd: string, stopAtDir: string): string | null {
+  try {
+    const stop = resolve(stopAtDir);
+    let dir = resolve(startCwd);
+    for (let i = 0; i < 64; i++) {
+      if (existsSync(join(dir, ".git"))) return dir; // .git file (submodule) or dir
+      if (dir === stop) break;                        // don't search above the project root
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    // ignore — fall back to the project root anchor
+  }
+  return null;
+}
+
+/** Register the working directory used to discover a repo-local config. */
+export function setLocalConfigContext(cwd: string | null | undefined): void {
+  _localConfigDir = cwd ? findLocalConfigDir(cwd) : null;
+}
+
+/** Explicitly set (or clear) the active repo-local `.honcho` dir. */
+export function setLocalConfigDir(dir: string | null): void {
+  _localConfigDir = dir;
+}
+
+export function getLocalConfigDir(): string | null {
+  return _localConfigDir;
+}
+
+export function getLocalConfigPath(): string | null {
+  return _localConfigDir ? join(_localConfigDir, "config.json") : null;
+}
+
+export function hasLocalConfig(): boolean {
+  const p = getLocalConfigPath();
+  return !!p && existsSync(p);
+}
+
+/** True if a resolved config was produced from a repo-local overlay. */
+export function isLocalConfig(config: HonchoCLAUDEConfig | null | undefined): boolean {
+  return !!config && (config as any)[LOCAL_CONFIG_FLAG] === true;
+}
+
+function markLocalConfig(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
+  // Non-enumerable so it is never serialized by JSON.stringify (get_config) and
+  // never written to disk by saveConfig.
+  Object.defineProperty(config, LOCAL_CONFIG_FLAG, {
+    value: true,
+    enumerable: false,
+    configurable: true,
+  });
+  return config;
+}
+
+// Fields a repo-local config may override. apiKey/endpoint are included so a
+// repo can point at a different instance, but the common case is `workspace`.
+// `sessions` and `globalOverride` are intentionally excluded (global-only).
+const LOCAL_OVERRIDABLE_FIELDS = [
+  "apiKey", "peerName", "workspace", "aiPeer",
+  "sessionStrategy", "sessionPeerPrefix", "sessionName", "splitSubmodules", "saveMessages",
+  "reasoningLevel", "observationMode",
+  "messageUpload", "contextRefresh", "endpoint", "localContext",
+  "enabled", "logging",
+] as const;
+
+/** Read a field from the repo-local raw file, host block taking precedence (mirrors resolveConfig). */
+function pickLocalField(raw: HonchoFileConfig, host: HonchoHost, key: string): unknown {
+  const hostBlock = raw.hosts?.[host]
+    ?? raw.hosts?.[host.replace(/_/g, "-")]
+    ?? raw.hosts?.[host.replace(/-/g, "_")];
+  const fromHost = hostBlock ? (hostBlock as Record<string, unknown>)[key] : undefined;
+  return fromHost ?? (raw as Record<string, unknown>)[key];
+}
+
+/**
+ * Overlay the active repo-local config (if any) on top of the resolved global
+ * config. Returns `base` unchanged when there is no repo-local config, so the
+ * default (global-only) path is preserved exactly.
+ */
+function applyLocalConfigOverrides(
+  base: HonchoCLAUDEConfig | null,
+  host: HonchoHost
+): HonchoCLAUDEConfig | null {
+  if (!hasLocalConfig()) return base;
+
+  let raw: HonchoFileConfig;
+  try {
+    raw = JSON.parse(readFileSync(getLocalConfigPath()!, "utf-8")) as HonchoFileConfig;
+  } catch {
+    return base; // malformed repo-local config — ignore it, keep global behavior
+  }
+
+  // Start from the global config when present (so apiKey/endpoint/etc. inherit);
+  // otherwise build a standalone config from the local file using the existing
+  // resolver (supports a fully self-contained repo-local config).
+  const effective: HonchoCLAUDEConfig | null = base
+    ? { ...base }
+    : resolveConfig(raw, host);
+  if (!effective) return base; // no apiKey anywhere → cannot form a config
+
+  for (const key of LOCAL_OVERRIDABLE_FIELDS) {
+    const value = pickLocalField(raw, host, key);
+    if (value !== undefined) {
+      (effective as any)[key] = value;
+    }
+  }
+
+  return markLocalConfig(effective);
+}
+
 /**
  * Write-back: read-merge-write to avoid clobbering other hosts' config.
  *
@@ -418,6 +595,11 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
  * user's root-level defaults still apply until overridden per-host.
  */
 export function saveConfig(config: HonchoCLAUDEConfig): void {
+  // Never persist a repo-local–overlaid config to the global file: that would
+  // leak the per-repo override (workspace, peer, …) into ~/.honcho/config.json.
+  // Repo-local config is user-managed by editing the repo's .honcho/config.json.
+  if (isLocalConfig(config)) return;
+
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
   }
@@ -537,9 +719,30 @@ export function getSessionName(cwd: string, instanceId?: string): string {
   const config = loadConfig();
   const strategy = config?.sessionStrategy ?? "per-directory";
 
-  // Manual overrides only apply to per-directory strategy.
+  // Repo-local config: anchor session identity to the PROJECT ROOT (the folder
+  // that contains .honcho/), not Claude Code's transient working directory.
+  // Claude Code reports the cwd it is currently in, which may be a subfolder, so
+  // without this a single project would fragment into one session per subfolder.
+  // Anchoring keeps the whole project on one session, and bypasses the global
+  // per-cwd session map (keyed by absolute paths, possibly stale/unrelated).
+  // Granularity stays user-controlled: the nearest ancestor .honcho/ wins, so
+  // dropping another .honcho/ in a subtree carves out its own session there.
+  const localDir = hasLocalConfig() ? getLocalConfigDir() : null;
+  let anchorCwd = cwd;
+  if (localDir) {
+    const projectRoot = dirname(localDir);
+    // splitSubmodules (opt-in): anchor each nested git repo (submodule) to its
+    // own session, bounded to within the project root; otherwise the whole tree
+    // anchors to the project root. Workspace is unaffected — it's still resolved
+    // from the nearest .honcho, so submodules inherit the parent's workspace.
+    anchorCwd = config?.splitSubmodules
+      ? (findNearestGitRoot(cwd, projectRoot) ?? projectRoot)
+      : projectRoot;
+  }
+
+  // Manual per-cwd overrides only apply on the default (no repo-local) path.
   // For chat-instance and git-branch, the session name is always derived dynamically.
-  if (strategy === "per-directory") {
+  if (!localDir && strategy === "per-directory") {
     const configuredSession = getSessionForPath(cwd);
     if (configuredSession) {
       return configuredSession;
@@ -548,12 +751,21 @@ export function getSessionName(cwd: string, instanceId?: string): string {
 
   const usePrefix = config?.sessionPeerPrefix !== false; // default true
   const peerPart = config?.peerName ? sanitizeForSessionName(config.peerName) : "user";
-  const repoPart = sanitizeForSessionName(basename(cwd));
+
+  // An explicit `sessionName` in a repo-local config pins the whole project to
+  // one fixed session name (peer-prefixed unless disabled), regardless of cwd
+  // or strategy.
+  if (localDir && config?.sessionName) {
+    const pinned = sanitizeForSessionName(config.sessionName);
+    return usePrefix ? `${peerPart}-${pinned}` : pinned;
+  }
+
+  const repoPart = sanitizeForSessionName(basename(anchorCwd));
   const base = usePrefix ? `${peerPart}-${repoPart}` : repoPart;
 
   switch (strategy) {
     case "git-branch": {
-      const gitState = captureGitState(cwd);
+      const gitState = captureGitState(anchorCwd);
       if (gitState) {
         const branchPart = sanitizeForSessionName(gitState.branch);
         return `${base}-${branchPart}`;
@@ -575,6 +787,10 @@ export function getSessionName(cwd: string, instanceId?: string): string {
 }
 
 export function setSessionForPath(cwd: string, sessionName: string): void {
+  // While a repo-local config is active it is read-only and session names are
+  // deterministic, so we skip persistence. This also stops a per-repo override
+  // from ever being written into the global config via saveConfig().
+  if (hasLocalConfig()) return;
   const config = loadConfig();
   if (!config) return;
   if (!config.sessions) {

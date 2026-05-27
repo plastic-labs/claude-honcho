@@ -1,7 +1,7 @@
 import { homedir } from "os";
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "fs";
-import { getContextRefreshConfig, getLocalContextConfig } from "./config.js";
+import { getContextRefreshConfig, getLocalContextConfig, loadConfig } from "./config.js";
 
 const CACHE_DIR = join(homedir(), ".honcho");
 const ID_CACHE_FILE = join(CACHE_DIR, "cache.json");
@@ -117,12 +117,35 @@ export function getInstanceIdForCwd(cwd: string): string | null {
 // Context Cache - user + claude context with TTL
 // ============================================
 
+interface ContextCacheEntry { data: any; fetchedAt: number }
+
 interface ContextCache {
-  userContext?: { data: any; fetchedAt: number };
-  claudeContext?: { data: any; fetchedAt: number };
-  summaries?: { data: any; fetchedAt: number };
-  messageCount?: number; // Track messages since last refresh
+  // Injected-context snapshots keyed by workspace name, so concurrent sessions on
+  // different workspaces never read each other's cached context. (Writes/observations
+  // are already isolated per workspace; this scopes the read-side cache to match.)
+  userContextByWorkspace?: Record<string, ContextCacheEntry>;
+  claudeContextByWorkspace?: Record<string, ContextCacheEntry>;
+  // Legacy single-slot fields from before workspace scoping. No longer written;
+  // retained only so loadContextCache() doesn't strip them as ghosts on upgrade.
+  userContext?: ContextCacheEntry;
+  claudeContext?: ContextCacheEntry;
+  summaries?: ContextCacheEntry;
+  messageCount?: number; // messages since last refresh (global; affects refresh cadence only)
   lastRefreshMessageCount?: number; // Message count at last knowledge graph refresh
+}
+
+/**
+ * Workspace key for the context cache. Uses the resolved workspace (which already
+ * honors any repo-local .honcho override), so each project's injected context is
+ * cached separately. Falls back to a sentinel when config can't be loaded.
+ */
+function contextCacheKey(): string {
+  try {
+    const ws = loadConfig()?.workspace;
+    return ws && ws.trim() ? ws : "_global";
+  } catch {
+    return "_global";
+  }
 }
 
 // These are now configurable via config.json, with defaults in getContextRefreshConfig()
@@ -138,6 +161,7 @@ function getMessageRefreshThreshold(): number {
 
 // Known keys in ContextCache — anything else is a ghost from older versions
 const CONTEXT_CACHE_KNOWN_KEYS = new Set([
+  "userContextByWorkspace", "claudeContextByWorkspace",
   "userContext", "claudeContext", "summaries", "messageCount", "lastRefreshMessageCount",
 ]);
 
@@ -172,8 +196,9 @@ export function saveContextCache(cache: ContextCache): void {
 
 export function getCachedUserContext(): any | null {
   const cache = loadContextCache();
-  if (cache.userContext && Date.now() - cache.userContext.fetchedAt < getContextTTL()) {
-    return cache.userContext.data;
+  const entry = cache.userContextByWorkspace?.[contextCacheKey()];
+  if (entry && Date.now() - entry.fetchedAt < getContextTTL()) {
+    return entry.data;
   }
   return null;
 }
@@ -181,33 +206,37 @@ export function getCachedUserContext(): any | null {
 /** Return cached context even if expired (for timeout fallback) */
 export function getStaleCachedUserContext(): any | null {
   const cache = loadContextCache();
-  return cache.userContext?.data ?? null;
+  return cache.userContextByWorkspace?.[contextCacheKey()]?.data ?? null;
 }
 
 export function setCachedUserContext(data: any): void {
   const cache = loadContextCache();
-  cache.userContext = { data, fetchedAt: Date.now() };
+  if (!cache.userContextByWorkspace) cache.userContextByWorkspace = {};
+  cache.userContextByWorkspace[contextCacheKey()] = { data, fetchedAt: Date.now() };
   saveContextCache(cache);
 }
 
 export function getCachedClaudeContext(): any | null {
   const cache = loadContextCache();
-  if (cache.claudeContext && Date.now() - cache.claudeContext.fetchedAt < getContextTTL()) {
-    return cache.claudeContext.data;
+  const entry = cache.claudeContextByWorkspace?.[contextCacheKey()];
+  if (entry && Date.now() - entry.fetchedAt < getContextTTL()) {
+    return entry.data;
   }
   return null;
 }
 
 export function setCachedClaudeContext(data: any): void {
   const cache = loadContextCache();
-  cache.claudeContext = { data, fetchedAt: Date.now() };
+  if (!cache.claudeContextByWorkspace) cache.claudeContextByWorkspace = {};
+  cache.claudeContextByWorkspace[contextCacheKey()] = { data, fetchedAt: Date.now() };
   saveContextCache(cache);
 }
 
 export function isContextCacheStale(): boolean {
   const cache = loadContextCache();
-  if (!cache.userContext) return true;
-  return Date.now() - cache.userContext.fetchedAt >= getContextTTL();
+  const entry = cache.userContextByWorkspace?.[contextCacheKey()];
+  if (!entry) return true;
+  return Date.now() - entry.fetchedAt >= getContextTTL();
 }
 
 // Track message count for threshold-based refresh
@@ -589,16 +618,18 @@ export function clearPeerCache(): void {
   saveIdCache(cache);
 }
 
-/** Clear only userContext from the context cache */
+/** Clear cached user context (all workspaces + legacy slot). */
 export function clearUserContextOnly(): void {
   const cache = loadContextCache();
+  cache.userContextByWorkspace = {};
   delete cache.userContext;
   saveContextCache(cache);
 }
 
-/** Clear only claudeContext from the context cache */
+/** Clear cached claude context (all workspaces + legacy slot). */
 export function clearClaudeContextOnly(): void {
   const cache = loadContextCache();
+  cache.claudeContextByWorkspace = {};
   delete cache.claudeContext;
   saveContextCache(cache);
 }

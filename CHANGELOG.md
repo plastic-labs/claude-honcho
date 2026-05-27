@@ -2,6 +2,18 @@
 
 All notable changes to claude-honcho will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Repo-local config overlay — a `.honcho/config.json` inside a repository overrides the global `~/.honcho/config.json` for that working tree, so you can route a project's memory to a dedicated workspace and keep unrelated observations out of it
+  - Discovered by walking up from the session's working directory (never matches the global `~/.honcho`); honored by all hooks and the MCP server
+  - Overlay semantics: only the fields you set are overridden; `apiKey`, `endpoint`, and other fields inherit from the global config, so secrets need not live in the repo
+  - Read-only to the plugin: the repo file is never written, and a repo-local override can never leak into or modify the global config; `get_config` reports when a repo-local config is active, and while one is active `set_config` won't modify it — it points you to edit the repo file directly
+  - Session anchoring: with a repo-local config, the session name is anchored to the project root (the folder containing `.honcho/`) instead of the current working directory, so subfolders of a project share one session instead of fragmenting; an optional `sessionName` field pins an exact name, and the nearest-ancestor `.honcho/` wins so placement controls granularity
+  - `splitSubmodules` (opt-in): when set in a project's `.honcho`, each nested git repo (submodule) gets its own session named after the submodule while inheriting the parent's workspace — keeping submodule work separate without placing a `.honcho` in each submodule; a submodule with its own `.honcho` still takes precedence
+  - Injected-context cache is scoped per workspace, so concurrent sessions on different workspaces never read each other's at-prompt context hint
+
 ## [0.2.4] - 2026-04-01
 
 ### Added
