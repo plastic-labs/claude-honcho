@@ -244,7 +244,15 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return true;
 }
 
-const CONFIG_DIR = join(homedir(), ".honcho");
+// state directory is overridable via HONCHO_HOME so a single install can give each
+// directory tree (e.g. work vs personal) its own config + caches + queue + logs.
+export function getHonchoHome(): string {
+  const env = process.env.HONCHO_HOME?.trim();
+  if (env) return env.startsWith("~/") ? join(homedir(), env.slice(2)) : env;
+  return join(homedir(), ".honcho");
+}
+
+const CONFIG_DIR = getHonchoHome();
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 export function getConfigDir(): string {

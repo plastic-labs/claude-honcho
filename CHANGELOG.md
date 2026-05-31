@@ -4,6 +4,10 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `HONCHO_HOME` env var overrides the plugin's state directory (default `~/.honcho`), so a single install can give different directory trees their own config, caches, queue, and logs (e.g. work vs personal projects). A leading `~/` is expanded to `$HOME`; unset / empty / whitespace falls through to `~/.honcho` unchanged, so existing setups are unaffected. Logs (`activity.log`, `verbose.log`) honor it too, keeping all state co-located. Covered by `getHonchoHome` unit tests and subprocess e2e tests that assert real state-file relocation and co-location.
+
 ### Changed
 
 - User prompts are now written to Honcho in real time on `UserPromptSubmit` instead of being queued for `SessionEnd` flush. Mirrors the existing fire-and-forget pattern used by `PostToolUse` and `Stop`.

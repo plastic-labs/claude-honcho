@@ -11,7 +11,7 @@
  */
 
 import { arrows, symbols } from "./unicode.js";
-import { isLoggingEnabled } from "./config.js";
+import { isLoggingEnabled, getHonchoHome } from "./config.js";
 
 // Plain text (no ANSI) for systemMessage — shown in Claude Code's UI
 const sym = {
@@ -101,14 +101,13 @@ export function addSystemMessage(existingJson: any, message: string): any {
 // printing verbose data to stdout instead — use formatVerboseBlock().
 // ============================================
 
-import { homedir } from "os";
 import { join } from "path";
 import { appendFileSync, mkdirSync, existsSync, writeFileSync } from "fs";
 
-const VERBOSE_LOG = join(homedir(), ".honcho", "verbose.log");
+const VERBOSE_LOG = join(getHonchoHome(), "verbose.log");
 
 function ensureVerboseLog(): void {
-  const dir = join(homedir(), ".honcho");
+  const dir = getHonchoHome();
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }

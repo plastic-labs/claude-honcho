@@ -1,9 +1,8 @@
-import { homedir } from "os";
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { getContextRefreshConfig, getLocalContextConfig } from "./config.js";
+import { getContextRefreshConfig, getLocalContextConfig, getHonchoHome } from "./config.js";
 
-const CACHE_DIR = join(homedir(), ".honcho");
+const CACHE_DIR = getHonchoHome();
 const ID_CACHE_FILE = join(CACHE_DIR, "cache.json");
 const CONTEXT_CACHE_FILE = join(CACHE_DIR, "context-cache.json");
 const CLAUDE_CONTEXT_FILE = join(CACHE_DIR, "claude-context.md");
