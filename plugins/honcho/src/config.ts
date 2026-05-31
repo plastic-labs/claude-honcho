@@ -266,14 +266,17 @@ export function getHonchoHome(): string {
 const CONFIG_DIR = getHonchoHome();
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
+/** absolute path to the honcho state directory (see getHonchoHome). */
 export function getConfigDir(): string {
   return CONFIG_DIR;
 }
 
+/** absolute path to config.json inside the honcho state directory. */
 export function getConfigPath(): string {
   return CONFIG_FILE;
 }
 
+/** whether config.json exists in the honcho state directory. */
 export function configExists(): boolean {
   return existsSync(CONFIG_FILE);
 }
