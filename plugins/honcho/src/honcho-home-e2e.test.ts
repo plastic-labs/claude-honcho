@@ -10,6 +10,7 @@ import { join, dirname } from "path";
 
 const PROBE = join(import.meta.dir, "honcho-home-probe.ts");
 const tmps: string[] = [];
+/** make a unique throwaway temp dir for one e2e scenario, tracked for cleanup. */
 function freshDir(tag: string): string {
   const d = mkdtempSync(join(tmpdir(), `hh-${tag}-`));
   tmps.push(d);
@@ -19,6 +20,7 @@ afterAll(() => {
   for (const d of tmps) rmSync(d, { recursive: true, force: true });
 });
 
+/** spawn the probe in a child with the given HOME/HONCHO_HOME env and parse the json on its last stdout line. */
 function runProbe(env: Record<string, string | undefined>): {
   configDir: string; configPath: string; logPath: string; verbosePath: string;
   cacheFileWritten: boolean; logFileWritten: boolean;

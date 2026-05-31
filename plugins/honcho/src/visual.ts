@@ -106,6 +106,7 @@ import { appendFileSync, mkdirSync, existsSync, writeFileSync } from "fs";
 
 const VERBOSE_LOG = join(getHonchoHome(), "verbose.log");
 
+/** ensure the honcho state directory exists for verbose logs. */
 function ensureVerboseLog(): void {
   const dir = getHonchoHome();
   if (!existsSync(dir)) {
@@ -113,6 +114,7 @@ function ensureVerboseLog(): void {
   }
 }
 
+/** append a timestamped line to verbose.log when verbose logging is enabled. */
 function writeVerbose(text: string): void {
   if (!isLoggingEnabled()) return;
   ensureVerboseLog();

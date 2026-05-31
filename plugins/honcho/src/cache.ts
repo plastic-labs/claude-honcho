@@ -7,7 +7,7 @@ const ID_CACHE_FILE = join(CACHE_DIR, "cache.json");
 const CONTEXT_CACHE_FILE = join(CACHE_DIR, "context-cache.json");
 const CLAUDE_CONTEXT_FILE = join(CACHE_DIR, "claude-context.md");
 
-// Ensure cache directory exists
+/** ensure the honcho state directory exists for cache files. */
 function ensureCacheDir(): void {
   if (!existsSync(CACHE_DIR)) {
     mkdirSync(CACHE_DIR, { recursive: true });

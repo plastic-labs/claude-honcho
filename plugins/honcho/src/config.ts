@@ -244,8 +244,13 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return true;
 }
 
-// state directory is overridable via HONCHO_HOME so a single install can give each
-// directory tree (e.g. work vs personal) its own config + caches + queue + logs.
+/**
+ * resolve the honcho state directory. defaults to ~/.honcho, overridable via
+ * HONCHO_HOME so a single install can give each directory tree (e.g. work vs
+ * personal) its own config, caches, queue, and logs. expands a leading ~, and
+ * resolves any other value (including a relative path) to an absolute path so
+ * the dir stays stable regardless of the cwd a hook runs from.
+ */
 export function getHonchoHome(): string {
   const env = process.env.HONCHO_HOME?.trim();
   if (env) {

@@ -89,6 +89,7 @@ const sym = {
 // Core Logging Functions
 // ============================================
 
+/** ensure the honcho state directory exists for activity logs. */
 function ensureLogDir(): void {
   if (!existsSync(CACHE_DIR)) {
     mkdirSync(CACHE_DIR, { recursive: true });
