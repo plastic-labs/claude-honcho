@@ -188,7 +188,7 @@ The honcho plugin provides these tools via MCP:
 
 ## Configuration
 
-All configuration lives in a single global file at `~/.honcho/config.json`. You can edit it directly, use the `/honcho:config` skill, or use the `set_config` MCP tool. Environment variables work for initial setup but the config file takes precedence once it exists.
+All configuration lives in a single global file at `~/.honcho/config.json`. You can edit it directly, use the `/honcho:config` skill, or use the `set_config` MCP tool. Environment variables work for initial setup but the config file takes precedence once it exists. (The `~/.honcho` location itself can be relocated — per directory tree, if you like — with the `HONCHO_HOME` environment variable; see [Environment Variables](#environment-variables).)
 
 ### Config File Reference
 
@@ -424,6 +424,18 @@ Environment variables work for initial bootstrap (before a config file exists). 
 | `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
 | `HONCHO_SAVE_MESSAGES` | No       | `true`        | Set to `false` to stop saving messages                            |
 | `HONCHO_LOGGING`       | No       | `true`        | Set to `false` to disable file logging to `~/.honcho/`            |
+| `HONCHO_HOME`          | No       | `~/.honcho`   | State directory for `config.json`, caches, message queue, and logs. A leading `~/` is expanded. Unlike the other variables, this one is honored **even when a config file exists**. |
+
+#### Separate state per directory (`HONCHO_HOME`)
+
+`HONCHO_HOME` relocates the entire plugin state directory (`~/.honcho` by default) — `config.json`, caches, the message queue, and logs. This lets a single install keep separate, fully isolated Honcho homes for different directory trees (e.g. work vs personal), so neither the conclusions nor the local `context-cache.json` cross between them. Pair it with a per-directory env tool (direnv, fnox, a shell hook):
+
+```bash
+# in your work tree:   export HONCHO_HOME=~/.honcho-work   # its own config.json (-> its own workspace) + caches + logs
+# everywhere else:     (unset)                             # -> ~/.honcho, unchanged
+```
+
+When `HONCHO_HOME` is unset, empty, or whitespace, behaviour is byte-identical to before.
 
 ## How It Works
 

@@ -7,13 +7,12 @@
  * - Useful: Real-time debugging and demo capabilities
  */
 
-import { homedir } from "os";
 import { join } from "path";
 import { existsSync, appendFileSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { symbols, arrows, box } from "./unicode.js";
-import { isLoggingEnabled } from "./config.js";
+import { isLoggingEnabled, getHonchoHome } from "./config.js";
 
-const CACHE_DIR = join(homedir(), ".honcho");
+const CACHE_DIR = getHonchoHome();
 const LOG_FILE = join(CACHE_DIR, "activity.log");
 const MAX_LOG_SIZE = 100 * 1024; // 100KB max log size
 
@@ -90,6 +89,7 @@ const sym = {
 // Core Logging Functions
 // ============================================
 
+/** ensure the honcho state directory exists for activity logs. */
 function ensureLogDir(): void {
   if (!existsSync(CACHE_DIR)) {
     mkdirSync(CACHE_DIR, { recursive: true });

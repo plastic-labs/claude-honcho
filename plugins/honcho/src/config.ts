@@ -1,5 +1,5 @@
 import { homedir } from "os";
-import { join, basename } from "path";
+import { join, basename, resolve } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { captureGitState } from "./git.js";
 import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
@@ -244,17 +244,39 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return true;
 }
 
-const CONFIG_DIR = join(homedir(), ".honcho");
+/**
+ * resolve the honcho state directory. defaults to ~/.honcho, overridable via
+ * HONCHO_HOME so a single install can give each directory tree (e.g. work vs
+ * personal) its own config, caches, queue, and logs. expands a leading ~, and
+ * resolves any other value (including a relative path) to an absolute path so
+ * the dir stays stable regardless of the cwd a hook runs from.
+ */
+export function getHonchoHome(): string {
+  const env = process.env.HONCHO_HOME?.trim();
+  if (env) {
+    if (env === "~") return homedir();
+    if (env.startsWith("~/")) return join(homedir(), env.slice(2));
+    // resolve any other value (including a relative path) to an absolute path
+    // now, so the state dir stays stable regardless of the cwd a hook runs from.
+    return resolve(env);
+  }
+  return join(homedir(), ".honcho");
+}
+
+const CONFIG_DIR = getHonchoHome();
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
+/** absolute path to the honcho state directory (see getHonchoHome). */
 export function getConfigDir(): string {
   return CONFIG_DIR;
 }
 
+/** absolute path to config.json inside the honcho state directory. */
 export function getConfigPath(): string {
   return CONFIG_FILE;
 }
 
+/** whether config.json exists in the honcho state directory. */
 export function configExists(): boolean {
   return existsSync(CONFIG_FILE);
 }
