@@ -1,6 +1,6 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { homedir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 import { getHonchoHome } from "./config.js";
 
 // unit tests for the pure env-resolution helper. getHonchoHome() reads
@@ -42,8 +42,13 @@ describe("getHonchoHome", () => {
     expect(getHonchoHome()).toBe("/tmp/honcho-trim");
   });
 
-  test("passes a relative path through unchanged", () => {
+  test("resolves a relative path to an absolute path", () => {
     process.env.HONCHO_HOME = "relative/dir";
-    expect(getHonchoHome()).toBe("relative/dir");
+    expect(getHonchoHome()).toBe(resolve("relative/dir"));
+  });
+
+  test("expands a bare ~ to the home directory", () => {
+    process.env.HONCHO_HOME = "~";
+    expect(getHonchoHome()).toBe(homedir());
   });
 });

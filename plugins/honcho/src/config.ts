@@ -1,5 +1,5 @@
 import { homedir } from "os";
-import { join, basename } from "path";
+import { join, basename, resolve } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { captureGitState } from "./git.js";
 import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
@@ -248,7 +248,13 @@ function deepEqual(a: unknown, b: unknown): boolean {
 // directory tree (e.g. work vs personal) its own config + caches + queue + logs.
 export function getHonchoHome(): string {
   const env = process.env.HONCHO_HOME?.trim();
-  if (env) return env.startsWith("~/") ? join(homedir(), env.slice(2)) : env;
+  if (env) {
+    if (env === "~") return homedir();
+    if (env.startsWith("~/")) return join(homedir(), env.slice(2));
+    // resolve any other value (including a relative path) to an absolute path
+    // now, so the state dir stays stable regardless of the cwd a hook runs from.
+    return resolve(env);
+  }
   return join(homedir(), ".honcho");
 }
 
