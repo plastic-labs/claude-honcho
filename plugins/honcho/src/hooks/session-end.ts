@@ -1,15 +1,33 @@
-import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
-import { existsSync, readFileSync } from "fs";
+import {
+  existsSync,
+  readFileSync,
+  mkdirSync,
+  chmodSync,
+  writeFileSync,
+  renameSync,
+  unlinkSync,
+  openSync,
+  fstatSync,
+  readSync,
+  closeSync,
+} from "fs";
+import { join } from "path";
+import {
+  loadConfig,
+  getSessionName,
+  isPluginEnabled,
+  getCachedStdin,
+  getConfigDir,
+  getDetectedHost,
+} from "../config.js";
 import {
   generateClaudeSummary,
   saveClaudeLocalContext,
   loadClaudeLocalContext,
   getInstanceIdForCwd,
-  chunkContent,
 } from "../cache.js";
-import { playCooldown } from "../spinner.js";
-import { logHook, logApiCall, setLogContext } from "../log.js";
+import { logHook, setLogContext } from "../log.js";
+import type { SessionEndPayload } from "./session-end-worker.js";
 
 
 interface HookInput {
@@ -67,6 +85,40 @@ function isMeaningfulAssistantContent(content: string): boolean {
   return content.length >= 200;
 }
 
+// cap how much of a transcript we read on the exit critical path. recent
+// messages (what the tail-based summary/upload need) live at the end of the
+// jsonl file, so reading only the last slice bounds work on huge transcripts
+// and keeps the hook from re-blocking the exit it is meant to free.
+const TRANSCRIPT_TAIL_CAP = 4 * 1024 * 1024; // 4 MB
+
+/** read at most the last `cap` bytes of a (possibly huge) transcript. when the
+ *  window starts mid-line, the partial first line is dropped so JSON.parse never
+ *  sees half a line; when it already starts on a line boundary nothing is lost. */
+export function readTranscriptTail(transcriptPath: string, cap = TRANSCRIPT_TAIL_CAP): string {
+  const fd = openSync(transcriptPath, "r");
+  try {
+    const size = fstatSync(fd).size;
+    if (size <= cap) {
+      return readFileSync(transcriptPath, "utf-8");
+    }
+    const start = size - cap;
+    // peek the byte before the window: if it's a newline the window already
+    // begins on a clean line boundary, so the first line is complete — keep it.
+    const prev = Buffer.allocUnsafe(1);
+    readSync(fd, prev, 0, 1, start - 1);
+    const cutMidLine = prev[0] !== 0x0a; // 0x0a = "\n"
+
+    const buf = Buffer.allocUnsafe(cap);
+    const read = readSync(fd, buf, 0, cap, start);
+    const text = buf.toString("utf-8", 0, read);
+    if (!cutMidLine) return text;
+    const nl = text.indexOf("\n");
+    return nl >= 0 ? text.slice(nl + 1) : text;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function parseTranscript(transcriptPath: string): Array<{ role: string; content: string; isMeaningful?: boolean; timestamp?: string }> {
   const messages: Array<{ role: string; content: string; isMeaningful?: boolean; timestamp?: string }> = [];
 
@@ -75,7 +127,7 @@ function parseTranscript(transcriptPath: string): Array<{ role: string; content:
   }
 
   try {
-    const content = readFileSync(transcriptPath, "utf-8");
+    const content = readTranscriptTail(transcriptPath);
     const lines = content.split("\n").filter((line) => line.trim());
 
     for (const line of lines) {
@@ -165,12 +217,77 @@ function extractWorkItems(assistantMessages: string[]): string[] {
 }
 
 /**
- * SessionEnd hook — structured for resilience against cancellation.
+ * Hand the Honcho upload to a detached background worker so the hook returns in
+ * milliseconds. SessionEnd runs while Claude Code is tearing down; any network
+ * I/O on the critical path risks blowing the exit budget and getting cancelled.
+ * The worker is fully detached (new session via setsid, stdio ignored, unref'd)
+ * so it outlives this process and uploads out-of-band. Best-effort: a failure to
+ * dispatch never blocks exit — the local summary was already saved in phase 1.
+ */
+function dispatchUploadWorker(payload: SessionEndPayload): void {
+  // track only files WE created, so failure-cleanup can never unlink another
+  // process's payload (filenames are unique, but stay defensive).
+  let createdTmp: string | undefined;
+  let createdFinal: string | undefined;
+  try {
+    const stateDir = getConfigDir();
+    const queueDir = join(stateDir, "session-end-queue");
+    // 0700 dir + 0600 file: the payload holds transcript-derived conversation
+    // text, so keep it private even under a permissive umask. mkdir's mode only
+    // applies on creation, so also chmod (best-effort) to tighten a queue dir
+    // that a prior build may have created with looser permissions.
+    mkdirSync(queueDir, { recursive: true, mode: 0o700 });
+    try {
+      chmodSync(queueDir, 0o700);
+    } catch {
+      // best-effort: a chmod failure must never block the upload dispatch
+    }
+
+    const finalPath = join(
+      queueDir,
+      `payload-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+    );
+    const tmpPath = `${finalPath}.tmp`;
+    // atomic publish: exclusive-create the tmp file, then rename so the worker
+    // never sees a partial file (rename preserves the 0600 mode).
+    writeFileSync(tmpPath, JSON.stringify(payload), { mode: 0o600, flag: "wx" });
+    createdTmp = tmpPath;
+    renameSync(tmpPath, finalPath);
+    createdTmp = undefined;
+    createdFinal = finalPath;
+
+    const workerPath = join(import.meta.dir, "session-end-worker.ts");
+    const proc = Bun.spawn([process.execPath, "run", workerPath], {
+      detached: true,
+      stdio: ["ignore", "ignore", "ignore"],
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        HONCHO_SESSION_END_PAYLOAD: finalPath,
+      },
+    });
+    // the worker now owns the payload and will unlink it.
+    createdFinal = undefined;
+    proc.unref();
+  } catch (error) {
+    logHook("session-end", `Failed to dispatch upload worker: ${error}`, { error: String(error) });
+    // best-effort: never leave an unpublished/un-owned payload (conversation text) behind.
+    for (const p of [createdTmp, createdFinal]) {
+      if (!p) continue;
+      try {
+        unlinkSync(p);
+      } catch {
+        // already gone
+      }
+    }
+  }
+}
+
+/**
+ * SessionEnd hook — returns instantly, never blocks Claude Code's exit.
  *
- * Priority order (most critical first):
- *   1. Local summary (instant, zero risk — survives any cancellation)
- *   2. Parallel: cooldown animation + API uploads (critical data first)
- *   3. Session end marker (nice-to-have metadata)
+ *   1. Phase 1: local summary (synchronous, zero risk — guaranteed before exit)
+ *   2. Phase 2: dispatch a detached worker for the Honcho upload, then exit 0
  */
 export async function handleSessionEnd(): Promise<void> {
   const config = loadConfig();
@@ -232,106 +349,30 @@ export async function handleSessionEnd(): Promise<void> {
   saveClaudeLocalContext(newSummary + recentActivity);
 
   // =========================================================
-  // Phase 2: PARALLEL API UPLOADS + ANIMATION
-  // Cooldown animation runs concurrently with network I/O
-  // so we don't waste budget on cosmetics before critical work.
+  // Phase 2: DISPATCH (instant, non-blocking)
+  // Hand the Honcho upload to a detached background worker and return. The
+  // worker outlives this process and uploads out-of-band, so the exit is never
+  // delayed by network I/O. The end marker is always sent; assistant messages
+  // are included unless saveMessages is disabled (the worker enforces that).
   // =========================================================
-  try {
-    const honcho = new Honcho(getHonchoClientOptions(config));
+  dispatchUploadWorker({
+    host: getDetectedHost(),
+    cwd,
+    sessionName,
+    instanceId: instanceId || undefined,
+    reason,
+    transcriptCount: transcriptMessages.length,
+    messages: assistantMessages.map((m) => ({
+      content: m.content,
+      timestamp: m.timestamp,
+      isMeaningful: m.isMeaningful,
+    })),
+  });
 
-    const [session, aiPeer] = await Promise.all([
-      honcho.session(sessionName),
-      honcho.peer(config.aiPeer),
-    ]);
-
-    logHook("session-end", `Processing ${assistantMessages.length} assistant msgs`);
-
-    const aiMessages = (config.saveMessages !== false && assistantMessages.length > 0)
-      ? assistantMessages.flatMap((msg) => {
-          const chunks = chunkContent(msg.content);
-          return chunks.map(chunk =>
-            aiPeer.message(chunk, {
-              createdAt: msg.timestamp,
-              metadata: {
-                instance_id: instanceId || undefined,
-                type: msg.isMeaningful ? 'assistant_prose' : 'assistant_brief',
-                meaningful: msg.isMeaningful || false,
-                session_affinity: sessionName,
-              },
-            })
-          );
-        })
-      : [];
-
-    const endMarker = aiPeer.message(
-      `[Session ended] Reason: ${reason}, Messages: ${transcriptMessages.length}, Time: ${new Date().toISOString()}`,
-      {
-        createdAt: new Date().toISOString(),
-        metadata: {
-          instance_id: instanceId || undefined,
-          session_affinity: sessionName,
-        },
-      }
-    );
-
-    // Single addMessages call with everything — one round trip instead of three.
-    const allMessages = [...aiMessages, endMarker];
-
-    if (allMessages.length > 0) {
-      const meaningfulCount = assistantMessages.filter(m => m.isMeaningful).length;
-      logApiCall("session.addMessages", "POST",
-        `${aiMessages.length} assistant (${meaningfulCount} meaningful) + 1 marker`);
-
-      // Start API upload immediately; run animation concurrently.
-      const uploadPromise = session.addMessages(allMessages);
-
-      // Trap SIGTERM/SIGINT to prevent default termination while upload
-      // is in flight. The handler is a no-op — its only purpose is to
-      // keep the process alive. Cooldown's own exit handler cleans up
-      // the cursor if the process exits unexpectedly.
-      const sigHandler = () => {};
-      process.on("SIGINT", sigHandler);
-      if (process.platform === "win32") {
-        process.on("SIGBREAK", sigHandler);
-      } else {
-        process.on("SIGTERM", sigHandler);
-      }
-
-      const removeSigHandlers = () => {
-        process.removeListener("SIGINT", sigHandler);
-        if (process.platform === "win32") {
-          process.removeListener("SIGBREAK", sigHandler);
-        } else {
-          process.removeListener("SIGTERM", sigHandler);
-        }
-      };
-
-      // Hard safety net: if the upload hangs beyond SDK timeout + margin,
-      // force exit. Local summary was already saved in phase 1.
-      const hardTimeout = setTimeout(() => {
-        logHook("session-end", "Hard timeout reached — forcing exit");
-        removeSigHandlers();
-        process.exit(0);
-      }, 12_000);
-      hardTimeout.unref();
-
-      await Promise.all([
-        uploadPromise.finally(() => {
-          clearTimeout(hardTimeout);
-          removeSigHandlers();
-        }),
-        playCooldown("saving memory"),
-      ]);
-    } else {
-      await playCooldown("saving memory");
-    }
-
-    const meaningfulCount = assistantMessages.filter(m => m.isMeaningful).length;
-    logHook("session-end", `Session saved: ${assistantMessages.length} assistant msgs (${meaningfulCount} meaningful)`);
-    process.exit(0);
-  } catch (error) {
-    logHook("session-end", `Error: ${error}`, { error: String(error) });
-    // Local summary was already saved in phase 1 — not a total loss.
-    process.exit(0);
-  }
+  const meaningfulCount = assistantMessages.filter((m) => m.isMeaningful).length;
+  logHook(
+    "session-end",
+    `Dispatched upload worker: ${assistantMessages.length} assistant msgs (${meaningfulCount} meaningful)`,
+  );
+  process.exit(0);
 }
