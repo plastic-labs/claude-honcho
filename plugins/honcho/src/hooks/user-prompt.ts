@@ -57,14 +57,10 @@ function extractTopics(prompt: string): string[] {
   const errors = prompt.match(/error[:\s]+[\w\s]+|failed[:\s]+[\w\s]+|exception[:\s]+[\w\s]+/gi) || [];
   topics.push(...errors.slice(0, 2));
 
-  if (topics.length > 0) {
-    return [...new Set(topics)];
-  }
-
-  // Fallback: meaningful words >3 chars minus stopwords
-  const stopwords = new Set(['the', 'and', 'for', 'that', 'this', 'with', 'from', 'have', 'are', 'was', 'were', 'been', 'being', 'has', 'had', 'does', 'did', 'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must', 'shall', 'need', 'want', 'like', 'just', 'also', 'more', 'some', 'what', 'when', 'where', 'which', 'who', 'how', 'why', 'all', 'each', 'every', 'both', 'few', 'most', 'other', 'into', 'over', 'such', 'only', 'same', 'than', 'very', 'your', 'make', 'take', 'come', 'give', 'look', 'think', 'know']);
-  const words = prompt.toLowerCase().match(/\b[a-z]{4,}\b/g) || [];
-  return [...new Set(words.filter(w => !stopwords.has(w)))].slice(0, 10);
+  // No keyword fallback: extracted word lists are English-only and produce
+  // low-signal queries for other languages. Callers fall back to the raw
+  // prompt, which embeds better for semantic search anyway.
+  return [...new Set(topics)];
 }
 
 function shouldSkipContextRetrieval(prompt: string): boolean {
@@ -246,22 +242,37 @@ async function fetchFreshContext(config: any, prompt: string): Promise<{ context
 
   const startTime = Date.now();
 
-  // Try search-based context first — returns conclusions relevant to the prompt
+  // Try search-based context first — returns conclusions relevant to the prompt.
+  // Fall back to the raw prompt (truncated) when no high-signal topics match:
+  // natural text embeds well, and it keeps non-English prompts working.
   const topics = extractTopics(prompt);
-  const searchQuery = topics.length > 0 ? topics.join(" ") : undefined;
+  const searchQuery = topics.length > 0 ? topics.join(" ") : prompt.trim().slice(0, 300);
 
   let contextResult: any = null;
 
   if (searchQuery) {
     try {
-      contextResult = await contextPeer.context({
-        ...(contextTarget ? { target: contextTarget } : {}),
-        searchQuery,
-        searchTopK: 5,
-        searchMaxDistance: 0.7,
-        maxConclusions: 15,
-        includeMostFrequent: true,
-      });
+      // The representation merges search hits with frequent/recent conclusions
+      // into one timestamp-ordered string, so prompt-relevant lines get lost.
+      // Query matched conclusions separately and let the formatter put them first.
+      const conclusionScope = contextTarget
+        ? contextPeer.conclusionsOf(contextTarget)
+        : contextPeer.conclusions;
+      const [ctx, matched] = await Promise.all([
+        contextPeer.context({
+          ...(contextTarget ? { target: contextTarget } : {}),
+          searchQuery,
+          searchTopK: 5,
+          searchMaxDistance: 0.7,
+          maxConclusions: 15,
+          includeMostFrequent: true,
+        }),
+        conclusionScope.query(searchQuery, 5).catch((): any[] => []),
+      ]);
+      contextResult = ctx;
+      if (contextResult && matched?.length) {
+        contextResult.searchMatched = matched.map((c: any) => c.content).filter(Boolean);
+      }
       logApiCall(contextLabel, "GET", `search: ${searchQuery.slice(0, 60)}`, Date.now() - startTime, true);
     } catch (e) {
       // Search failed — fall through to static context
@@ -288,17 +299,42 @@ async function fetchFreshContext(config: any, prompt: string): Promise<{ context
   return { context: contextResult };
 }
 
+function stripConclusionLine(line: string): string {
+  return line.replace(/^\[.*?\]\s*/, "").replace(/^- /, "").trim();
+}
+
 function formatCachedContext(context: any, peerName: string): { parts: string[]; conclusionCount: number } {
   const parts: string[] = [];
   let conclusionCount = 0;
   const rep = context?.representation;
 
+  // Prompt-matched conclusions first (semantic search), then the most recent
+  // representation lines to fill up to 5 slots. The representation is ordered
+  // oldest-first, so taking its head would inject the stalest facts.
+  const seen = new Set<string>();
+  const selected: string[] = [];
+  const push = (text: string) => {
+    const clean = stripConclusionLine(text);
+    const key = clean.toLowerCase();
+    if (clean && !seen.has(key) && selected.length < 5) {
+      seen.add(key);
+      selected.push(clean);
+    }
+  };
+
+  for (const c of context?.searchMatched ?? []) push(String(c));
+
   if (typeof rep === "string" && rep.trim()) {
     const lines = rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
-    const selected = lines.slice(0, 5);
+    // Sort newest-first when lines carry a leading [timestamp]; otherwise keep order.
+    const stamped = lines.map((l: string, i: number) => ({ l, t: l.match(/^\[([^\]]+)\]/)?.[1] ?? "", i }));
+    stamped.sort((a, b) => (b.t.localeCompare(a.t)) || (a.i - b.i));
+    for (const { l } of stamped) push(l);
+  }
+
+  if (selected.length > 0) {
     conclusionCount = selected.length;
-    const summary = selected.map((l: string) => l.replace(/^\[.*?\]\s*/, "").replace(/^- /, "")).join("; ");
-    if (summary) parts.push(`Relevant conclusions: ${summary}`);
+    parts.push(`Relevant conclusions: ${selected.join("; ")}`);
   }
 
   const peerCard = context?.peerCard;
