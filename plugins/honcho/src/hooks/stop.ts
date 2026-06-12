@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, applyDirectoryOverride } from "../config.js";
 import { existsSync, readFileSync } from "fs";
 import { getInstanceIdForCwd } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -93,7 +93,7 @@ function getLastAssistantMessage(transcriptPath: string): string | null {
 }
 
 export async function handleStop(): Promise<void> {
-  const config = loadConfig();
+  let config = loadConfig();
   if (!config) {
     process.exit(0);
   }
@@ -125,6 +125,7 @@ export async function handleStop(): Promise<void> {
   }
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
+  config = applyDirectoryOverride(config, cwd);
   const transcriptPath = hookInput.transcript_path;
   const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
   const sessionName = getSessionName(cwd, instanceId || undefined);

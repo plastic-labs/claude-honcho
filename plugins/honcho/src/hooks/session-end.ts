@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, applyDirectoryOverride } from "../config.js";
 import { existsSync, readFileSync } from "fs";
 import {
   getQueuedMessages,
@@ -175,7 +175,7 @@ function extractWorkItems(assistantMessages: string[]): string[] {
  *   3. Session end marker (nice-to-have metadata)
  */
 export async function handleSessionEnd(): Promise<void> {
-  const config = loadConfig();
+  let config = loadConfig();
   if (!config) {
     process.exit(0);
   }
@@ -195,6 +195,7 @@ export async function handleSessionEnd(): Promise<void> {
   }
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
+  config = applyDirectoryOverride(config, cwd);
   const reason = hookInput.reason || "unknown";
   const transcriptPath = hookInput.transcript_path;
   const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
@@ -300,8 +301,16 @@ export async function handleSessionEnd(): Promise<void> {
       logApiCall("session.addMessages", "POST",
         `${userMessages.length} user + ${aiMessages.length} assistant (${meaningfulCount} meaningful) + 1 marker`);
 
-      // Start API upload immediately; run animation concurrently.
-      const uploadPromise = session.addMessages(allMessages);
+      // PATCH 2026-06-02: Honcho server limits MessageBatchCreate to maxItems=100;
+      // long-running sessions can queue 100+ user msgs, triggering 422
+      // UnprocessableEntityError on single addMessages call.
+      // Batch in chunks of 100 to stay under server limit.
+      const BATCH_SIZE = 100;
+      const uploadPromise = (async () => {
+        for (let i = 0; i < allMessages.length; i += BATCH_SIZE) {
+          await session.addMessages(allMessages.slice(i, i + BATCH_SIZE));
+        }
+      })();
 
       // Trap SIGTERM/SIGINT to prevent default termination while upload
       // is in flight. The handler is a no-op — its only purpose is to

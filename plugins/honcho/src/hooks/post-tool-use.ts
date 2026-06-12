@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, applyDirectoryOverride } from "../config.js";
 import { appendClaudeWork, getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visCapture } from "../visual.js";
@@ -186,7 +186,7 @@ function formatToolSummary(
 }
 
 export async function handlePostToolUse(): Promise<void> {
-  const config = loadConfig();
+  let config = loadConfig();
   if (!config) {
     process.exit(0);
   }
@@ -210,6 +210,7 @@ export async function handlePostToolUse(): Promise<void> {
   const toolInput = hookInput.tool_input || {};
   const toolResponse = hookInput.tool_response || {};
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
+  config = applyDirectoryOverride(config, cwd);
 
   // Set log context
   setLogContext(cwd, getSessionName(cwd));

@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, applyDirectoryOverride } from "../config.js";
 import {
   getCachedUserContext,
   getStaleCachedUserContext,
@@ -84,7 +84,7 @@ function formatSessionLink(sessionUrl: string): string {
  * On no cache at all, exits silently — context will arrive next turn.
  */
 export async function handleUserPrompt(): Promise<void> {
-  const config = loadConfig();
+  let config = loadConfig();
   if (!config) {
     process.exit(0);
   }
@@ -105,6 +105,7 @@ export async function handleUserPrompt(): Promise<void> {
 
   const prompt = hookInput.prompt || "";
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
+  config = applyDirectoryOverride(config, cwd);
   const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
   const sessionName = getSessionName(cwd, instanceId || undefined);
 

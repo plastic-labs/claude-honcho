@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
+import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, applyDirectoryOverride } from "../config.js";
 import {
   setCachedUserContext,
   setCachedSessionId,
@@ -24,7 +24,7 @@ interface HookInput {
 }
 
 export async function handleSessionStart(): Promise<void> {
-  const config = loadConfig();
+  let config = loadConfig();
   if (!config) {
     console.error("[honcho] Not configured. Run: honcho init");
     process.exit(1);
@@ -46,6 +46,7 @@ export async function handleSessionStart(): Promise<void> {
   }
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
+  config = applyDirectoryOverride(config, cwd);
   const claudeInstanceId = hookInput.session_id;
 
   // Store Claude's instance ID for parallel session support

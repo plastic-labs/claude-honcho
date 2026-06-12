@@ -154,6 +154,18 @@ export async function initHook(): Promise<void> {
 // Config Types
 // ============================================
 
+/** Per-directory workspace override entry */
+export interface DirectoryWorkspaceConfig {
+  /** Honcho workspace name for this directory */
+  workspace: string;
+  /** API key for this workspace (if different from global) */
+  apiKey?: string;
+  /** AI peer name for this directory (if different from host default) */
+  aiPeer?: string;
+  /** Endpoint override for this directory */
+  endpoint?: HonchoEndpointConfig;
+}
+
 /** Raw shape of ~/.honcho/config.json on disk */
 interface HonchoFileConfig {
   apiKey?: string;
@@ -161,6 +173,19 @@ interface HonchoFileConfig {
   workspace?: string;
   aiPeer?: string;
   sessions?: Record<string, string>;
+  /**
+   * Per-directory workspace overrides.
+   * Key: absolute directory path (matching workspace_roots[0] or cwd from hook input).
+   * Value: workspace + optional apiKey/aiPeer/endpoint overrides.
+   * Takes precedence over hosts.<host>.workspace for the matching directory.
+   *
+   * Example:
+   *   "directoryWorkspaces": {
+   *     "/Users/alice/sybil-farming": { "workspace": "Sybil_farming", "apiKey": "<sybil-jwt>" },
+   *     "/Users/alice/crypto-trader":  { "workspace": "Crypto_trader",  "apiKey": "<crypto-jwt>" }
+   *   }
+   */
+  directoryWorkspaces?: Record<string, DirectoryWorkspaceConfig>;
   saveMessages?: boolean;
   messageUpload?: MessageUploadConfig;
   contextRefresh?: ContextRefreshConfig;
@@ -697,7 +722,7 @@ export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClient
     apiKey: config.apiKey,
     baseURL: getHonchoBaseUrl(config),
     workspaceId: config.workspace,
-    timeout: 8000,
+    timeout: 60000,
     maxRetries: 1,
   };
 }
@@ -725,4 +750,29 @@ export function setEndpoint(environment?: HonchoEnvironment, baseUrl?: string): 
   if (environment && !VALID_ENVIRONMENTS.has(environment)) return;
   config.endpoint = { environment, baseUrl };
   saveConfig(config);
+}
+
+/**
+ * Apply per-directory workspace override to a resolved config.
+ * Reads `directoryWorkspaces[cwd]` from config.json and patches workspace,
+ * apiKey, aiPeer, and endpoint if an entry exists for this directory.
+ * Returns the patched config (new object, original is unchanged).
+ * No-ops if no override is found or config file is unreadable.
+ */
+export function applyDirectoryOverride(config: HonchoCLAUDEConfig, cwd: string): HonchoCLAUDEConfig {
+  if (!cwd || !configExists()) return config;
+  try {
+    const raw = JSON.parse(readFileSync(CONFIG_FILE, "utf-8")) as HonchoFileConfig;
+    const dirOverride = raw.directoryWorkspaces?.[cwd];
+    if (!dirOverride) return config;
+    return {
+      ...config,
+      workspace: dirOverride.workspace,
+      apiKey: dirOverride.apiKey ?? config.apiKey,
+      aiPeer: dirOverride.aiPeer ?? config.aiPeer,
+      endpoint: dirOverride.endpoint ?? config.endpoint,
+    };
+  } catch {
+    return config;
+  }
 }
