@@ -38,7 +38,7 @@ const FETCH_TIMEOUT_MS = 4000;
  * Extract meaningful topics from a prompt for semantic search.
  * Returns terms that are high-signal for conclusion matching.
  */
-function extractTopics(prompt: string): string[] {
+export function extractTopics(prompt: string): string[] {
   const topics: string[] = [];
 
   // File paths (high signal)
@@ -299,11 +299,11 @@ async function fetchFreshContext(config: any, prompt: string): Promise<{ context
   return { context: contextResult };
 }
 
-function stripConclusionLine(line: string): string {
+export function stripConclusionLine(line: string): string {
   return line.replace(/^\[.*?\]\s*/, "").replace(/^- /, "").trim();
 }
 
-function formatCachedContext(context: any, peerName: string): { parts: string[]; conclusionCount: number } {
+export function formatCachedContext(context: any, peerName: string): { parts: string[]; conclusionCount: number } {
   const parts: string[] = [];
   let conclusionCount = 0;
   const rep = context?.representation;
