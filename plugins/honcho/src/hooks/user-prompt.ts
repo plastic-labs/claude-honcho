@@ -32,6 +32,23 @@ const SKIP_CONTEXT_PATTERNS = [
   /^\//, // slash commands
 ];
 
+// Low-signal prompts not worth OBSERVING as durable memory: bare acknowledgements,
+// numeric menu picks ("1"), and slash commands. Without this filter the deriver
+// turns acks like "1", "ok", "sì, vai" into standalone conclusions
+// ("deckard responded with '1'"), polluting the user's representation. Kept
+// separate from SKIP_CONTEXT_PATTERNS (which is English-only and anchored) and
+// extended to common IT/ES acks + numeric replies.
+const TRIVIAL_OBSERVE_PATTERN =
+  /^(y|n|ok(ay)?|yes|no|sure|thx|thanks|ty|yep|yup|nope|yeah|nah|continue|go ahead|do it|proceed|done|next|sì|si|no|vai|dai|ok dai|va bene|certo|esatto|ho capito|👍|👌|\d{1,3})[.!,\s]*$/i;
+
+export function shouldObservePrompt(prompt: string): boolean {
+  const t = prompt.trim();
+  if (!t) return false;
+  if (t.startsWith("/")) return false; // slash commands
+  if (TRIVIAL_OBSERVE_PATTERN.test(t)) return false; // acks / numeric picks (IT+EN+ES)
+  return t.length > 2;
+}
+
 const FETCH_TIMEOUT_MS = 4000;
 
 /**
@@ -132,8 +149,10 @@ export async function handleUserPrompt(): Promise<void> {
   logHook("user-prompt", `Prompt received (${prompt.length} chars)`);
   setSessionLink(honchoSessionUrl(config.workspace, sessionName), sessionName, hookInput.session_id);
 
-  // Queue user prompt for upload at session-end (instant, no network)
-  if (config.saveMessages !== false) {
+  // Queue user prompt for upload at session-end (instant, no network).
+  // Skip trivial acknowledgements / numeric picks so they don't get derived into
+  // noise conclusions (see shouldObservePrompt).
+  if (config.saveMessages !== false && shouldObservePrompt(prompt)) {
     queueMessage(prompt, config.peerName, cwd, instanceId || undefined);
   }
 
