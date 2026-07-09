@@ -146,11 +146,21 @@ export function highlight(text: string): string {
   return `${colors.peach}${text}${colors.reset}`;
 }
 
+/** Default dashboard (GUI) base URL — the hosted platform. */
+const DEFAULT_DASHBOARD_URL = "https://app.honcho.dev";
+
 /**
- * Build a Honcho app URL for a session
+ * Build a Honcho dashboard URL for a session.
+ * `dashboardBaseUrl` lets self-hosted deployments point links at their own GUI
+ * (resolve it via getDashboardUrl(config)); it defaults to the hosted platform.
  */
-export function honchoSessionUrl(workspace: string, sessionName: string): string {
-  return `https://app.honcho.dev/explore?workspace=${encodeURIComponent(workspace)}&view=sessions&session=${encodeURIComponent(sessionName)}`;
+export function honchoSessionUrl(
+  workspace: string,
+  sessionName: string,
+  dashboardBaseUrl: string = DEFAULT_DASHBOARD_URL,
+): string {
+  const base = dashboardBaseUrl.replace(/\/+$/, "");
+  return `${base}/explore?workspace=${encodeURIComponent(workspace)}&view=sessions&session=${encodeURIComponent(sessionName)}`;
 }
 
 /**
@@ -163,7 +173,11 @@ export function hyperlink(url: string, text: string): string {
 /**
  * Styled session line with clickable hyperlink to Honcho app
  */
-export function sessionLine(workspace: string, sessionName: string): string {
-  const url = honchoSessionUrl(workspace, sessionName);
+export function sessionLine(
+  workspace: string,
+  sessionName: string,
+  dashboardBaseUrl?: string,
+): string {
+  const url = honchoSessionUrl(workspace, sessionName, dashboardBaseUrl);
   return `${colors.dim}Honcho session:${colors.reset} ${hyperlink(url, `${colors.skyBlue}${sessionName}${colors.reset}`)}`;
 }

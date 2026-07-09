@@ -1,7 +1,7 @@
 import { Honcho } from "@honcho-ai/sdk";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, getDashboardUrl } from "../config.js";
 import {
   getCachedUserContext,
   getStaleCachedUserContext,
@@ -130,7 +130,7 @@ export async function handleUserPrompt(): Promise<void> {
   }
 
   logHook("user-prompt", `Prompt received (${prompt.length} chars)`);
-  setSessionLink(honchoSessionUrl(config.workspace, sessionName), sessionName, hookInput.session_id);
+  setSessionLink(honchoSessionUrl(config.workspace, sessionName, getDashboardUrl(config)), sessionName, hookInput.session_id);
 
   // Queue user prompt for upload at session-end (instant, no network)
   if (config.saveMessages !== false) {
@@ -158,9 +158,9 @@ export async function handleUserPrompt(): Promise<void> {
   const nag = readVersionNag();
   const sessionLink =
     messageCountBefore === 0
-      ? nag ?? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
+      ? nag ?? formatSessionLink(honchoSessionUrl(config.workspace, sessionName, getDashboardUrl(config)))
       : messageCountBefore === 1 && nag
-        ? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
+        ? formatSessionLink(honchoSessionUrl(config.workspace, sessionName, getDashboardUrl(config)))
         : undefined;
 
   // Skip trivial prompts — no context needed for "y", "ok", etc.

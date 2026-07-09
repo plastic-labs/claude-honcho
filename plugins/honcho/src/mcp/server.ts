@@ -16,6 +16,7 @@ import {
   configExists,
   getDetectedHost,
   getEndpointInfo,
+  getDashboardUrl,
   getKnownHosts,
   setDetectedHost,
   type HonchoCLAUDEConfig,
@@ -48,6 +49,7 @@ const ENV_SHADOW_MAP: Record<string, string> = {
   saveMessages: "HONCHO_SAVE_MESSAGES",
   "endpoint.baseUrl": "HONCHO_ENDPOINT",
   "endpoint.environment": "HONCHO_ENDPOINT",
+  "endpoint.dashboardUrl": "HONCHO_DASHBOARD_URL",
 };
 
 // Fields that require confirm=true to change
@@ -123,7 +125,7 @@ function handleGetConfig(cwd: string) {
     ? endpointInfo.type === "production" ? "platform" : endpointInfo.type
     : null;
 
-  const sessionUrl = cfg && sessionName ? honchoSessionUrl(cfg.workspace, sessionName) : null;
+  const sessionUrl = cfg && sessionName ? honchoSessionUrl(cfg.workspace, sessionName, getDashboardUrl(cfg)) : null;
 
   const current = cfg ? {
     workspace: cfg.workspace,
@@ -348,6 +350,18 @@ function handleSetConfig(args: Record<string, unknown>) {
       cacheInvalidation = { cleared: ["all IDs", "all context"], reason: "Endpoint URL changed" };
       break;
 
+    case "endpoint.dashboardUrl": {
+      previousValue = cfg.endpoint?.dashboardUrl;
+      if (!cfg.endpoint) cfg.endpoint = {};
+      // Empty string clears the override, reverting to the hosted default.
+      const dash = String(value).trim();
+      cfg.endpoint.dashboardUrl = dash === "" ? undefined : dash;
+      // endpoint is a global field — write to root (user-directed action).
+      // Display-only (session links); no ID/context cache to invalidate.
+      saveRootField("endpoint", cfg.endpoint);
+      break;
+    }
+
     case "sessionStrategy":
       previousValue = cfg.sessionStrategy ?? "per-directory";
       cfg.sessionStrategy = String(value) as SessionStrategy;
@@ -525,7 +539,7 @@ function handleSetConfig(args: Record<string, unknown>) {
   // Include session URL when session-affecting fields change
   const cwd = getLastActiveCwd() || process.cwd();
   const newSessionName = SESSION_AFFECTING_FIELDS.has(field) ? getSessionName(cwd) : undefined;
-  const sessionUrl = newSessionName ? honchoSessionUrl(cfg.workspace, newSessionName) : undefined;
+  const sessionUrl = newSessionName ? honchoSessionUrl(cfg.workspace, newSessionName, getDashboardUrl(cfg)) : undefined;
 
   return {
     content: [{
@@ -709,6 +723,7 @@ export async function runMcpServer(): Promise<void> {
                   "globalOverride",
                   "endpoint.environment",
                   "endpoint.baseUrl",
+                  "endpoint.dashboardUrl",
                   "sessionStrategy",
                   "sessionPeerPrefix",
                   "enabled",

@@ -4,6 +4,10 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Configurable dashboard URL for session links. Self-hosted deployments can now point the clickable "view your session" links at their own GUI instead of the hardcoded `app.honcho.dev`. Set it via the `endpoint.dashboardUrl` config field, the `set_config` MCP tool, or the `HONCHO_DASHBOARD_URL` env var (which takes precedence). Defaults to `https://app.honcho.dev`, so hosted users are unaffected. Useful when the GUI runs on a different host than the API (e.g. API at `honcho.example.com`, dashboard at `dashboard.example.com`).
+
 ## [0.2.5] - 2026-06-02
 
 ### Added

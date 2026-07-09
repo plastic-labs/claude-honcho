@@ -44,12 +44,22 @@ export interface HonchoEndpointConfig {
   environment?: HonchoEnvironment;
   /** Custom URL override (takes precedence over environment) */
   baseUrl?: string;
+  /**
+   * Dashboard (GUI) base URL used to build clickable session links.
+   * Self-hosted deployments often serve the GUI on a different host than the
+   * API (e.g. API at honcho.example.com, GUI at dashboard.example.com), so this
+   * is configured independently of `baseUrl`. Defaults to the hosted platform.
+   */
+  dashboardUrl?: string;
 }
 
 const HONCHO_BASE_URLS = {
   production: "https://api.honcho.dev/v3",
   local: "http://localhost:8000/v3",
 } as const;
+
+/** Dashboard (GUI) base URL for the hosted platform. */
+const DEFAULT_DASHBOARD_URL = "https://app.honcho.dev";
 
 // ============================================
 // Host Detection
@@ -372,6 +382,7 @@ export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null 
     : process.env.HONCHO_CLAUDE_PEER;
   const aiPeer = process.env.HONCHO_AI_PEER || hostPeerEnv || DEFAULT_AI_PEER[resolvedHost];
   const endpoint = process.env.HONCHO_ENDPOINT;
+  const dashboardUrl = process.env.HONCHO_DASHBOARD_URL;
 
   const config: HonchoCLAUDEConfig = {
     apiKey,
@@ -389,6 +400,10 @@ export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null 
     } else if (endpoint.startsWith("http")) {
       config.endpoint = { baseUrl: endpoint };
     }
+  }
+
+  if (dashboardUrl) {
+    config.endpoint = { ...config.endpoint, dashboardUrl };
   }
 
   return config;
@@ -713,6 +728,21 @@ export function getHonchoBaseUrl(config: HonchoCLAUDEConfig): string {
   return getHonchoBaseUrlForEndpoint(config.endpoint);
 }
 
+/**
+ * Get the dashboard (GUI) base URL used for session links.
+ * Priority: HONCHO_DASHBOARD_URL env > endpoint.dashboardUrl > hosted default.
+ * Trailing slashes are stripped so callers can safely append a path.
+ */
+export function getDashboardUrlForEndpoint(endpoint?: HonchoEndpointConfig): string {
+  const raw = process.env.HONCHO_DASHBOARD_URL || endpoint?.dashboardUrl || DEFAULT_DASHBOARD_URL;
+  return raw.replace(/\/+$/, "");
+}
+
+/** Get the dashboard (GUI) base URL for a resolved runtime config. */
+export function getDashboardUrl(config: HonchoCLAUDEConfig): string {
+  return getDashboardUrlForEndpoint(config.endpoint);
+}
+
 export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClientOptions {
   return {
     apiKey: config.apiKey,
@@ -740,10 +770,20 @@ export function getObservationMode(config: HonchoCLAUDEConfig): ObservationMode 
   return config.observationMode ?? "unified";
 }
 
-export function setEndpoint(environment?: HonchoEnvironment, baseUrl?: string): void {
+export function setEndpoint(
+  environment?: HonchoEnvironment,
+  baseUrl?: string,
+  dashboardUrl?: string,
+): void {
   const config = loadConfig();
   if (!config) return;
   if (environment && !VALID_ENVIRONMENTS.has(environment)) return;
-  config.endpoint = { environment, baseUrl };
+  // Preserve an existing custom dashboard URL when the caller doesn't set one —
+  // switching API environment shouldn't silently reset the GUI link target.
+  config.endpoint = {
+    environment,
+    baseUrl,
+    dashboardUrl: dashboardUrl ?? config.endpoint?.dashboardUrl,
+  };
   saveConfig(config);
 }

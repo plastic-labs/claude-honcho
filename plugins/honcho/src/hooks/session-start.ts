@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
+import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, getDashboardUrl } from "../config.js";
 import {
   setCachedUserContext,
   setCachedSessionId,
@@ -84,7 +84,7 @@ export async function handleSessionStart(): Promise<void> {
   const spinner = new Spinner({ style: "neural" });
   spinner.start(`${sessionName} · loading memory`);
   setMemoryState("loading", sessionName, claudeInstanceId);
-  setSessionLink(honchoSessionUrl(config.workspace, sessionName), sessionName, claudeInstanceId);
+  setSessionLink(honchoSessionUrl(config.workspace, sessionName, getDashboardUrl(config)), sessionName, claudeInstanceId);
 
   try {
     logHook("session-start", `Starting session in ${cwd}`, { branch: currentGitState?.branch });
