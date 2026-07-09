@@ -403,6 +403,18 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.messageUpload.summarizeAssistant = Boolean(value);
       break;
 
+    case "messageUpload.skipToolEvents":
+      previousValue = cfg.messageUpload?.skipToolEvents;
+      if (!cfg.messageUpload) cfg.messageUpload = {};
+      cfg.messageUpload.skipToolEvents = Boolean(value);
+      break;
+
+    case "messageUpload.skipGitObservations":
+      previousValue = cfg.messageUpload?.skipGitObservations;
+      if (!cfg.messageUpload) cfg.messageUpload = {};
+      cfg.messageUpload.skipGitObservations = Boolean(value);
+      break;
+
     case "contextRefresh.messageThreshold":
       previousValue = cfg.contextRefresh?.messageThreshold;
       if (!cfg.contextRefresh) cfg.contextRefresh = {};
@@ -717,6 +729,8 @@ export async function runMcpServer(): Promise<void> {
                   "messageUpload.maxUserTokens",
                   "messageUpload.maxAssistantTokens",
                   "messageUpload.summarizeAssistant",
+                  "messageUpload.skipToolEvents",
+                  "messageUpload.skipGitObservations",
                   "contextRefresh.messageThreshold",
                   "contextRefresh.ttlSeconds",
                   "contextRefresh.skipDialectic",

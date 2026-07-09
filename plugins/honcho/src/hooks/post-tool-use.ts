@@ -237,6 +237,12 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
     return;
   }
 
+  // Skip uploading tool-use events when configured — they dominate derived memory
+  // and pollute semantic search. Local claude-context.md already captured this above.
+  if (config.messageUpload?.skipToolEvents) {
+    return;
+  }
+
   const honcho = new Honcho(getHonchoClientOptions(config));
   const sessionName = getSessionName(cwd);
 

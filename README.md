@@ -221,7 +221,9 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
   "messageUpload": {
     "maxUserTokens": null,            // Truncate user messages (null = no limit)
     "maxAssistantTokens": null,       // Truncate assistant messages (null = no limit)
-    "summarizeAssistant": false       // Summarize instead of sending full assistant text
+    "summarizeAssistant": false,      // Summarize instead of sending full assistant text
+    "skipToolEvents": false,          // Don't upload "[Tool] Edited …" events (cuts noise for heavy tool users)
+    "skipGitObservations": false      // Don't upload "[Git External]" commit observations at session start
   },
 
   // Context retrieval

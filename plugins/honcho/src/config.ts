@@ -15,6 +15,18 @@ export interface MessageUploadConfig {
   maxAssistantTokens?: number;
   /** Summarize assistant messages instead of sending full text (default: false) */
   summarizeAssistant?: boolean;
+  /**
+   * Skip uploading per-tool-use events (`[Tool] Edited …`) to Honcho (default: false).
+   * Heavy tool users generate thousands of low-value edit/diff fragments that
+   * dominate the derived memory and pollute semantic search. Local claude-context.md
+   * is unaffected — only the Honcho upload is skipped.
+   */
+  skipToolEvents?: boolean;
+  /**
+   * Skip uploading `[Git External]` commit observations at session start (default: false).
+   * Turns every commit into a memory ("made a commit <hash>") — usually noise.
+   */
+  skipGitObservations?: boolean;
 }
 
 export interface ContextRefreshConfig {
@@ -623,6 +635,8 @@ export function getMessageUploadConfig(): MessageUploadConfig {
     maxUserTokens: config?.messageUpload?.maxUserTokens ?? undefined,
     maxAssistantTokens: config?.messageUpload?.maxAssistantTokens ?? undefined,
     summarizeAssistant: config?.messageUpload?.summarizeAssistant ?? false,
+    skipToolEvents: config?.messageUpload?.skipToolEvents ?? false,
+    skipGitObservations: config?.messageUpload?.skipGitObservations ?? false,
   };
 }
 
