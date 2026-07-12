@@ -1,7 +1,7 @@
 import { Honcho } from "@honcho-ai/sdk";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, isAdmitted, getCachedStdin, getObservationMode } from "../config.js";
 import {
   getCachedUserContext,
   getStaleCachedUserContext,
@@ -115,6 +115,11 @@ export async function handleUserPrompt(): Promise<void> {
       hookInput = JSON.parse(input);
     }
   } catch {
+    process.exit(0);
+  }
+
+  // Admission gate: see session-start.ts for the contract. Unset = admit all.
+  if (!isAdmitted(hookInput)) {
     process.exit(0);
   }
 
