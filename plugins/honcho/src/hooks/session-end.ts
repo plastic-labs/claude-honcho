@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, isAdmitted, getCachedStdin } from "../config.js";
 import { existsSync, readFileSync } from "fs";
 import {
   getQueuedMessages,
@@ -193,6 +193,11 @@ export async function handleSessionEnd(): Promise<void> {
     }
   } catch {
     // Continue with defaults
+  }
+
+  // Admission gate: see session-start.ts for the contract. Unset = admit all.
+  if (!isAdmitted(hookInput)) {
+    process.exit(0);
   }
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
