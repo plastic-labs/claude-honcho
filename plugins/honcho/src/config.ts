@@ -678,9 +678,11 @@ export function isPluginEnabled(): boolean {
  * not silently fall back to "capture everything"; that would defeat the
  * purpose of having a policy at all.
  *
- * Callers (each of the four capture hooks) must call this BEFORE any
- * `honcho.session(...)`, `session.addPeers(...)`, or `session.addMessages(...)`
- * call, so a rejected session never touches the Honcho API.
+ * Callers (each of the six write/create hooks: session-start, post-tool-use,
+ * user-prompt, stop, session-end, pre-compact) must call this BEFORE any
+ * `honcho.session(...)`, `honcho.peer(...)`, `session.addPeers(...)`,
+ * `session.addMessages(...)`, `peer.chat(...)`, or any other Honcho API
+ * contact, so a rejected session never touches the Honcho API.
  */
 export function isAdmitted(hookInput: unknown): boolean {
   const config = loadConfig();

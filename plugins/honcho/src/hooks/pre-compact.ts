@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, isAdmitted, getCachedStdin, getObservationMode } from "../config.js";
 import { Spinner } from "../spinner.js";
 import { setMemoryState } from "../state.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -105,6 +105,11 @@ export async function handlePreCompact(): Promise<void> {
     }
   } catch {
     // No input, continue with defaults
+  }
+
+  // Admission gate: see session-start.ts for the contract. Unset = admit all.
+  if (!isAdmitted(hookInput)) {
+    process.exit(0);
   }
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
