@@ -5,7 +5,7 @@
     "": {
       "name": "claude-honcho",
       "dependencies": {
-        "@honcho-ai/sdk": "^2.1.0",
+        "@honcho-ai/sdk": "^2.1.1",
         "@modelcontextprotocol/sdk": "^1.26.0",
       },
       "devDependencies": {
@@ -15,7 +15,7 @@
     },
   },
   "packages": {
-    "@honcho-ai/sdk": ["@honcho-ai/sdk@2.1.0", "", { "dependencies": { "zod": "4.0.0" } }, "sha512-GPyeKTDRhg5jd77RAh63LwrxLxnbluLdYUF1gsI6g6CU4eTyv8s1+KJ3/OTCiBwJ/dhjznNvQUngkUjjnNzUTA=="],
+    "@honcho-ai/sdk": ["@honcho-ai/sdk@2.2.0", "", { "dependencies": { "zod": "4.0.0" } }, "sha512-SyygN+BrpUB2fRjhwcYmT+tcEhHrKmbj9nOZLVUFY7M5YBswJ+mZb/CeLpNbRh+QQTU8F8JWY3lQat95c6nwmA=="],
 
     "@hono/node-server": ["@hono/node-server@1.19.9", "", { "peerDependencies": { "hono": "^4" } }, "sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw=="],
 
