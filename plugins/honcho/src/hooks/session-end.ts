@@ -277,6 +277,9 @@ export async function handleSessionEnd(): Promise<void> {
                 meaningful: msg.isMeaningful || false,
                 session_affinity: sessionName,
               },
+              ...(msg.isMeaningful
+                ? {}
+                : { configuration: { reasoning: { enabled: false } } }),
             })
           );
         })
@@ -286,6 +289,7 @@ export async function handleSessionEnd(): Promise<void> {
       `[Session ended] Reason: ${reason}, Messages: ${transcriptMessages.length}, Time: ${new Date().toISOString()}`,
       {
         createdAt: new Date().toISOString(),
+        configuration: { reasoning: { enabled: false } },
         metadata: {
           instance_id: instanceId || undefined,
           session_affinity: sessionName,
