@@ -1,6 +1,7 @@
 {
   "honcho": {
     "command": "bun",
-    "args": ["run", "${CLAUDE_PLUGIN_ROOT}/mcp-server.ts"]
+    "args": ["run", "${CLAUDE_PLUGIN_ROOT}/mcp-server.ts"],
+    "timeout": 150000
   }
 }
