@@ -4,6 +4,8 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-07-21
+
 ### Fixed
 
 - MCP `chat` tool no longer times out on long dialectic queries (~80s at max reasoning). Dialectic calls run on a dedicated 120s-timeout Honcho client instead of the shared 8s one, and the plugin's MCP server config sets a 150s per-tool timeout so the harness-side wall clock always outlasts the SDK's.
