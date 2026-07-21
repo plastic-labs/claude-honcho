@@ -545,6 +545,9 @@ function handleSetConfig(args: Record<string, unknown>) {
   };
 }
 
+/** Client-side ceiling for dialectic chat calls. */
+const DIALECTIC_TIMEOUT_MS = 120_000;
+
 export async function runMcpServer(): Promise<void> {
   setDetectedHost("claude_code");
   const config = loadConfig();
@@ -567,6 +570,13 @@ export async function runMcpServer(): Promise<void> {
 
   // Initialize Honcho client
   const honcho = new Honcho(getHonchoClientOptions(config));
+
+  // Dedicated client for dialectic queries, which run far past the shared
+  // 8s timeout (≈80s at max reasoning)
+  const honchoDialectic = new Honcho({
+    ...getHonchoClientOptions(config),
+    timeout: DIALECTIC_TIMEOUT_MS,
+  });
 
   // List available tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -845,7 +855,9 @@ export async function runMcpServer(): Promise<void> {
           const query = args?.query as string;
           const reasoningLevel = (args?.reasoning_level as string) ?? config.reasoningLevel ?? "medium";
 
-          const response = await activePeer.chat(query, {
+          const dialecticPeer = await honchoDialectic.peer(activePeer.id);
+
+          const response = await dialecticPeer.chat(query, {
             ...(chatTarget ? { target: chatTarget } : {}),
             session,
             reasoningLevel,
