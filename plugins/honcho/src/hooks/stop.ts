@@ -1,7 +1,7 @@
-import { Honcho } from "@honcho-ai/sdk";
+import { Honcho, Session, Peer } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
 import { existsSync, readFileSync } from "fs";
-import { getInstanceIdForCwd } from "../cache.js";
+import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visStopMessage } from "../visual.js";
 
@@ -16,6 +16,8 @@ interface HookInput {
 interface TranscriptEntry {
   type?: string;
   role?: string;
+  timestamp?: string;
+  isMeta?: boolean;
   message?: {
     role?: string;
     content: string | Array<{ type: string; text?: string; name?: string; input?: any }>;
@@ -23,73 +25,66 @@ interface TranscriptEntry {
   content?: string | Array<{ type: string; text?: string }>;
 }
 
-/**
- * Check if content is meaningful (not just tool announcements)
- */
-function isMeaningfulContent(content: string): boolean {
-  if (content.length < 20) return false;
-
-  // Skip pure tool invocation one-liners
-  const toolAnnouncements = [
-    /^(I'll|Let me|I'm going to|I will|Now I'll|First,? I'll)\s+(run|use|execute|check|read|look at|search|edit|write|create)/i,
-  ];
-  for (const pattern of toolAnnouncements) {
-    if (pattern.test(content.trim()) && content.length < 150) {
-      return false;
-    }
-  }
-
-  return true;
+/** True for a real user-typed prompt. Excludes tool_results, isMeta entries, and `<...>` command caveats. */
+function isRealUserPrompt(entry: TranscriptEntry): boolean {
+  if (entry.isMeta) return false;
+  const mc = entry.message?.content ?? entry.content;
+  const text =
+    typeof mc === "string"
+      ? mc
+      : Array.isArray(mc)
+        ? mc.filter((b) => b.type === "text" && b.text).map((b) => b.text!).join("")
+        : "";
+  const trimmed = text.trim();
+  return trimmed.length > 0 && !trimmed.startsWith("<");
 }
 
-/**
- * Extract the last assistant message from the transcript
- */
-function getLastAssistantMessage(transcriptPath: string): string | null {
-  if (!transcriptPath || !existsSync(transcriptPath)) {
-    return null;
+function assistantText(entry: TranscriptEntry): string {
+  const mc = entry.message?.content ?? entry.content;
+  if (typeof mc === "string") return mc;
+  if (Array.isArray(mc)) {
+    return mc.filter((p) => p.type === "text" && p.text).map((p) => p.text!).join("\n\n");
   }
+  return "";
+}
 
+/** Assistant text blocks since the last real user prompt (the just-completed turn). */
+function getCurrentTurnAssistantMessages(transcriptPath: string): Array<{ text: string; timestamp?: string }> {
+  if (!transcriptPath || !existsSync(transcriptPath)) return [];
+
+  let lines: string[];
   try {
-    const content = readFileSync(transcriptPath, "utf-8");
-    const lines = content.trim().split("\n").filter((line) => line.trim());
-
-    // Read from the end to find the last assistant message
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const entry: TranscriptEntry = JSON.parse(lines[i]);
-
-        const entryType = entry.type || entry.role;
-        const messageContent = entry.message?.content || entry.content;
-
-        if (entryType === "assistant" && messageContent) {
-          let assistantContent = "";
-
-          if (typeof messageContent === "string") {
-            assistantContent = messageContent;
-          } else if (Array.isArray(messageContent)) {
-            // Extract text blocks only (skip tool_use blocks)
-            const textBlocks = messageContent
-              .filter((p) => p.type === "text" && p.text)
-              .map((p) => p.text!)
-              .join("\n\n");
-
-            assistantContent = textBlocks;
-          }
-
-          if (assistantContent && assistantContent.trim()) {
-            return assistantContent;
-          }
-        }
-      } catch {
-        continue;
-      }
-    }
+    lines = readFileSync(transcriptPath, "utf-8").trim().split("\n").filter((l) => l.trim());
   } catch {
-    // Failed to read transcript
+    return [];
   }
 
-  return null;
+  // Walk back to the last real user prompt — the start of the current turn.
+  let lastPromptIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const entry: TranscriptEntry = JSON.parse(lines[i]);
+      if ((entry.type || entry.role) === "user" && isRealUserPrompt(entry)) {
+        lastPromptIdx = i;
+        break;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  const blocks: Array<{ text: string; timestamp?: string }> = [];
+  for (let i = lastPromptIdx + 1; i < lines.length; i++) {
+    try {
+      const entry: TranscriptEntry = JSON.parse(lines[i]);
+      if ((entry.type || entry.role) !== "assistant") continue;
+      const text = assistantText(entry);
+      if (text && text.trim()) blocks.push({ text, timestamp: entry.timestamp });
+    } catch {
+      continue;
+    }
+  }
+  return blocks;
 }
 
 export async function handleStop(): Promise<void> {
@@ -132,40 +127,50 @@ export async function handleStop(): Promise<void> {
   // Set log context
   setLogContext(cwd, sessionName);
 
-  // Get the last assistant message from the transcript
-  const lastMessage = getLastAssistantMessage(transcriptPath || "");
+  const turnMessages = getCurrentTurnAssistantMessages(transcriptPath || "");
 
-  if (!lastMessage || !isMeaningfulContent(lastMessage)) {
-    logHook("stop", `Skipping (no meaningful content)`);
-    // Don't show systemMessage for skips — too noisy since this fires every turn
+  if (turnMessages.length === 0) {
+    logHook("stop", `Skipping (no assistant content this turn)`);
     process.exit(0);
   }
 
-  logHook("stop", `Capturing assistant response (${lastMessage.length} chars)`);
+  logHook("stop", `Capturing ${turnMessages.length} assistant message(s) this turn`);
 
   try {
     const honcho = new Honcho(getHonchoClientOptions(config));
 
-    // Get session and peer using new fluent API
-    const session = await honcho.session(sessionName);
-    const aiPeer = await honcho.peer(config.aiPeer);
+    // Local peer handle, no get-or-create hop (see postUserMessage in user-prompt.ts).
+    const noEnsure = () => Promise.resolve();
+    const aiPeer = new Peer(config.aiPeer, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
 
-    // Upload the assistant response
-    logApiCall("session.addMessages", "POST", `assistant response (${lastMessage.length} chars)`);
+    // Last block is the turn's response; earlier ones are intermediate reasoning.
+    const fallbackTs = new Date().toISOString();
+    const lastIdx = turnMessages.length - 1;
+    const messages = turnMessages.flatMap((block, i) =>
+      chunkContent(block.text).map((chunk) =>
+        aiPeer.message(chunk, {
+          createdAt: block.timestamp || fallbackTs,
+          metadata: {
+            instance_id: instanceId || undefined,
+            type: i === lastIdx ? "assistant_response" : "assistant_intermediate",
+            session_affinity: sessionName,
+          },
+        })
+      )
+    );
+    logApiCall("session.addMessages", "POST", `${turnMessages.length} assistant msg(s), ${messages.length} chunk(s), direct`);
 
-    await session.addMessages([
-      aiPeer.message(lastMessage.slice(0, 3000), {
-        createdAt: new Date().toISOString(),
-        metadata: {
-          instance_id: instanceId || undefined,
-          type: "assistant_response",
-          session_affinity: sessionName,
-        },
-      }),
-    ]);
+    try {
+      const session = new Session(sessionName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
+      await addMessagesBatched(session, messages);
+    } catch (e) {
+      logHook("stop", `Direct upload failed, retrying via get-or-create: ${e}`);
+      const session = await honcho.session(sessionName);
+      await addMessagesBatched(session, messages);
+    }
 
-    logHook("stop", `Assistant response saved`);
-    visStopMessage("out", `saved response (${lastMessage.length} chars)`);
+    logHook("stop", `Saved ${turnMessages.length} assistant message(s)`);
+    visStopMessage("out", `saved ${turnMessages.length} assistant msg(s)`);
   } catch (error) {
     logHook("stop", `Upload failed: ${error}`, { error: String(error) });
   }

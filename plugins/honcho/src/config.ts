@@ -76,6 +76,7 @@ export interface HostConfig {
   enabled?: boolean;
   logging?: boolean;
   saveMessages?: boolean;
+  saveToolUse?: boolean;
   sessionStrategy?: SessionStrategy;
   sessionPeerPrefix?: boolean;
   /** Default reasoning level for Honcho dialectic calls (default: "medium") */
@@ -171,6 +172,8 @@ interface HonchoFileConfig {
   aiPeer?: string;
   sessions?: Record<string, string>;
   saveMessages?: boolean;
+  /** Save [Tool] action summaries to Honcho (default: false) */
+  saveToolUse?: boolean;
   messageUpload?: MessageUploadConfig;
   contextRefresh?: ContextRefreshConfig;
   endpoint?: HonchoEndpointConfig;
@@ -217,6 +220,8 @@ export interface HonchoCLAUDEConfig {
   sessions?: Record<string, string>;
   /** Save messages to Honcho (default: true) */
   saveMessages?: boolean;
+  /** Save [Tool] action summaries to Honcho (default: false — low signal, redundant with assistant reasoning) */
+  saveToolUse?: boolean;
   /** Default reasoning level for Honcho dialectic calls (default: "medium") */
   reasoningLevel?: ReasoningLevel;
   /**
@@ -339,6 +344,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     sessionPeerPrefix: hostBlock?.sessionPeerPrefix ?? raw.sessionPeerPrefix,
     sessions: raw.sessions,
     saveMessages: hostBlock?.saveMessages ?? raw.saveMessages,
+    saveToolUse: hostBlock?.saveToolUse ?? raw.saveToolUse,
     reasoningLevel: hostBlock?.reasoningLevel ?? raw.reasoningLevel,
     observationMode: hostBlock?.observationMode ?? raw.observationMode,
     messageUpload: hostBlock?.messageUpload ?? raw.messageUpload,
@@ -379,6 +385,7 @@ export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null 
     workspace,
     aiPeer,
     saveMessages: process.env.HONCHO_SAVE_MESSAGES !== "false",
+    saveToolUse: process.env.HONCHO_SAVE_TOOL_USE === "true",
     enabled: process.env.HONCHO_ENABLED !== "false",
     logging: process.env.HONCHO_LOGGING !== "false",
   };
@@ -414,6 +421,9 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   }
   if (process.env.HONCHO_LOGGING === "false") {
     config.logging = false;
+  }
+  if (process.env.HONCHO_SAVE_TOOL_USE !== undefined) {
+    config.saveToolUse = process.env.HONCHO_SAVE_TOOL_USE === "true";
   }
   return config;
 }
