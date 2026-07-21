@@ -147,21 +147,27 @@ export async function handleUserPrompt(): Promise<void> {
   const messageCountBefore = getMessageCount();
   incrementMessageCount();
 
-  // On the first prompt only, nudge active use of the honcho MCP tools
-  // (search/chat/get_context) instead of relying on this passive injection.
+  // First prompt of the session: nudge the harness to actively call the honcho
+  // MCP tools (search/chat/get_context) rather than rely only on this passive
+  // injection. Injected once to respect a lean per-turn context budget.
   if (messageCountBefore === 0) {
     sessionToolHint =
       `Honcho memory tools are available — call honcho.search(query) or honcho.get_context to recall ` +
       `facts about ${config.peerName} across sessions, and honcho.chat(question) for dialectic/` +
       `psychological questions. Prefer querying over guessing when the user's history is relevant.`;
   }
-  // Show each one-time banner once: nag on prompt 1, link right after (prompt 1,
-  // or 2 if the nag took prompt 1).
+  // Stagger the one-off banners so the first prompt isn't crowded. The
+  // version-update nag (if stale) takes the first message and bumps the GUI
+  // session link to the second; with no nag, the link shows on the first.
+  // The nag flag is written at SessionStart and stable for the session, so
+  // its presence on message 2 tells us the link hasn't been shown yet.
   const nag = readVersionNag();
-  const link = formatSessionLink(honchoSessionUrl(config.workspace, sessionName));
-  let sessionLink: string | undefined;
-  if (messageCountBefore === 0) sessionLink = nag ?? link;
-  else if (messageCountBefore === 1 && nag) sessionLink = link;
+  const sessionLink =
+    messageCountBefore === 0
+      ? nag ?? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
+      : messageCountBefore === 1 && nag
+        ? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
+        : undefined;
 
   // Skip trivial prompts — no context needed for "y", "ok", etc.
   if (shouldSkipContextRetrieval(prompt)) {
@@ -220,11 +226,9 @@ export async function handleUserPrompt(): Promise<void> {
   process.exit(0);
 }
 
-/**
- * Upload a user prompt. SessionStart already created the session/peers, so we
- * build handles locally and skip the get-or-create round trips (1 hop, not 3).
- * Falls back to the fluent path if the direct write fails.
- */
+
+// Upload a user prompt. SessionStart already created the session/peers
+
 async function postUserMessage(
   config: any,
   prompt: string,
