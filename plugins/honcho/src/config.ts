@@ -1,6 +1,7 @@
 import { homedir } from "os";
 import { join, basename } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { spawnSync } from "child_process";
 import { captureGitState } from "./git.js";
 import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
 
@@ -90,6 +91,8 @@ export interface HostConfig {
   contextRefresh?: ContextRefreshConfig;
   localContext?: LocalContextConfig;
   endpoint?: HonchoEndpointConfig;
+  /** Per-host override for the external admission policy command (see root field of the same name). */
+  admissionCommand?: string;
 }
 
 let _detectedHost: HonchoHost | null = null;
@@ -191,6 +194,13 @@ interface HonchoFileConfig {
    *  ignoring host-specific blocks. When false (default), each host
    *  uses its own block and flat fields are fallbacks only. */
   globalOverride?: boolean;
+  /** Optional external admission policy. When set, every capture hook
+   *  (session-start, user-prompt, post-tool-use, stop) shells out to this
+   *  command with the hook's HookInput JSON on stdin before creating any
+   *  session/peer or writing any message. Exit 0 admits; non-zero (or a
+   *  spawn error) rejects. Unset (default): every session is admitted,
+   *  matching pre-existing behavior. See isAdmitted(). */
+  admissionCommand?: string;
   // Legacy flat fields (read-only fallbacks when no hosts block)
   cursorPeer?: string;
   claudePeer?: string;
@@ -241,6 +251,8 @@ export interface HonchoCLAUDEConfig {
   logging?: boolean;
   /** When true, flat workspace/aiPeer fields apply to ALL hosts */
   globalOverride?: boolean;
+  /** Optional external admission policy command (see the file-config field of the same name above). */
+  admissionCommand?: string;
 }
 
 function deepEqual(a: unknown, b: unknown): boolean {
@@ -348,6 +360,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     enabled: hostBlock?.enabled ?? raw.enabled,
     logging: hostBlock?.logging ?? raw.logging,
     globalOverride: raw.globalOverride,
+    admissionCommand: hostBlock?.admissionCommand ?? raw.admissionCommand,
   };
 
   return mergeWithEnvVars(config);
@@ -650,6 +663,48 @@ export function isLoggingEnabled(): boolean {
 export function isPluginEnabled(): boolean {
   const config = loadConfig();
   return config?.enabled !== false;
+}
+
+/**
+ * Generic per-session admission policy hook.
+ *
+ * When `admissionCommand` is unset (the default), every session is admitted
+ * -- this is a strict no-op, existing installs see zero behavior change.
+ *
+ * When set, the configured command is spawned with the hook's raw
+ * HookInput JSON written to its stdin. Exit code 0 admits (capture
+ * proceeds); any non-zero exit, or a failure to spawn the command at all,
+ * REJECTS -- fail-closed. A misconfigured or crashing admission policy must
+ * not silently fall back to "capture everything"; that would defeat the
+ * purpose of having a policy at all.
+ *
+ * Callers (each of the six write/create hooks: session-start, post-tool-use,
+ * user-prompt, stop, session-end, pre-compact) must call this BEFORE any
+ * `honcho.session(...)`, `honcho.peer(...)`, `session.addPeers(...)`,
+ * `session.addMessages(...)`, `peer.chat(...)`, or any other Honcho API
+ * contact, so a rejected session never touches the Honcho API.
+ */
+export function isAdmitted(hookInput: unknown): boolean {
+  const config = loadConfig();
+  const command = config?.admissionCommand;
+  if (!command) {
+    return true;
+  }
+
+  try {
+    const result = spawnSync(command, {
+      input: JSON.stringify(hookInput ?? {}),
+      shell: true,
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+    if (result.error) {
+      return false;
+    }
+    return result.status === 0;
+  } catch {
+    return false;
+  }
 }
 
 export function setPluginEnabled(enabled: boolean): void {

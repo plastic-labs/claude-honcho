@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, isAdmitted, getCachedStdin } from "../config.js";
 import { existsSync, readFileSync } from "fs";
 import { getInstanceIdForCwd } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -121,6 +121,11 @@ export async function handleStop(): Promise<void> {
   // If stop_hook_active is true, Claude is already continuing from a previous stop hook
   // Don't process to avoid infinite loops
   if (hookInput.stop_hook_active) {
+    process.exit(0);
+  }
+
+  // Admission gate: see session-start.ts for the contract. Unset = admit all.
+  if (!isAdmitted(hookInput)) {
     process.exit(0);
   }
 

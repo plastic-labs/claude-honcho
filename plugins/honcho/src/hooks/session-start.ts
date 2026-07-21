@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
+import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, isAdmitted, getCachedStdin, getObservationMode } from "../config.js";
 import {
   setCachedUserContext,
   setCachedSessionId,
@@ -45,6 +45,13 @@ export async function handleSessionStart(): Promise<void> {
     }
   } catch {
     // No input or invalid JSON
+  }
+
+  // Admission gate: an unset admissionCommand admits everything (no-op,
+  // preserves existing behavior). A configured command decides whether
+  // this session is allowed to create/write to Honcho state at all.
+  if (!isAdmitted(hookInput)) {
+    process.exit(0);
   }
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();

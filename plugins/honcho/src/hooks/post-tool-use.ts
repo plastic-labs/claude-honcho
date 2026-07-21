@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, isAdmitted, getCachedStdin } from "../config.js";
 import { appendClaudeWork, getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visCapture } from "../visual.js";
@@ -203,6 +203,15 @@ export async function handlePostToolUse(): Promise<void> {
       hookInput = JSON.parse(input);
     }
   } catch {
+    process.exit(0);
+  }
+
+  // Admission gate: see session-start.ts for the contract. Unset = admit all.
+  // NOTE: this hook's local HookInput type does not declare session_id, but
+  // the raw JSON payload from Claude Code's PostToolUse event carries it --
+  // JSON.parse does not strip undeclared fields, so isAdmitted() still sees
+  // it at runtime. Do not "fix" this by stripping fields before the call.
+  if (!isAdmitted(hookInput)) {
     process.exit(0);
   }
 
