@@ -559,7 +559,7 @@ export async function runMcpServer(): Promise<void> {
   const server = new Server(
     {
       name: "honcho",
-      version: "0.2.4",
+      version: "0.2.6",
     },
     {
       capabilities: {
@@ -572,10 +572,12 @@ export async function runMcpServer(): Promise<void> {
   const honcho = new Honcho(getHonchoClientOptions(config));
 
   // Dedicated client for dialectic queries, which run far past the shared
-  // 8s timeout (≈80s at max reasoning)
+  // 8s timeout (≈80s at max reasoning). No retries: the chat case enforces
+  // one DIALECTIC_TIMEOUT_MS deadline across the whole flow.
   const honchoDialectic = new Honcho({
     ...getHonchoClientOptions(config),
     timeout: DIALECTIC_TIMEOUT_MS,
+    maxRetries: 0,
   });
 
   // List available tools
@@ -855,22 +857,39 @@ export async function runMcpServer(): Promise<void> {
           const query = args?.query as string;
           const reasoningLevel = (args?.reasoning_level as string) ?? config.reasoningLevel ?? "medium";
 
-          const dialecticPeer = await honchoDialectic.peer(activePeer.id);
-
-          const response = await dialecticPeer.chat(query, {
-            ...(chatTarget ? { target: chatTarget } : {}),
-            session,
-            reasoningLevel,
+          // Single deadline for the whole flow (peer resolve + chat), so
+          // sequential requests can't stack past the harness's 150s budget
+          let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+          const deadline = new Promise<never>((_, reject) => {
+            deadlineTimer = setTimeout(
+              () => reject(new Error(`Dialectic call exceeded ${DIALECTIC_TIMEOUT_MS}ms`)),
+              DIALECTIC_TIMEOUT_MS
+            );
           });
 
-          return {
-            content: [
-              {
-                type: "text",
-                text: response ?? "No response from Honcho",
-              },
-            ],
-          };
+          const chatFlow = (async () => {
+            const dialecticPeer = await honchoDialectic.peer(activePeer.id);
+            return dialecticPeer.chat(query, {
+              ...(chatTarget ? { target: chatTarget } : {}),
+              session,
+              reasoningLevel,
+            });
+          })();
+
+          try {
+            const response = await Promise.race([chatFlow, deadline]);
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: response ?? "No response from Honcho",
+                },
+              ],
+            };
+          } finally {
+            clearTimeout(deadlineTimer);
+            chatFlow.catch(() => {});
+          }
         }
 
         case "create_conclusion": {
