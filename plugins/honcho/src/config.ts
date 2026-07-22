@@ -628,10 +628,31 @@ export function getClaudeSettingsDir(): string {
   return join(homedir(), ".claude");
 }
 
+/** Longest declared path that is `cwd` or an ancestor of it. */
+export function resolveSessionPath(
+  sessions: Record<string, string>,
+  cwd: string,
+): string | null {
+  if (sessions[cwd]) return sessions[cwd];
+
+  // A declared root owns its subtree: work done in <project>/src belongs to
+  // <project>, not to a session named "src". Exact-match alone forks a session
+  // per subdirectory the user happens to launch from, and the memory for one
+  // project ends up scattered over "src", "scripts", "modules", ...
+  let best: string | null = null;
+  for (const root of Object.keys(sessions)) {
+    const prefix = root.endsWith("/") ? root : `${root}/`;
+    if (cwd.startsWith(prefix) && (best === null || root.length > best.length)) {
+      best = root;
+    }
+  }
+  return best ? sessions[best] : null;
+}
+
 export function getSessionForPath(cwd: string): string | null {
   const config = loadConfig();
   if (!config?.sessions) return null;
-  return config.sessions[cwd] || null;
+  return resolveSessionPath(config.sessions, cwd);
 }
 
 export function deriveSessionName(
