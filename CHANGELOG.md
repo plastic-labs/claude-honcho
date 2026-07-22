@@ -4,6 +4,20 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-07-22
+
+### Added
+
+- `saveToolUse` config flag (`HONCHO_SAVE_TOOL_USE` env var) to opt into uploading tool-use messages.
+
+### Changed
+
+- Messages upload live (user prompts on submit, assistant messages from the stop hook) instead of being queued and flushed at session end.
+
+### Fixed
+
+- Stop hook no longer uploads assistant messages when the turn has no preceding user prompt.
+
 ## [0.2.6] - 2026-07-21
 
 ### Fixed

@@ -72,6 +72,8 @@ function getCurrentTurnAssistantMessages(transcriptPath: string): Array<{ text: 
       continue;
     }
   }
+  // return nothing if there's no last prompt
+  if (lastPromptIdx === -1) return [];
 
   const blocks: Array<{ text: string; timestamp?: string }> = [];
   for (let i = lastPromptIdx + 1; i < lines.length; i++) {

@@ -120,7 +120,8 @@ function parseTranscript(transcriptPath: string): Array<{ role: string; content:
           }
 
           if (assistantContent && assistantContent.trim()) {
-            // only used to build ~/.honcho/claude-context.md; not uploaded here
+            // Feeds the local work summary only — assistant messages upload live
+            // from the stop hook, not here.
             messages.push({
               role: "assistant",
               content: assistantContent,
