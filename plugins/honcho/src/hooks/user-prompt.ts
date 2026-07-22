@@ -27,11 +27,40 @@ interface HookInput {
   workspace_roots?: string[];
 }
 
+// Terse acknowledgements — genuine human input, but too low-signal to reason
+// over. Still uploaded (for conversational continuity) but with deriver reasoning
+// disabled, so they don't mint content-free conclusions like "user agreed with
+// the statement 'yes'" (issue #66).
+const TRIVIAL_REPLY_PATTERN = /^(yes|no|ok|sure|thanks|y|n|yep|nope|yeah|nah|continue|go ahead|do it|proceed)$/i;
+
+function isTerseReply(prompt: string): boolean {
+  return TRIVIAL_REPLY_PATTERN.test(prompt.trim());
+}
+
 // Patterns to skip context injection
 const SKIP_CONTEXT_PATTERNS = [
-  /^(yes|no|ok|sure|thanks|y|n|yep|nope|yeah|nah|continue|go ahead|do it|proceed)$/i,
+  TRIVIAL_REPLY_PATTERN,
   /^\//, // slash commands
 ];
+
+// Harness-injected turns that Claude Code delivers in the user-message slot but
+// the human never typed: background-task events, slash-command stdout, injected
+// system reminders. Uploading these as user messages makes the deriver mint
+// "facts about the user" from plumbing (issue #66). Mirrors the isRealUserPrompt
+// guard already on the assistant path in stop.ts.
+const HARNESS_INJECTED_PATTERNS = [
+  /^<task-notification>/,
+  /^<local-command-stdout>/,
+  /^<command-name>/,
+  /^<command-message>/,
+  /^<system-reminder>/,
+  /^<bash-(stdout|stderr|input)>/,
+];
+
+function isHarnessInjected(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  return HARNESS_INJECTED_PATTERNS.some((p) => p.test(trimmed));
+}
 
 const FETCH_TIMEOUT_MS = 4000;
 
@@ -135,8 +164,13 @@ export async function handleUserPrompt(): Promise<void> {
 
   // Upload the prompt immediately, concurrent with context retrieval and
   // awaited before each exit. Log-and-drop on failure, like stop.ts.
+  // Skip harness-injected turns (task-notifications, command stdout, system
+  // reminders): they aren't human input and would pollute the user's memory (#66).
   let uploadPromise: Promise<void> = Promise.resolve();
-  if (config.saveMessages !== false) {
+  const harnessInjected = isHarnessInjected(prompt);
+  if (harnessInjected) {
+    logHook("user-prompt", "Skipping upload (harness-injected content, not user input)");
+  } else if (config.saveMessages !== false) {
     uploadPromise = postUserMessage(config, prompt, instanceId || undefined, sessionName)
       .catch((e) => {
         logHook("user-prompt", `Immediate upload failed: ${e}`);
@@ -240,6 +274,9 @@ async function postUserMessage(
 
   const userPeer = new Peer(config.peerName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
   const createdAt = new Date().toISOString();
+  // Terse acknowledgements ("yes", "ok") are real input but not worth reasoning
+  // over — disable the deriver per-message so they don't become junk conclusions.
+  const configuration = isTerseReply(prompt) ? { reasoning: { enabled: false } } : undefined;
   const messages = chunkContent(prompt).map((chunk) =>
     userPeer.message(chunk, {
       createdAt,
@@ -247,6 +284,7 @@ async function postUserMessage(
         instance_id: instanceId || undefined,
         session_affinity: sessionName,
       },
+      ...(configuration ? { configuration } : {}),
     })
   );
 
