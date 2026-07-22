@@ -2,13 +2,11 @@ import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
 import { existsSync, readFileSync } from "fs";
 import {
-  getQueuedMessages,
-  markMessagesUploaded,
   generateClaudeSummary,
   saveClaudeLocalContext,
   loadClaudeLocalContext,
   getInstanceIdForCwd,
-  chunkContent,
+  addMessagesBatched,
 } from "../cache.js";
 import { playCooldown } from "../spinner.js";
 import { clearSessionFiles } from "../state.js";
@@ -122,12 +120,12 @@ function parseTranscript(transcriptPath: string): Array<{ role: string; content:
           }
 
           if (assistantContent && assistantContent.trim()) {
-            const isMeaningful = isMeaningfulAssistantContent(assistantContent);
-            const maxLen = isMeaningful ? 3000 : 1500;
+            // Feeds the local work summary only — assistant messages upload live
+            // from the stop hook, not here.
             messages.push({
               role: "assistant",
-              content: assistantContent.slice(0, maxLen),
-              isMeaningful,
+              content: assistantContent,
+              isMeaningful: isMeaningfulAssistantContent(assistantContent),
               timestamp: entry.timestamp,
             });
           }
@@ -242,46 +240,12 @@ export async function handleSessionEnd(): Promise<void> {
   try {
     const honcho = new Honcho(getHonchoClientOptions(config));
 
-    const [session, userPeer, aiPeer] = await Promise.all([
+    const [session, aiPeer] = await Promise.all([
       honcho.session(sessionName),
-      honcho.peer(config.peerName),
       honcho.peer(config.aiPeer),
     ]);
 
-    // Build all upload batches before sending
-    const queuedMessages = getQueuedMessages(cwd);
-    logHook("session-end", `Processing ${queuedMessages.length} queued + ${assistantMessages.length} assistant msgs`);
-
-    const userMessages = queuedMessages.flatMap((msg) => {
-      const chunks = chunkContent(msg.content);
-      return chunks.map(chunk =>
-        userPeer.message(chunk, {
-          createdAt: msg.timestamp,
-          metadata: {
-            instance_id: msg.instanceId || undefined,
-            session_affinity: sessionName,
-          },
-        })
-      );
-    });
-
-    const aiMessages = (config.saveMessages !== false && assistantMessages.length > 0)
-      ? assistantMessages.flatMap((msg) => {
-          const chunks = chunkContent(msg.content);
-          return chunks.map(chunk =>
-            aiPeer.message(chunk, {
-              createdAt: msg.timestamp,
-              metadata: {
-                instance_id: instanceId || undefined,
-                type: msg.isMeaningful ? 'assistant_prose' : 'assistant_brief',
-                meaningful: msg.isMeaningful || false,
-                session_affinity: sessionName,
-              },
-            })
-          );
-        })
-      : [];
-
+    // just the end marker; messages upload live elsewhere
     const endMarker = aiPeer.message(
       `[Session ended] Reason: ${reason}, Messages: ${transcriptMessages.length}, Time: ${new Date().toISOString()}`,
       {
@@ -293,21 +257,13 @@ export async function handleSessionEnd(): Promise<void> {
       }
     );
 
-    // Single addMessages call with everything — one round trip instead of three.
-    const allMessages = [...userMessages, ...aiMessages, endMarker];
-
-    if (allMessages.length > 0) {
-      const meaningfulCount = assistantMessages.filter(m => m.isMeaningful).length;
-      logApiCall("session.addMessages", "POST",
-        `${userMessages.length} user + ${aiMessages.length} assistant (${meaningfulCount} meaningful) + 1 marker`);
+    {
+      logApiCall("session.addMessages", "POST", `end marker`);
 
       // Start API upload immediately; run animation concurrently.
-      const uploadPromise = session.addMessages(allMessages);
+      const uploadPromise = addMessagesBatched(session, [endMarker]);
 
-      // Trap SIGTERM/SIGINT to prevent default termination while upload
-      // is in flight. The handler is a no-op — its only purpose is to
-      // keep the process alive. Cooldown's own exit handler cleans up
-      // the cursor if the process exits unexpectedly.
+      // No-op signal handlers keep the process alive while the upload is in flight.
       const sigHandler = () => {};
       process.on("SIGINT", sigHandler);
       if (process.platform === "win32") {
@@ -325,8 +281,7 @@ export async function handleSessionEnd(): Promise<void> {
         }
       };
 
-      // Hard safety net: if the upload hangs beyond SDK timeout + margin,
-      // force exit. Local summary was already saved in phase 1.
+      // Force exit if the upload hangs (local summary already saved above).
       const hardTimeout = setTimeout(() => {
         logHook("session-end", "Hard timeout reached — forcing exit");
         removeSigHandlers();
@@ -334,24 +289,16 @@ export async function handleSessionEnd(): Promise<void> {
       }, 12_000);
       hardTimeout.unref();
 
-      let uploadSucceeded = false;
       await Promise.all([
-        uploadPromise.then(() => { uploadSucceeded = true; }).finally(() => {
+        uploadPromise.finally(() => {
           clearTimeout(hardTimeout);
           removeSigHandlers();
         }),
         playCooldown("saving memory"),
       ]);
-
-      if (uploadSucceeded && queuedMessages.length > 0) {
-        markMessagesUploaded(cwd);
-      }
-    } else {
-      await playCooldown("saving memory");
     }
 
-    const meaningfulCount = assistantMessages.filter(m => m.isMeaningful).length;
-    logHook("session-end", `Session saved: ${assistantMessages.length} assistant msgs (${meaningfulCount} meaningful), ${queuedMessages.length} queued msgs`);
+    logHook("session-end", `Session ended — end marker saved (${assistantMessages.length} assistant msgs handled live)`);
     clearSessionFiles(hookInput.session_id);
     process.exit(0);
   } catch (error) {

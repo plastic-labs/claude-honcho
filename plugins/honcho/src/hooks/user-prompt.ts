@@ -1,4 +1,4 @@
-import { Honcho } from "@honcho-ai/sdk";
+import { Honcho, Session, Peer } from "@honcho-ai/sdk";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
@@ -12,7 +12,8 @@ import {
   shouldRefreshKnowledgeGraph,
   markKnowledgeGraphRefreshed,
   getInstanceIdForCwd,
-  queueMessage,
+  chunkContent,
+  addMessagesBatched,
 } from "../cache.js";
 import { logHook, logApiCall, logCache, setLogContext } from "../log.js";
 import { visContextLine, visSkipMessage, addSystemMessage, verboseApiResult, verboseList } from "../visual.js";
@@ -132,9 +133,14 @@ export async function handleUserPrompt(): Promise<void> {
   logHook("user-prompt", `Prompt received (${prompt.length} chars)`);
   setSessionLink(honchoSessionUrl(config.workspace, sessionName), sessionName, hookInput.session_id);
 
-  // Queue user prompt for upload at session-end (instant, no network)
+  // Upload the prompt immediately, concurrent with context retrieval and
+  // awaited before each exit. Log-and-drop on failure, like stop.ts.
+  let uploadPromise: Promise<void> = Promise.resolve();
   if (config.saveMessages !== false) {
-    queueMessage(prompt, config.peerName, cwd, instanceId || undefined);
+    uploadPromise = postUserMessage(config, prompt, instanceId || undefined, sessionName)
+      .catch((e) => {
+        logHook("user-prompt", `Immediate upload failed: ${e}`);
+      });
   }
 
   // Track message count for threshold-based refresh
@@ -167,6 +173,7 @@ export async function handleUserPrompt(): Promise<void> {
   if (shouldSkipContextRetrieval(prompt)) {
     logHook("user-prompt", "Skipping context (trivial prompt)");
     visSkipMessage("user-prompt", sessionLink ? `${sessionLink} · trivial prompt` : "trivial prompt");
+    await uploadPromise;
     process.exit(0);
   }
 
@@ -182,6 +189,7 @@ export async function handleUserPrompt(): Promise<void> {
     verboseList("peer.context() -> peerCard (cached)", cachedContext?.peerCard);
 
     serveContext(config.peerName, cachedContext, true, sessionLink);
+    await uploadPromise;
     process.exit(0);
   }
 
@@ -201,6 +209,7 @@ export async function handleUserPrompt(): Promise<void> {
     }
     if (context) {
       serveContext(config.peerName, context, false, sessionLink);
+      await uploadPromise;
       process.exit(0);
     }
   }
@@ -213,7 +222,43 @@ export async function handleUserPrompt(): Promise<void> {
   }
   // No cache at all — exit silently, context will arrive after session-start completes
 
+  await uploadPromise;
   process.exit(0);
+}
+
+
+// Upload a user prompt. SessionStart already created the session/peers
+
+async function postUserMessage(
+  config: any,
+  prompt: string,
+  instanceId: string | undefined,
+  sessionName: string,
+): Promise<void> {
+  const honcho = new Honcho(getHonchoClientOptions(config));
+  const noEnsure = () => Promise.resolve();
+
+  const userPeer = new Peer(config.peerName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
+  const createdAt = new Date().toISOString();
+  const messages = chunkContent(prompt).map((chunk) =>
+    userPeer.message(chunk, {
+      createdAt,
+      metadata: {
+        instance_id: instanceId || undefined,
+        session_affinity: sessionName,
+      },
+    })
+  );
+
+  logApiCall("session.addMessages", "POST", `user prompt (${prompt.length} chars, ${messages.length} msg, direct)`);
+  try {
+    const session = new Session(sessionName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
+    await addMessagesBatched(session, messages);
+  } catch (e) {
+    logHook("user-prompt", `Direct upload failed, retrying via get-or-create: ${e}`);
+    const session = await honcho.session(sessionName);
+    await addMessagesBatched(session, messages);
+  }
 }
 
 /**
@@ -309,8 +354,7 @@ function formatCachedContext(context: any, peerName: string): { parts: string[];
   return { parts, conclusionCount };
 }
 
-// Set once per session (first prompt) to nudge active use of the honcho MCP
-// tools without taxing every turn's context budget.
+// Set once per session to nudge active use of the honcho MCP tools.
 let sessionToolHint = "";
 
 function outputContext(peerName: string, contextParts: string[], systemMsg?: string): void {
