@@ -42,7 +42,7 @@ AskUserQuestion:
       description: "What Honcho injects at session start and per turn (currently: start [{injection.sessionStart}], turn [{injection.perTurn}])"
 ```
 
-For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `[]` (nothing), and if `injection.perTurn` is unset it is `["context"]` (conclusions on).
+For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `["summary", "peerCard"]`, and if `injection.perTurn` is unset it is `["context"]` (conclusions on).
 
 If the user selects "Other", present advanced options:
 

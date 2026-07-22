@@ -66,7 +66,7 @@ export type PerTurnComponent = (typeof PER_TURN_COMPONENTS)[number];
  * components; the retrieval knobs shape whatever those components emit.
  */
 export interface InjectionConfig {
-  /** Components emitted once at session open (default: []). */
+  /** Components emitted once at session open (default: ["summary", "peerCard"]). */
   sessionStart?: SessionStartComponent[];
   /** Components emitted per non-trivial prompt (default: ["context"]). */
   perTurn?: PerTurnComponent[];
@@ -79,12 +79,13 @@ export interface InjectionConfig {
   searchMaxDistance?: number;
 }
 
-/** Resolved injection defaults: nothing at session start, a fresh context()
- *  per turn. Retrieval knobs are tuned for a lean, high-precision per-turn
- *  block — topK 10 (up from the old literal 5) for recall, and a tight 0.4
- *  cosine distance (down from 0.7) to cut low-relevance conclusions. */
+/** Resolved injection defaults: session summary + peer card at session start,
+ *  a fresh context() per turn. Retrieval knobs are tuned for a lean,
+ *  high-precision per-turn block — topK 10 (up from the old literal 5) for
+ *  recall, and a tight 0.4 cosine distance (down from 0.7) to cut
+ *  low-relevance conclusions. */
 export const DEFAULT_INJECTION: Required<InjectionConfig> = {
-  sessionStart: [],
+  sessionStart: ["summary", "peerCard"],
   perTurn: ["context"],
   searchTopK: 10,
   maxConclusions: 15,
