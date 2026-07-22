@@ -4,6 +4,16 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-07-22
+
+### Changed
+
+- Git events are no longer uploaded by default; opt back in with the `saveGitEvents` flag (`HONCHO_SAVE_GIT_EVENTS` env var).
+
+### Fixed
+
+- Harness-injected turns and terse acknowledgements no longer pollute user memory (#66).
+
 ## [0.2.7] - 2026-07-22
 
 ### Added

@@ -164,8 +164,7 @@ export async function handleUserPrompt(): Promise<void> {
 
   // Upload the prompt immediately, concurrent with context retrieval and
   // awaited before each exit. Log-and-drop on failure, like stop.ts.
-  // Skip harness-injected turns (task-notifications, command stdout, system
-  // reminders): they aren't human input and would pollute the user's memory (#66).
+  // Skip harness-injected turns
   let uploadPromise: Promise<void> = Promise.resolve();
   const harnessInjected = isHarnessInjected(prompt);
   if (harnessInjected) {
@@ -274,8 +273,6 @@ async function postUserMessage(
 
   const userPeer = new Peer(config.peerName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
   const createdAt = new Date().toISOString();
-  // Terse acknowledgements ("yes", "ok") are real input but not worth reasoning
-  // over — disable the deriver per-message so they don't become junk conclusions.
   const configuration = isTerseReply(prompt) ? { reasoning: { enabled: false } } : undefined;
   const messages = chunkContent(prompt).map((chunk) =>
     userPeer.message(chunk, {
