@@ -1,7 +1,7 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
+import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, getInjectionConfig } from "../config.js";
+import { renderSessionStart } from "../injection.js";
 import {
-  setCachedUserContext,
   setCachedSessionId,
   resetMessageCount,
   setClaudeInstanceId,
@@ -12,9 +12,9 @@ import {
 import { Spinner } from "../spinner.js";
 import { setMemoryState, setSessionLink } from "../state.js";
 import { honchoSessionUrl } from "../styles.js";
-import { captureGitState, getRecentCommits, isGitRepo, inferFeatureContext } from "../git.js";
-import { logHook, logApiCall, logCache, logFlow, logAsync, setLogContext } from "../log.js";
-import { verboseApiResult, verboseList, clearVerboseLog } from "../visual.js";
+import { captureGitState } from "../git.js";
+import { logHook, logApiCall, logFlow, logAsync, setLogContext } from "../log.js";
+import { verboseApiResult, verboseList, clearVerboseLog, visComposedInjection } from "../visual.js";
 
 
 interface HookInput {
@@ -70,10 +70,6 @@ export async function handleSessionStart(): Promise<void> {
   const previousGitState = getCachedGitState(cwd);
   const currentGitState = captureGitState(cwd);
   const gitChanges = currentGitState ? detectGitChanges(previousGitState, currentGitState) : [];
-  const recentCommits = isGitRepo(cwd) ? getRecentCommits(cwd, 5) : [];
-
-  // Infer feature context from git state
-  const featureContext = currentGitState ? inferFeatureContext(currentGitState, recentCommits) : null;
 
   // Update git state cache
   if (currentGitState) {
@@ -150,61 +146,41 @@ export async function handleSessionStart(): Promise<void> {
       }
     }
 
-    // Step 5: Warm caches + trigger dialectic reasoning.
-    // context() results are cached for user-prompt hook (sole injection point).
-    // chat() triggers Honcho's dialectic engine — the results aren't displayed
-    // but the reasoning feeds back into the knowledge graph.
+    // Step 5: Fetch only what the configured session-start components need —
+    // the SDK long summary and/or the context() representation + peer card.
+    // Nothing is cached here; the per-turn hook does its own fresh,
+    // prompt-scoped fetch, so a session with no context components pays for no
+    // context round-trip.
     spinner.update(`${sessionName} · fetching context`);
 
-    const branchContext = currentGitState ? ` on branch '${currentGitState.branch}'` : "";
-    const featureHint = featureContext && featureContext.confidence !== "low"
-      ? ` Working on: ${featureContext.type} - ${featureContext.description}.`
-      : "";
+    const injection = getInjectionConfig(config);
+    const startComponents = injection.sessionStart;
+    const wantSummary = startComponents.includes("summary");
+    const wantContext =
+      startComponents.includes("peerCard") || startComponents.includes("peerRepresentation");
 
-    logAsync("context-fetch", "Starting context fetch + 2 dialectic fire-and-forget");
+    logAsync("context-fetch", `Starting context fetch${wantSummary ? " + summary" : ""}`);
 
     const fetchStart = Date.now();
-    const dialecticLevel = config.reasoningLevel ?? "low";
 
     // unified: user observes self — use userPeer, no target.
     // directional: aiPeer observes user — use aiPeer with target.
     const contextLabel = observationMode === "unified" ? "userPeer.context()" : "aiPeer.context(target=user)";
-    const [userContextResult] = await Promise.allSettled([
-      observationMode === "unified"
-        ? userPeer.context({ maxConclusions: 25, includeMostFrequent: true })
-        : aiPeer.context({ target: config.peerName, maxConclusions: 25, includeMostFrequent: true }),
+    const [userContextResult, summaryResult] = await Promise.allSettled([
+      wantContext
+        ? (observationMode === "unified"
+            ? userPeer.context({ maxConclusions: 25, includeMostFrequent: true })
+            : aiPeer.context({ target: config.peerName, maxConclusions: 25, includeMostFrequent: true }))
+        : Promise.resolve(null),
+      wantSummary ? session.summaries() : Promise.resolve(null),
     ]);
-
-    // Dialectic: fire-and-forget. Results feed the knowledge graph;
-    // we don't need them for cache or display.
-    if (observationMode === "unified") {
-      userPeer.chat(
-        `Summarize what you know about ${config.peerName}. Focus on preferences, current projects, and working style.${branchContext}${featureHint}`,
-        { session, reasoningLevel: dialecticLevel }
-      ).catch((e) => logHook("session-start", `Dialectic (user) failed: ${e}`));
-
-      userPeer.chat(
-        `What has ${config.peerName} been working on recently?${branchContext}${featureHint} Summarize recent activities relevant to the current work.`,
-        { session, reasoningLevel: dialecticLevel }
-      ).catch((e) => logHook("session-start", `Dialectic (recent work) failed: ${e}`));
-    } else {
-      aiPeer.chat(
-        `Summarize what you know about ${config.peerName}. Focus on preferences, current projects, and working style.${branchContext}${featureHint}`,
-        { target: config.peerName, session, reasoningLevel: dialecticLevel }
-      ).catch((e) => logHook("session-start", `Dialectic (user) failed: ${e}`));
-
-      aiPeer.chat(
-        `What has ${config.peerName} been working on recently?${branchContext}${featureHint} Summarize recent activities relevant to the current work.`,
-        { target: config.peerName, session, reasoningLevel: dialecticLevel }
-      ).catch((e) => logHook("session-start", `Dialectic (recent work) failed: ${e}`));
-    }
 
     const fetchDuration = Date.now() - fetchStart;
     const asyncResults = [
       { name: contextLabel, success: userContextResult.status === "fulfilled" },
     ];
     const successCount = asyncResults.filter(r => r.success).length;
-    logAsync("context-fetch", `Context: ${successCount}/1 succeeded in ${fetchDuration}ms (dialectic fire-and-forget)`, asyncResults);
+    logAsync("context-fetch", `Context: ${successCount}/1 succeeded in ${fetchDuration}ms`, asyncResults);
 
     // Verbose output (file-based — ~/.honcho/verbose.log)
     if (userContextResult.status === "fulfilled" && userContextResult.value) {
@@ -213,20 +189,32 @@ export async function handleSessionStart(): Promise<void> {
       verboseList(`${contextLabel} → peerCard`, ctx.peerCard);
     }
 
-    // Cache results for user-prompt hook
-    if (userContextResult.status === "fulfilled" && userContextResult.value) {
-      const context = userContextResult.value as any;
-      setCachedUserContext(context);
-      const rep = context.representation;
-      const count = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
-      logCache("write", "userContext", `${count} conclusions`);
-    }
+    // Compose the configured session-start injection. Default [] renders to an
+    // empty payload — nothing injected at session start.
+    const contextValue = userContextResult.status === "fulfilled" ? (userContextResult.value as any) : null;
+    const summaryValue = summaryResult.status === "fulfilled" ? (summaryResult.value as any) : null;
+    const rendered = renderSessionStart(startComponents, {
+      summary: summaryValue?.longSummary?.content ?? null,
+      peerCard: contextValue?.peerCard ?? null,
+      representation: contextValue?.representation ?? null,
+    });
 
-    // Stop spinner; avoid stdout writes here to prevent UI artifacts.
+    // Stop the spinner before any stdout write — a live spinner would corrupt
+    // the hook's JSON and leave UI artifacts.
     spinner.stop();
     setMemoryState("idle", undefined, claudeInstanceId);
 
-    logFlow("complete", `Cache warmed: ${successCount}/1 context + 2 dialectic (fire-and-forget)`);
+    if (rendered.content) {
+      console.log(JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "SessionStart",
+          additionalContext: `[Honcho Memory for ${config.peerName}]: ${rendered.content}`,
+        },
+        systemMessage: visComposedInjection("session-start", rendered.labels),
+      }));
+    }
+
+    logFlow("complete", `Cache warmed: ${successCount}/1 context · injected: ${rendered.labels.join(", ") || "none"}`);
     process.exit(0);
   } catch (error) {
     logHook("session-start", `Error: ${error}`, { error: String(error) });

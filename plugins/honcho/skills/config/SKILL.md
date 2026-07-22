@@ -38,7 +38,11 @@ AskUserQuestion:
       description: "How sessions are named — per directory, git branch, or per chat (currently: {resolved.sessionStrategy})"
     - label: "Workspace"
       description: "Data space and session scope (currently: {resolved.workspace})"
+    - label: "Memory injection"
+      description: "What Honcho injects at session start and per turn (currently: start [{injection.sessionStart}], turn [{injection.perTurn}])"
 ```
+
+For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `[]` (nothing), and if `injection.perTurn` is unset it is `["context"]` (conclusions on).
 
 If the user selects "Other", present advanced options:
 
@@ -141,6 +145,38 @@ AskUserQuestion:
 ```
 
 If confirmed, call `set_config` again WITH `confirm: true`.
+
+### Memory injection
+
+Ask BOTH questions in a SINGLE `AskUserQuestion` call — two multi-select questions — so the user configures both surfaces at once. This is the only injection prompt; do not add follow-ups.
+
+```
+AskUserQuestion (both questions multiSelect: true):
+  Q1:
+    question: "What should Honcho inject at the start of each session?"
+    header: "Session start"
+    options:
+      - label: "Session summary"
+        description: "Rolling long summary of prior sessions"
+      - label: "Peer card"
+        description: "Your identity + attributes list"
+      - label: "Representation"
+        description: "Honcho's derived prose profile of you"
+  Q2:
+    question: "What should Honcho inject on each user turn?"
+    header: "Per turn"
+    options:
+      - label: "Relevant conclusions"
+        description: "Fresh, prompt-scoped memory pulled every turn"
+```
+
+Map the selections to component names, then call `set_config` once per surface:
+- Session start → `injection.sessionStart`, mapping "Session summary"→`summary`, "Peer card"→`peerCard`, "Representation"→`peerRepresentation`.
+- Per turn → `injection.perTurn`, mapping "Relevant conclusions"→`context`.
+
+Pass the value as a JSON array (e.g. `["summary","peerCard"]`). An empty selection for a surface means "inject nothing" there — pass `[]`.
+
+Retrieval tuning is intentionally NOT asked here. `injection.searchTopK` (default 10), `injection.maxConclusions` (15), and `injection.searchMaxDistance` (0.4, cosine — lower is stricter) are all configurable via `set_config`, but keep the defaults; only mention they're tunable if the user brings it up, and never prompt for them.
 
 ### Dangerous fields (Host)
 
