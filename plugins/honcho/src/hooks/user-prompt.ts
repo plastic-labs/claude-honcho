@@ -34,11 +34,20 @@ const SKIP_CONTEXT_PATTERNS = [
 
 const FETCH_TIMEOUT_MS = 4000;
 
+// A letter from a writing system other than Latin: Persian, Arabic, Hebrew,
+// Cyrillic, Greek, CJK, and so on. Digits and punctuation are not letters,
+// so an ASCII prompt with an emoji or a curly quote does not match.
+const NON_LATIN_SCRIPT = /(?![\p{Script=Latin}])\p{L}/u;
+
+// Cap for a whole-prompt search query — long enough to carry the question,
+// short enough that a pasted stack trace doesn't become the embedding.
+const MAX_QUERY_CHARS = 500;
+
 /**
  * Extract meaningful topics from a prompt for semantic search.
  * Returns terms that are high-signal for conclusion matching.
  */
-function extractTopics(prompt: string): string[] {
+export function extractTopics(prompt: string): string[] {
   const topics: string[] = [];
 
   // File paths (high signal)
@@ -59,6 +68,15 @@ function extractTopics(prompt: string): string[] {
 
   if (topics.length > 0) {
     return [...new Set(topics)];
+  }
+
+  // The word fallback below only sees [a-z], so for a prompt written in another
+  // script it returns either nothing — dropping the caller into static context,
+  // where the user gets the same generic conclusions every turn — or a couple of
+  // stray loanwords that misrepresent the question. The search is embedding-based,
+  // so hand it the prompt itself instead.
+  if (NON_LATIN_SCRIPT.test(prompt)) {
+    return [prompt.trim().slice(0, MAX_QUERY_CHARS)];
   }
 
   // Fallback: meaningful words >3 chars minus stopwords

@@ -4,6 +4,10 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Context retrieval for prompts not written in Latin script. `extractTopics` produced no search terms for a Persian, Japanese, Russian, etc. prompt, so `peer.context()` was called without a `searchQuery` and the user got the same generic most-frequent conclusions on every turn instead of recall relevant to what they just asked. Mixed-script prompts were worse than empty — a query built from the one or two Latin loanwords that happened to survive. These prompts now fall back to the prompt itself, which the embedding-based search handles directly.
+
 ## [0.2.5] - 2026-06-02
 
 ### Added

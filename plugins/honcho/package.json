@@ -14,6 +14,9 @@
   ],
   "author": "Plastic Labs",
   "license": "MIT",
+  "scripts": {
+    "test": "bun test"
+  },
   "dependencies": {
     "@honcho-ai/sdk": "^2.1.0",
     "@modelcontextprotocol/sdk": "^1.26.0"
