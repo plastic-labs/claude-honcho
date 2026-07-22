@@ -131,7 +131,7 @@ function getContextTTL(): number {
 
 // Known keys in ContextCache — anything else is a ghost from older versions
 const CONTEXT_CACHE_KNOWN_KEYS = new Set([
-  "userContext", "claudeContext", "summaries", "messageCount",
+  "claudeContext", "summaries", "messageCount",
 ]);
 
 export function loadContextCache(): ContextCache {

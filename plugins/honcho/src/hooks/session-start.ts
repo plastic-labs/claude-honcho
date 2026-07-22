@@ -177,10 +177,11 @@ export async function handleSessionStart(): Promise<void> {
 
     const fetchDuration = Date.now() - fetchStart;
     const asyncResults = [
-      { name: contextLabel, success: userContextResult.status === "fulfilled" },
+      ...(wantContext ? [{ name: contextLabel, success: userContextResult.status === "fulfilled" }] : []),
+      ...(wantSummary ? [{ name: "session.summaries()", success: summaryResult.status === "fulfilled" }] : []),
     ];
     const successCount = asyncResults.filter(r => r.success).length;
-    logAsync("context-fetch", `Context: ${successCount}/1 succeeded in ${fetchDuration}ms`, asyncResults);
+    logAsync("context-fetch", `Fetched ${successCount}/${asyncResults.length} in ${fetchDuration}ms`, asyncResults);
 
     // Verbose output (file-based — ~/.honcho/verbose.log)
     if (userContextResult.status === "fulfilled" && userContextResult.value) {

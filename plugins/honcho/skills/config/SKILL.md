@@ -39,7 +39,7 @@ AskUserQuestion:
     - label: "Workspace"
       description: "Data space and session scope (currently: {resolved.workspace})"
     - label: "Memory injection"
-      description: "What Honcho injects at session start and per turn (currently: start [{injection.sessionStart}], turn [{injection.perTurn}])"
+      description: "What Honcho injects at session start and per turn (currently: start [{resolved.injection.sessionStart}], turn [{resolved.injection.perTurn}])"
 ```
 
 For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `["summary", "peerCard"]`, and if `injection.perTurn` is unset it is `["context"]` (conclusions on).
@@ -150,24 +150,25 @@ If confirmed, call `set_config` again WITH `confirm: true`.
 
 Ask BOTH questions in a SINGLE `AskUserQuestion` call — two multi-select questions — so the user configures both surfaces at once. This is the only injection prompt; do not add follow-ups.
 
-```
-AskUserQuestion (both questions multiSelect: true):
-  Q1:
-    question: "What should Honcho inject at the start of each session?"
-    header: "Session start"
-    options:
-      - label: "Session summary"
-        description: "Rolling long summary of prior sessions"
-      - label: "Peer card"
-        description: "Your identity + attributes list"
-      - label: "Representation"
-        description: "Honcho's derived prose profile of you"
-  Q2:
-    question: "What should Honcho inject on each user turn?"
-    header: "Per turn"
-    options:
-      - label: "Relevant conclusions"
-        description: "Fresh, prompt-scoped memory pulled every turn"
+```yaml
+AskUserQuestion:
+  questions:
+    - question: "What should Honcho inject at the start of each session?"
+      header: "On start"          # ≤12 chars
+      multiSelect: true
+      options:
+        - label: "Session summary"
+          description: "Rolling long summary of prior sessions"
+        - label: "Peer card"
+          description: "Your identity + attributes list"
+        - label: "Representation"
+          description: "Honcho's derived prose profile of you"
+    - question: "What should Honcho inject on each user turn?"
+      header: "Per turn"
+      multiSelect: true
+      options:
+        - label: "Relevant conclusions"
+          description: "Fresh, prompt-scoped memory pulled every turn"
 ```
 
 Map the selections to component names, then call `set_config` once per surface:
