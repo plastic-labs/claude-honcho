@@ -559,6 +559,36 @@ export function getSessionForPath(cwd: string): string | null {
   return config.sessions[cwd] || null;
 }
 
+export function deriveSessionName(
+  strategy: SessionStrategy,
+  cwd: string,
+  opts: { peerName?: string; sessionPeerPrefix?: boolean; branch?: string; instanceId?: string } = {}
+): string {
+  const usePrefix = opts.sessionPeerPrefix !== false; // default true
+  const peerPart = opts.peerName ? sanitizeForSessionName(opts.peerName) : "user";
+  const repoPart = sanitizeForSessionName(basename(cwd));
+  const base = usePrefix ? `${peerPart}-${repoPart}` : repoPart;
+
+  switch (strategy) {
+    case "git-branch": {
+      if (opts.branch) {
+        const branchPart = sanitizeForSessionName(opts.branch);
+        return `${base}-${branchPart}`;
+      }
+      return base;
+    }
+    case "chat-instance": {
+      if (opts.instanceId) {
+        return usePrefix ? `${peerPart}-chat-${opts.instanceId}` : `chat-${opts.instanceId}`;
+      }
+      return base;
+    }
+    case "per-directory":
+    default:
+      return base;
+  }
+}
+
 /** Session name derived from strategy. Manual overrides only apply to per-directory.
  *  @param instanceId - Explicit instance ID for chat-instance strategy. Falls back to
  *                      per-cwd cache, then global cache. Callers should pass hookInput.session_id
@@ -577,32 +607,23 @@ export function getSessionName(cwd: string, instanceId?: string): string {
     }
   }
 
-  const usePrefix = config?.sessionPeerPrefix !== false; // default true
-  const peerPart = config?.peerName ? sanitizeForSessionName(config.peerName) : "user";
-  const repoPart = sanitizeForSessionName(basename(cwd));
-  const base = usePrefix ? `${peerPart}-${repoPart}` : repoPart;
-
-  switch (strategy) {
-    case "git-branch": {
-      const gitState = captureGitState(cwd);
-      if (gitState) {
-        const branchPart = sanitizeForSessionName(gitState.branch);
-        return `${base}-${branchPart}`;
-      }
-      return base;
-    }
-    case "chat-instance": {
-      // Prefer explicit instanceId > per-cwd cache > global cache (legacy)
-      const resolved = instanceId || getInstanceIdForCwd(cwd) || getClaudeInstanceId();
-      if (resolved) {
-        return usePrefix ? `${peerPart}-chat-${resolved}` : `chat-${resolved}`;
-      }
-      return base;
-    }
-    case "per-directory":
-    default:
-      return base;
+  // Resolve live env state, then delegate to the pure deriver.
+  let branch: string | undefined;
+  if (strategy === "git-branch") {
+    branch = captureGitState(cwd)?.branch;
   }
+  let resolvedInstanceId: string | undefined;
+  if (strategy === "chat-instance") {
+    // Prefer explicit instanceId > per-cwd cache > global cache (legacy)
+    resolvedInstanceId = instanceId || getInstanceIdForCwd(cwd) || getClaudeInstanceId() || undefined;
+  }
+
+  return deriveSessionName(strategy, cwd, {
+    peerName: config?.peerName,
+    sessionPeerPrefix: config?.sessionPeerPrefix,
+    branch,
+    instanceId: resolvedInstanceId,
+  });
 }
 
 export function setSessionForPath(cwd: string, sessionName: string): void {
