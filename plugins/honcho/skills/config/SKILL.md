@@ -42,7 +42,7 @@ AskUserQuestion:
       description: "What Honcho injects at session start and per turn (currently: start [{resolved.injection.sessionStart}], turn [{resolved.injection.perTurn}])"
 ```
 
-For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `["summary", "peerCard"]`, and if `injection.perTurn` is unset it is `["context"]` (conclusions on).
+For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `["directives", "summary", "peerCard"]`, and if `injection.perTurn` is unset it is `["context"]` (conclusions on).
 
 If the user selects "Other", present advanced options:
 
@@ -157,6 +157,8 @@ AskUserQuestion:
       header: "On start"          # ≤12 chars
       multiSelect: true
       options:
+        - label: "Memory directives"
+          description: "How to use memory — treat as background, search, save insights"
         - label: "Session summary"
           description: "Rolling long summary of prior sessions"
         - label: "Peer card"
@@ -172,10 +174,10 @@ AskUserQuestion:
 ```
 
 Map the selections to component names, then call `set_config` once per surface:
-- Session start → `injection.sessionStart`, mapping "Session summary"→`summary`, "Peer card"→`peerCard`, "Representation"→`peerRepresentation`.
+- Session start → `injection.sessionStart`, mapping "Memory directives"→`directives`, "Session summary"→`summary`, "Peer card"→`peerCard`, "Representation"→`peerRepresentation`.
 - Per turn → `injection.perTurn`, mapping "Relevant conclusions"→`context`.
 
-Pass the value as a JSON array (e.g. `["summary","peerCard"]`). An empty selection for a surface means "inject nothing" there — pass `[]`.
+Pass the value as a JSON array (e.g. `["directives","summary","peerCard"]`). An empty selection for a surface means "inject nothing" there — pass `[]`.
 
 Retrieval tuning is intentionally NOT asked here. `injection.searchTopK` (default 10), `injection.maxConclusions` (15), `injection.searchMaxDistance` (0.6, cosine — lower is stricter), and `injection.searchQuerySource` ("prompt" | "topics", default "prompt") are all configurable via `set_config`, but keep the defaults; only mention they're tunable if the user brings it up, and never prompt for them.
 

@@ -40,11 +40,14 @@ export interface LocalContextConfig {
  * single source of truth: the union type derives from it, and set_config
  * validation builds its allow-set and error text from the same array — so
  * adding a component is a one-line edit with no drift between layers.
+ * - "directives": static memory-usage guidance (treat injected memory as
+ *   background, use chat/search, save insights) — formerly a manual "paste
+ *   this into your CLAUDE.md" README step; now shipped every session instead.
  * - "summary": the SDK `session.summaries().long` narrative.
  * - "peerCard" / "peerRepresentation": the two fields of a single context() call,
  *   each injected at full length (no per-field caps — inclusion is the only lever).
  */
-export const SESSION_START_COMPONENTS = ["summary", "peerCard", "peerRepresentation"] as const;
+export const SESSION_START_COMPONENTS = ["directives", "summary", "peerCard", "peerRepresentation"] as const;
 export type SessionStartComponent = (typeof SESSION_START_COMPONENTS)[number];
 
 /**
@@ -66,7 +69,7 @@ export type PerTurnComponent = (typeof PER_TURN_COMPONENTS)[number];
  * components; the retrieval knobs shape whatever those components emit.
  */
 export interface InjectionConfig {
-  /** Components emitted once at session open (default: ["summary", "peerCard"]). */
+  /** Components emitted once at session open (default: ["directives", "summary", "peerCard"]). */
   sessionStart?: SessionStartComponent[];
   /** Components emitted per non-trivial prompt (default: ["context"]). */
   perTurn?: PerTurnComponent[];
@@ -82,12 +85,12 @@ export interface InjectionConfig {
   searchQuerySource?: "topics" | "prompt";
 }
 
-/** Resolved injection defaults: session summary + peer card at session start,
- *  a fresh context() per turn. Retrieval knobs are tuned for a lean per-turn
- *  block — topK 10 for recall, a 0.6 cosine distance, searching on the raw
- *  prompt. */
+/** Resolved injection defaults: memory-usage directives + session summary +
+ *  peer card at session start, a fresh context() per turn. Retrieval knobs
+ *  are tuned for a lean per-turn block — topK 10 for recall, a 0.6 cosine
+ *  distance, searching on the raw prompt. */
 export const DEFAULT_INJECTION: Required<InjectionConfig> = {
-  sessionStart: ["summary", "peerCard"],
+  sessionStart: ["directives", "summary", "peerCard"],
   perTurn: ["context"],
   searchTopK: 10,
   maxConclusions: 15,
