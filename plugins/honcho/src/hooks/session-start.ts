@@ -198,6 +198,7 @@ export async function handleSessionStart(): Promise<void> {
       summary: summaryValue?.longSummary?.content ?? null,
       peerCard: contextValue?.peerCard ?? null,
       representation: contextValue?.representation ?? null,
+      remember: config.rememberTool === true,
     });
 
     // Stop the spinner before any stdout write — a live spinner would corrupt
