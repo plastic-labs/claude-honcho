@@ -1,16 +1,13 @@
-import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionName, isPluginEnabled, getCachedStdin } from "../config.js";
 import { existsSync, readFileSync } from "fs";
 import {
   generateClaudeSummary,
   saveClaudeLocalContext,
   loadClaudeLocalContext,
   getInstanceIdForCwd,
-  addMessagesBatched,
 } from "../cache.js";
-import { playCooldown } from "../spinner.js";
 import { clearSessionFiles } from "../state.js";
-import { logHook, logApiCall, setLogContext } from "../log.js";
+import { logHook, setLogContext } from "../log.js";
 
 
 interface HookInput {
@@ -232,79 +229,10 @@ export async function handleSessionEnd(): Promise<void> {
   );
   saveClaudeLocalContext(newSummary + recentActivity);
 
-  // =========================================================
-  // Phase 2: PARALLEL API UPLOADS + ANIMATION
-  // Cooldown animation runs concurrently with network I/O
-  // so we don't waste budget on cosmetics before critical work.
-  // =========================================================
-  try {
-    const honcho = new Honcho(getHonchoClientOptions(config));
-
-    const [session, aiPeer] = await Promise.all([
-      honcho.session(sessionName),
-      honcho.peer(config.aiPeer),
-    ]);
-
-    // just the end marker; messages upload live elsewhere
-    const endMarker = aiPeer.message(
-      `[Session ended] Reason: ${reason}, Messages: ${transcriptMessages.length}, Time: ${new Date().toISOString()}`,
-      {
-        createdAt: new Date().toISOString(),
-        metadata: {
-          instance_id: instanceId || undefined,
-          session_affinity: sessionName,
-        },
-      }
-    );
-
-    {
-      logApiCall("session.addMessages", "POST", `end marker`);
-
-      // Start API upload immediately; run animation concurrently.
-      const uploadPromise = addMessagesBatched(session, [endMarker]);
-
-      // No-op signal handlers keep the process alive while the upload is in flight.
-      const sigHandler = () => {};
-      process.on("SIGINT", sigHandler);
-      if (process.platform === "win32") {
-        process.on("SIGBREAK", sigHandler);
-      } else {
-        process.on("SIGTERM", sigHandler);
-      }
-
-      const removeSigHandlers = () => {
-        process.removeListener("SIGINT", sigHandler);
-        if (process.platform === "win32") {
-          process.removeListener("SIGBREAK", sigHandler);
-        } else {
-          process.removeListener("SIGTERM", sigHandler);
-        }
-      };
-
-      // Force exit if the upload hangs (local summary already saved above).
-      const hardTimeout = setTimeout(() => {
-        logHook("session-end", "Hard timeout reached — forcing exit");
-        removeSigHandlers();
-        process.exit(0);
-      }, 12_000);
-      hardTimeout.unref();
-
-      await Promise.all([
-        uploadPromise.finally(() => {
-          clearTimeout(hardTimeout);
-          removeSigHandlers();
-        }),
-        playCooldown("saving memory"),
-      ]);
-    }
-
-    logHook("session-end", `Session ended — end marker saved (${assistantMessages.length} assistant msgs handled live)`);
-    clearSessionFiles(hookInput.session_id);
-    process.exit(0);
-  } catch (error) {
-    logHook("session-end", `Error: ${error}`, { error: String(error) });
-    // Local summary was already saved in phase 1 — not a total loss.
-    clearSessionFiles(hookInput.session_id);
-    process.exit(0);
-  }
+  // No end-of-session upload: messages are saved live by the other hooks, and
+  // the [Session ended] marker only ever derived lifecycle exhaust
+  // ("claude's session ended at ...") — write-only telemetry, never read back.
+  logHook("session-end", `Session ended (${assistantMessages.length} assistant msgs handled live)`);
+  clearSessionFiles(hookInput.session_id);
+  process.exit(0);
 }
