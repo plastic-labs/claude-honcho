@@ -77,6 +77,9 @@ export interface InjectionConfig {
   /** Max cosine distance for context()'s semantic search — lower is stricter
    *  (default: 0.4). */
   searchMaxDistance?: number;
+  /** What drives the per-turn semantic search: extracted "topics" (default)
+   *  or the raw "prompt". */
+  searchQuerySource?: "topics" | "prompt";
 }
 
 /** Resolved injection defaults: session summary + peer card at session start,
@@ -90,6 +93,7 @@ export const DEFAULT_INJECTION: Required<InjectionConfig> = {
   searchTopK: 10,
   maxConclusions: 15,
   searchMaxDistance: 0.4,
+  searchQuerySource: "topics",
 };
 
 export type ReasoningLevel = "minimal" | "low" | "medium" | "high" | "max";

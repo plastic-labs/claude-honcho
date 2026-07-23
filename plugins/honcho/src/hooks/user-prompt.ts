@@ -192,9 +192,9 @@ export async function handleUserPrompt(): Promise<void> {
     new Promise<{ ok: false }>(resolve => setTimeout(() => resolve({ ok: false }), FETCH_TIMEOUT_MS)),
   ]).catch((): { ok: false } => ({ ok: false }));
 
-  const ctx: { context: any; matched?: string[] } | null =
+  const ctx: { context: any; matched?: string[]; queryLabel?: string } | null =
     fetchResult.ok && fetchResult.context
-      ? { context: fetchResult.context, matched: fetchResult.matched }
+      ? { context: fetchResult.context, matched: fetchResult.matched, queryLabel: fetchResult.queryLabel }
       : null;
 
   emitPerTurn(config.peerName, ctx, sessionLink);
@@ -244,7 +244,7 @@ async function postUserMessage(
  */
 function emitPerTurn(
   peerName: string,
-  ctx: { context: any; matched?: string[] } | null,
+  ctx: { context: any; matched?: string[]; queryLabel?: string } | null,
   sessionLink?: string,
 ): void {
   if (!ctx) return;
@@ -253,11 +253,11 @@ function emitPerTurn(
   if (conclusions.length === 0) return;
 
   const parts = [`Relevant conclusions: ${conclusions.join("; ")}`];
-  const visMsg = visInjectionMessage("user-prompt", { conclusions, matched: ctx.matched });
+  const visMsg = visInjectionMessage("user-prompt", { conclusions, matched: ctx.matched, queryLabel: ctx.queryLabel });
   outputContext(peerName, parts, sessionLink ? `${sessionLink}\n${visMsg}` : visMsg);
 }
 
-async function fetchFreshContext(config: any, prompt: string, injection: InjectionConfig): Promise<{ context: any; matched: string[] }> {
+async function fetchFreshContext(config: any, prompt: string, injection: InjectionConfig): Promise<{ context: any; matched: string[]; queryLabel?: string }> {
   const honcho = new Honcho(getHonchoClientOptions(config));
   const observationMode = getObservationMode(config);
 
@@ -275,8 +275,11 @@ async function fetchFreshContext(config: any, prompt: string, injection: Injecti
   // the raw prompt. `includeMostFrequent` is OFF so frequency-based conclusions
   // ("task completed" repeats) don't crowd out what the distance gate selects —
   // relevance/recency drives the block, not raw frequency.
-  const { topics, precise } = extractTopics(prompt);
-  const searchQuery = topics.length > 0 ? topics.join(" ") : prompt;
+  // "prompt" mode searches with the raw prompt (no topic extraction);
+  // "topics" mode (default) prefers extracted topics, falling back to the prompt.
+  const usePrompt = injection.searchQuerySource === "prompt";
+  const { topics, precise } = usePrompt ? { topics: [], precise: false } : extractTopics(prompt);
+  const searchQuery = usePrompt || topics.length === 0 ? prompt : topics.join(" ");
 
   let contextResult: any = null;
   // Topics shown to the user as the match — only set when the topics are
@@ -303,7 +306,7 @@ async function fetchFreshContext(config: any, prompt: string, injection: Injecti
     verboseList("peer.context() -> peerCard (fresh)", (contextResult as any).peerCard);
   }
 
-  return { context: contextResult, matched };
+  return { context: contextResult, matched, queryLabel: usePrompt ? "prompt" : undefined };
 }
 
 // Per-turn context injects representation-derived conclusions ONLY. The full

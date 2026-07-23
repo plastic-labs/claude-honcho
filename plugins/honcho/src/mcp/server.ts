@@ -529,6 +529,18 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.injection.searchMaxDistance = Number(value);
       break;
 
+    case "injection.searchQuerySource":
+      if (value !== "topics" && value !== "prompt") {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: `injection.searchQuerySource must be "topics" or "prompt"` }, null, 2) }],
+          isError: true,
+        };
+      }
+      previousValue = cfg.injection?.searchQuerySource;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.searchQuerySource = value;
+      break;
+
     case "sessions.set": {
       const obj = value as Record<string, unknown>;
       const path = obj?.path;
@@ -818,6 +830,7 @@ export async function runMcpServer(): Promise<void> {
                   "injection.searchTopK",
                   "injection.maxConclusions",
                   "injection.searchMaxDistance",
+                  "injection.searchQuerySource",
                   "sessions.set",
                   "sessions.remove",
                 ],

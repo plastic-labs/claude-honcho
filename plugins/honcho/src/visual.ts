@@ -59,12 +59,16 @@ export function visMessage(direction: HookDirection, hookName: string, message: 
 export function visInjectionMessage(hookName: string, opts: {
   conclusions: string[];
   matched?: string[];
+  /** Overrides the matched suffix, e.g. "prompt" → "(query: prompt)". */
+  queryLabel?: string;
 }): string {
   const count = opts.conclusions.length;
   const noun = count === 1 ? "conclusion" : "conclusions";
-  const head = opts.matched?.length
-    ? `injected ${count} ${noun} (matched: ${opts.matched.join(", ")})`
-    : `injected ${count} ${noun}`;
+  const head = opts.queryLabel
+    ? `injected ${count} ${noun} (query: ${opts.queryLabel})`
+    : opts.matched?.length
+      ? `injected ${count} ${noun} (matched: ${opts.matched.join(", ")})`
+      : `injected ${count} ${noun}`;
   const summary = formatLine("in", hookName, head);
   const body = opts.conclusions.map(c => `  ${sym.bullet} ${c}`).join("\n");
   return body ? `${summary}\n${body}` : summary;
