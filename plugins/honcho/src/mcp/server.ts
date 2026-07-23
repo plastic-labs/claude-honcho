@@ -24,6 +24,10 @@ import {
   type HonchoEnvironment,
   type ObservationMode,
   type StatuslineMode,
+  type SessionStartComponent,
+  type PerTurnComponent,
+  SESSION_START_COMPONENTS,
+  PER_TURN_COMPONENTS,
   getObservationMode,
 } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
@@ -111,6 +115,7 @@ function handleGetConfig(cwd: string) {
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
     localContext: cfg.localContext ?? {},
+    injection: cfg.injection ?? {},
     enabled: cfg.enabled !== false,
     logging: cfg.logging !== false,
     saveMessages: cfg.saveMessages !== false,
@@ -233,6 +238,42 @@ function handleGetConfig(cwd: string) {
 // ============================================
 // set_config handler
 // ============================================
+
+/**
+ * Coerce a set_config `value` into a string array. The `value` field is
+ * schema-less, so MCP clients may deliver an array as a real array OR as a
+ * JSON-encoded string (e.g. '["summary","peerCard"]'); accept both. Returns
+ * null when the value is neither, so the caller can report a shape error.
+ */
+function coerceStringArray(value: unknown): string[] | null {
+  let v = value;
+  if (typeof v === "string") {
+    try { v = JSON.parse(v); } catch { return null; }
+  }
+  return Array.isArray(v) ? v.map(String) : null;
+}
+
+/**
+ * Validate a component-array set_config value against the allowed component
+ * names (the SESSION_START_COMPONENTS / PER_TURN_COMPONENTS tuples). Returns the
+ * validated array, or an isError tool result describing the shape/enum problem.
+ */
+function validateComponentArray(
+  value: unknown,
+  allowed: readonly string[],
+  field: string,
+): string[] | { content: { type: "text"; text: string }[]; isError: true } {
+  const example = JSON.stringify(allowed.slice(0, 2));
+  const err = (msg: string) => ({
+    content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: msg }, null, 2) }],
+    isError: true as const,
+  });
+  const arr = coerceStringArray(value);
+  if (!arr) return err(`${field} must be an array of component names, e.g. ${example}`);
+  const bad = arr.filter((v) => !allowed.includes(v));
+  if (bad.length) return err(`${field} entries must be one of: ${allowed.join(", ")} (got: ${bad.join(", ")})`);
+  return arr;
+}
 
 function handleSetConfig(args: Record<string, unknown>) {
   const field = args.field;
@@ -452,6 +493,54 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.localContext.maxEntries = Number(value);
       break;
 
+    case "injection.sessionStart": {
+      const arr = validateComponentArray(value, SESSION_START_COMPONENTS, field);
+      if (!Array.isArray(arr)) return arr;
+      previousValue = cfg.injection?.sessionStart;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.sessionStart = arr as SessionStartComponent[];
+      break;
+    }
+
+    case "injection.perTurn": {
+      const arr = validateComponentArray(value, PER_TURN_COMPONENTS, field);
+      if (!Array.isArray(arr)) return arr;
+      previousValue = cfg.injection?.perTurn;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.perTurn = arr as PerTurnComponent[];
+      break;
+    }
+
+    case "injection.searchTopK":
+      previousValue = cfg.injection?.searchTopK;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.searchTopK = Number(value);
+      break;
+
+    case "injection.maxConclusions":
+      previousValue = cfg.injection?.maxConclusions;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.maxConclusions = Number(value);
+      break;
+
+    case "injection.searchMaxDistance":
+      previousValue = cfg.injection?.searchMaxDistance;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.searchMaxDistance = Number(value);
+      break;
+
+    case "injection.searchQuerySource":
+      if (value !== "topics" && value !== "prompt") {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: `injection.searchQuerySource must be "topics" or "prompt"` }, null, 2) }],
+          isError: true,
+        };
+      }
+      previousValue = cfg.injection?.searchQuerySource;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.searchQuerySource = value;
+      break;
+
     case "sessions.set": {
       const obj = value as Record<string, unknown>;
       const path = obj?.path;
@@ -512,6 +601,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
     localContext: cfg.localContext ?? {},
+    injection: cfg.injection ?? {},
     enabled: cfg.enabled !== false,
     logging: cfg.logging !== false,
     saveMessages: cfg.saveMessages !== false,
@@ -735,12 +825,18 @@ export async function runMcpServer(): Promise<void> {
                   "reasoningLevel",
                   "observationMode",
                   "localContext.maxEntries",
+                  "injection.sessionStart",
+                  "injection.perTurn",
+                  "injection.searchTopK",
+                  "injection.maxConclusions",
+                  "injection.searchMaxDistance",
+                  "injection.searchQuerySource",
                   "sessions.set",
                   "sessions.remove",
                 ],
               },
               value: {
-                description: "New value. For sessions.set: {path, name}. For sessions.remove: {path}.",
+                description: "New value. For sessions.set: {path, name}. For sessions.remove: {path}. For injection.sessionStart / injection.perTurn: a string array of component names (e.g. [\"summary\",\"peerCard\"]).",
               },
               confirm: {
                 type: "boolean",

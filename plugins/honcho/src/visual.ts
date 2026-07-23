@@ -50,14 +50,39 @@ export function visMessage(direction: HookDirection, hookName: string, message: 
 }
 
 /**
- * Build context injection status string
- * Used by user-prompt hook (which outputs JSON systemMessage — works)
+ * Build the injection systemMessage for the user-prompt hook: a one-line status
+ * summary followed by the injected conclusions as bullets. The stable profile
+ * block is intentionally omitted here — it lives in the injection log, not in
+ * every turn's transcript. `matched` is only set for high-signal topics, so a
+ * low-signal fuzzy fallback query is never surfaced as a bogus match.
  */
-export function visContextLine(hookName: string, opts: {
-  cached?: boolean;
+export function visInjectionMessage(hookName: string, opts: {
+  conclusions: string[];
+  matched?: string[];
+  /** Overrides the matched suffix, e.g. "prompt" → "(query: prompt)". */
+  queryLabel?: string;
 }): string {
-  const suffix = opts.cached ? " (cached)" : "";
-  return formatLine("in", hookName, `injected conclusions${suffix}`);
+  const count = opts.conclusions.length;
+  const noun = count === 1 ? "conclusion" : "conclusions";
+  const head = opts.queryLabel
+    ? `injected ${count} ${noun} (query: ${opts.queryLabel})`
+    : opts.matched?.length
+      ? `injected ${count} ${noun} (matched: ${opts.matched.join(", ")})`
+      : `injected ${count} ${noun}`;
+  const summary = formatLine("in", hookName, head);
+  const body = opts.conclusions.map(c => `  ${sym.bullet} ${c}`).join("\n");
+  return body ? `${summary}\n${body}` : summary;
+}
+
+/**
+ * Build the systemMessage for the SessionStart composition: a single status
+ * line naming which components were injected (e.g. "injected summary + peer
+ * card (12 items)"). Session start is a once-per-session surface, so unlike the
+ * per-turn line it stays terse — the payload itself goes to additionalContext.
+ */
+export function visComposedInjection(hookName: string, labels: string[]): string {
+  const summary = labels.length ? `injected ${labels.join(" + ")}` : "nothing to inject";
+  return formatLine("in", hookName, summary);
 }
 
 /**

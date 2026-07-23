@@ -1,22 +1,16 @@
 import { Honcho, Session, Peer } from "@honcho-ai/sdk";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, getInjectionConfig, type InjectionConfig } from "../config.js";
 import {
-  getCachedUserContext,
-  getStaleCachedUserContext,
-  isContextCacheStale,
-  setCachedUserContext,
   getMessageCount,
   incrementMessageCount,
-  shouldRefreshKnowledgeGraph,
-  markKnowledgeGraphRefreshed,
   getInstanceIdForCwd,
   chunkContent,
   addMessagesBatched,
 } from "../cache.js";
-import { logHook, logApiCall, logCache, setLogContext } from "../log.js";
-import { visContextLine, visSkipMessage, addSystemMessage, verboseApiResult, verboseList } from "../visual.js";
+import { logHook, logApiCall, setLogContext } from "../log.js";
+import { visInjectionMessage, visSkipMessage, addSystemMessage, verboseApiResult, verboseList } from "../visual.js";
 import { honchoSessionUrl } from "../styles.js";
 import { setMemoryState, setSessionLink } from "../state.js";
 
@@ -36,10 +30,14 @@ const SKIP_CONTEXT_PATTERNS = [
 const FETCH_TIMEOUT_MS = 4000;
 
 /**
- * Extract meaningful topics from a prompt for semantic search.
- * Returns terms that are high-signal for conclusion matching.
+ * Extract meaningful topics from a prompt for semantic search. Returns terms
+ * that are high-signal for conclusion matching. `precise` is true when topics
+ * came from high-signal patterns (file paths, quoted strings, tech terms,
+ * errors) rather than the fuzzy word fallback; the fallback still drives
+ * search, but callers use `precise` to decide whether the topics are worth
+ * showing to the user as a match.
  */
-function extractTopics(prompt: string): string[] {
+function extractTopics(prompt: string): { topics: string[]; precise: boolean } {
   const topics: string[] = [];
 
   // File paths (high signal)
@@ -59,13 +57,13 @@ function extractTopics(prompt: string): string[] {
   topics.push(...errors.slice(0, 2));
 
   if (topics.length > 0) {
-    return [...new Set(topics)];
+    return { topics: [...new Set(topics)], precise: true };
   }
 
   // Fallback: meaningful words >3 chars minus stopwords
   const stopwords = new Set(['the', 'and', 'for', 'that', 'this', 'with', 'from', 'have', 'are', 'was', 'were', 'been', 'being', 'has', 'had', 'does', 'did', 'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must', 'shall', 'need', 'want', 'like', 'just', 'also', 'more', 'some', 'what', 'when', 'where', 'which', 'who', 'how', 'why', 'all', 'each', 'every', 'both', 'few', 'most', 'other', 'into', 'over', 'such', 'only', 'same', 'than', 'very', 'your', 'make', 'take', 'come', 'give', 'look', 'think', 'know']);
   const words = prompt.toLowerCase().match(/\b[a-z]{4,}\b/g) || [];
-  return [...new Set(words.filter(w => !stopwords.has(w)))].slice(0, 10);
+  return { topics: [...new Set(words.filter(w => !stopwords.has(w)))].slice(0, 10), precise: false };
 }
 
 function shouldSkipContextRetrieval(prompt: string): boolean {
@@ -177,51 +175,29 @@ export async function handleUserPrompt(): Promise<void> {
     process.exit(0);
   }
 
-  // Decide whether to refresh: TTL expired or message threshold hit
-  const forceRefresh = shouldRefreshKnowledgeGraph();
-  const cachedContext = getCachedUserContext();
-  const cacheIsStale = isContextCacheStale();
+  const injection = getInjectionConfig(config);
+  const wantContext = injection.perTurn.includes("context");
 
-  if (cachedContext && !cacheIsStale && !forceRefresh) {
-    // Fresh cache — serve instantly, no API call
-    logCache("hit", "userContext", "fresh cache");
-    verboseApiResult("peer.context() -> representation (cached)", cachedContext?.representation);
-    verboseList("peer.context() -> peerCard (cached)", cachedContext?.peerCard);
-
-    serveContext(config.peerName, cachedContext, true, sessionLink);
+  if (!wantContext) {
+    logHook("user-prompt", "No per-turn injection components selected");
+    visSkipMessage("user-prompt", sessionLink ? `${sessionLink} · injection off` : "injection off");
     await uploadPromise;
     process.exit(0);
   }
 
-  // Cache is stale or threshold reached — try a fresh fetch with timeout
-  logCache("miss", "userContext", forceRefresh ? "threshold refresh" : "stale cache");
   setMemoryState("recalling", undefined, hookInput.session_id);
 
   const fetchResult = await Promise.race([
-    fetchFreshContext(config, prompt).then(r => ({ ok: true as const, ...r })),
+    fetchFreshContext(config, prompt, injection).then(r => ({ ok: true as const, ...r })),
     new Promise<{ ok: false }>(resolve => setTimeout(() => resolve({ ok: false }), FETCH_TIMEOUT_MS)),
   ]).catch((): { ok: false } => ({ ok: false }));
 
-  if (fetchResult.ok) {
-    const { context } = fetchResult;
-    if (forceRefresh) {
-      markKnowledgeGraphRefreshed();
-    }
-    if (context) {
-      serveContext(config.peerName, context, false, sessionLink);
-      await uploadPromise;
-      process.exit(0);
-    }
-  }
+  const ctx: { context: any; matched?: string[]; queryLabel?: string } | null =
+    fetchResult.ok && fetchResult.context
+      ? { context: fetchResult.context, matched: fetchResult.matched, queryLabel: fetchResult.queryLabel }
+      : null;
 
-  // Fetch failed or timed out — silently fall back to stale cache
-  const staleContext = getStaleCachedUserContext();
-  if (staleContext) {
-    logHook("user-prompt", "Serving stale cache after timeout");
-    serveContext(config.peerName, staleContext, true, sessionLink);
-  }
-  // No cache at all — exit silently, context will arrive after session-start completes
-
+  emitPerTurn(config.peerName, ctx, sessionLink);
   await uploadPromise;
   process.exit(0);
 }
@@ -262,22 +238,26 @@ async function postUserMessage(
 }
 
 /**
- * Format and output context injection to Claude.
+ * Emit the per-turn "context" injection: the cache/fresh/stale context blob
+ * formatted into additionalContext plus its systemMessage. Exits silently when
+ * nothing resolved — mirroring the old no-cache fall-through.
  */
-function serveContext(
+function emitPerTurn(
   peerName: string,
-  context: any,
-  cached: boolean,
+  ctx: { context: any; matched?: string[]; queryLabel?: string } | null,
   sessionLink?: string,
 ): void {
-  const { parts: contextParts } = formatCachedContext(context, peerName);
-  if (contextParts.length === 0) return;
+  if (!ctx) return;
 
-  const visMsg = visContextLine("user-prompt", { cached });
-  outputContext(peerName, contextParts, sessionLink ? `${sessionLink}\n${visMsg}` : visMsg);
+  const conclusions = extractConclusions(ctx.context);
+  if (conclusions.length === 0) return;
+
+  const parts = [`Relevant conclusions: ${conclusions.join("; ")}`];
+  const visMsg = visInjectionMessage("user-prompt", { conclusions, matched: ctx.matched, queryLabel: ctx.queryLabel });
+  outputContext(peerName, parts, sessionLink ? `${sessionLink}\n${visMsg}` : visMsg);
 }
 
-async function fetchFreshContext(config: any, prompt: string): Promise<{ context: any }> {
+async function fetchFreshContext(config: any, prompt: string, injection: InjectionConfig): Promise<{ context: any; matched: string[]; queryLabel?: string }> {
   const honcho = new Honcho(getHonchoClientOptions(config));
   const observationMode = getObservationMode(config);
 
@@ -291,67 +271,60 @@ async function fetchFreshContext(config: any, prompt: string): Promise<{ context
 
   const startTime = Date.now();
 
-  // Try search-based context first — returns conclusions relevant to the prompt
-  const topics = extractTopics(prompt);
-  const searchQuery = topics.length > 0 ? topics.join(" ") : undefined;
+  // Always search-scope the fetch: high-signal topics when we have them, else
+  // the raw prompt. `includeMostFrequent` is OFF so frequency-based conclusions
+  // ("task completed" repeats) don't crowd out what the distance gate selects —
+  // relevance/recency drives the block, not raw frequency.
+  // "prompt" mode searches with the raw prompt (no topic extraction);
+  // "topics" mode (default) prefers extracted topics, falling back to the prompt.
+  const usePrompt = injection.searchQuerySource === "prompt";
+  const { topics, precise } = usePrompt ? { topics: [], precise: false } : extractTopics(prompt);
+  const searchQuery = usePrompt || topics.length === 0 ? prompt : topics.join(" ");
 
   let contextResult: any = null;
+  // Topics shown to the user as the match — only set when the topics are
+  // high-signal, so we never surface fuzzy fallback words as a real match.
+  let matched: string[] = [];
 
-  if (searchQuery) {
-    try {
-      contextResult = await contextPeer.context({
-        ...(contextTarget ? { target: contextTarget } : {}),
-        searchQuery,
-        searchTopK: 5,
-        searchMaxDistance: 0.7,
-        maxConclusions: 15,
-        includeMostFrequent: true,
-      });
-      logApiCall(contextLabel, "GET", `search: ${searchQuery.slice(0, 60)}`, Date.now() - startTime, true);
-    } catch (e) {
-      // Search failed — fall through to static context
-      logHook("user-prompt", `Search context failed, falling back to static: ${e}`);
-    }
-  }
-
-  // Fallback: static context (no search query)
-  if (!contextResult) {
+  try {
     contextResult = await contextPeer.context({
       ...(contextTarget ? { target: contextTarget } : {}),
-      maxConclusions: 15,
-      includeMostFrequent: true,
+      searchQuery,
+      searchTopK: injection.searchTopK,
+      searchMaxDistance: injection.searchMaxDistance,
+      maxConclusions: injection.maxConclusions,
+      includeMostFrequent: false,
     });
-    logApiCall(contextLabel, "GET", `static context`, Date.now() - startTime, true);
+    matched = precise ? topics : [];
+    logApiCall(contextLabel, "GET", `search: ${searchQuery.slice(0, 60)}`, Date.now() - startTime, true);
+  } catch (e) {
+    logHook("user-prompt", `Context fetch failed: ${e}`);
   }
 
   if (contextResult) {
-    setCachedUserContext(contextResult);
     verboseApiResult("peer.context() -> representation (fresh)", (contextResult as any).representation);
     verboseList("peer.context() -> peerCard (fresh)", (contextResult as any).peerCard);
   }
 
-  return { context: contextResult };
+  return { context: contextResult, matched, queryLabel: usePrompt ? "prompt" : undefined };
 }
 
-function formatCachedContext(context: any, peerName: string): { parts: string[]; conclusionCount: number } {
-  const parts: string[] = [];
-  let conclusionCount = 0;
+// Per-turn context injects representation-derived conclusions ONLY. The full
+// peer card is stable identity and belongs to the SessionStart surface (the
+// "peerCard" component) — re-sending its 40+ items every turn was a recurring
+// slug of low-turn-relevance tokens (DEV-2024). context() returns
+// `representation` and `peerCard` as separate fields, so excluding the card is
+// simply not reading it — no string surgery.
+//
+// The conclusion count is bounded upstream by the maxConclusions knob passed to
+// context(), so no client-side cap is applied here.
+function extractConclusions(context: any): string[] {
   const rep = context?.representation;
-
-  if (typeof rep === "string" && rep.trim()) {
-    const lines = rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
-    const selected = lines.slice(0, 5);
-    conclusionCount = selected.length;
-    const summary = selected.map((l: string) => l.replace(/^\[.*?\]\s*/, "").replace(/^- /, "")).join("; ");
-    if (summary) parts.push(`Relevant conclusions: ${summary}`);
-  }
-
-  const peerCard = context?.peerCard;
-  if (peerCard?.length) {
-    parts.push(`Profile: ${peerCard.join("; ")}`);
-  }
-
-  return { parts, conclusionCount };
+  if (typeof rep !== "string" || !rep.trim()) return [];
+  return rep
+    .split("\n")
+    .filter((l: string) => l.trim() && !l.startsWith("#"))
+    .map((l: string) => l.replace(/^\[.*?\]\s*/, "").replace(/^- /, ""));
 }
 
 // Set once per session to nudge active use of the honcho MCP tools.

@@ -31,6 +31,70 @@ export interface LocalContextConfig {
   maxEntries?: number;
 }
 
+// ============================================
+// Composable injection (DEV-2088 + DEV-2024)
+// ============================================
+
+/**
+ * Components the SessionStart hook may emit once per session. The tuple is the
+ * single source of truth: the union type derives from it, and set_config
+ * validation builds its allow-set and error text from the same array — so
+ * adding a component is a one-line edit with no drift between layers.
+ * - "summary": the SDK `session.summaries().long` narrative.
+ * - "peerCard" / "peerRepresentation": the two fields of a single context() call,
+ *   each injected at full length (no per-field caps — inclusion is the only lever).
+ */
+export const SESSION_START_COMPONENTS = ["summary", "peerCard", "peerRepresentation"] as const;
+export type SessionStartComponent = (typeof SESSION_START_COMPONENTS)[number];
+
+/**
+ * Components the UserPromptSubmit hook may emit per non-trivial prompt.
+ * - "context": a fresh, prompt-scoped context() blob (representation + peerCard),
+ *   whose semantic retrieval is shaped by the searchTopK/searchMaxDistance/
+ *   maxConclusions knobs below.
+ *
+ * A "search" component (filtered semantic search over inductive conclusions)
+ * was scoped out: `level` is not filterable through the API, so it needs a
+ * honcho-backend + SDK change before it can ship. See the plan.
+ */
+export const PER_TURN_COMPONENTS = ["context"] as const;
+export type PerTurnComponent = (typeof PER_TURN_COMPONENTS)[number];
+
+/**
+ * The `injection` config block: turns the two hardcoded injection surfaces
+ * into a composable, config-driven menu. Each surface selects zero or more
+ * components; the retrieval knobs shape whatever those components emit.
+ */
+export interface InjectionConfig {
+  /** Components emitted once at session open (default: ["summary", "peerCard"]). */
+  sessionStart?: SessionStartComponent[];
+  /** Components emitted per non-trivial prompt (default: ["context"]). */
+  perTurn?: PerTurnComponent[];
+  /** Top-K conclusions pulled by context()'s semantic search (default: 10). */
+  searchTopK?: number;
+  /** Max conclusions injected per context() call (default: 15). */
+  maxConclusions?: number;
+  /** Max cosine distance for context()'s semantic search — lower is stricter
+   *  (default: 0.6). */
+  searchMaxDistance?: number;
+  /** What drives the per-turn semantic search: the raw "prompt" (default)
+   *  or extracted "topics". */
+  searchQuerySource?: "topics" | "prompt";
+}
+
+/** Resolved injection defaults: session summary + peer card at session start,
+ *  a fresh context() per turn. Retrieval knobs are tuned for a lean per-turn
+ *  block — topK 10 for recall, a 0.6 cosine distance, searching on the raw
+ *  prompt. */
+export const DEFAULT_INJECTION: Required<InjectionConfig> = {
+  sessionStart: ["summary", "peerCard"],
+  perTurn: ["context"],
+  searchTopK: 10,
+  maxConclusions: 15,
+  searchMaxDistance: 0.6,
+  searchQuerySource: "prompt",
+};
+
 export type ReasoningLevel = "minimal" | "low" | "medium" | "high" | "max";
 
 export type SessionStrategy = "per-directory" | "git-branch" | "chat-instance";
@@ -91,6 +155,8 @@ export interface HostConfig {
   contextRefresh?: ContextRefreshConfig;
   localContext?: LocalContextConfig;
   endpoint?: HonchoEndpointConfig;
+  /** Composable injection config (session-start + per-turn component menus). */
+  injection?: InjectionConfig;
 }
 
 let _detectedHost: HonchoHost | null = null;
@@ -189,6 +255,8 @@ interface HonchoFileConfig {
   observationMode?: ObservationMode;
   /** Memory statusLine visibility: "on" (default) · "off" */
   statusline?: StatuslineMode;
+  /** Composable injection config (session-start + per-turn component menus). */
+  injection?: InjectionConfig;
   hosts?: Record<string, HostConfig>;
   /** When true, flat workspace/aiPeer fields apply to ALL hosts,
    *  ignoring host-specific blocks. When false (default), each host
@@ -240,6 +308,8 @@ export interface HonchoCLAUDEConfig {
   endpoint?: HonchoEndpointConfig;
   /** Local claude-context.md settings */
   localContext?: LocalContextConfig;
+  /** Composable injection config (session-start + per-turn component menus) */
+  injection?: InjectionConfig;
   /** Temporarily disable plugin (default: true) */
   enabled?: boolean;
   /** Enable file logging to ~/.honcho/ (default: true) */
@@ -351,6 +421,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     contextRefresh: hostBlock?.contextRefresh ?? raw.contextRefresh,
     endpoint: hostBlock?.endpoint ?? raw.endpoint,
     localContext: hostBlock?.localContext ?? raw.localContext,
+    injection: hostBlock?.injection ?? raw.injection,
     enabled: hostBlock?.enabled ?? raw.enabled,
     logging: hostBlock?.logging ?? raw.logging,
     globalOverride: raw.globalOverride,
@@ -510,6 +581,7 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   setHostIfExplicit("contextRefresh", config.contextRefresh, existing.contextRefresh);
   setHostIfExplicit("localContext", config.localContext, existing.localContext);
   setHostIfExplicit("endpoint", config.endpoint, existing.endpoint);
+  setHostIfExplicit("injection", config.injection, existing.injection);
 
   // Preserve a host-scoped apiKey already on disk. This integration never writes
   // apiKey (config.apiKey is the *resolved* key — env/root — and must not be
@@ -650,6 +722,20 @@ export function getLocalContextConfig(): LocalContextConfig {
   return {
     maxEntries: config?.localContext?.maxEntries ?? 50,
   };
+}
+
+/**
+ * Resolved injection config with every field defaulted. Callers get a fully
+ * populated object so they never repeat the fallback literals. Config comes
+ * from parsed JSON, so absent keys simply don't appear — the spread over
+ * DEFAULT_INJECTION defaults them, while an explicit `[]` is preserved.
+ *
+ * Pass the already-loaded config (hooks have it in scope) to avoid a second
+ * disk read + parse on the per-turn hot path; omit it for a standalone lookup.
+ */
+export function getInjectionConfig(config?: HonchoCLAUDEConfig | null): Required<InjectionConfig> {
+  const injection = (config === undefined ? loadConfig() : config)?.injection;
+  return { ...DEFAULT_INJECTION, ...(injection ?? {}) };
 }
 
 export function isLoggingEnabled(): boolean {
