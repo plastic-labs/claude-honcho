@@ -55,6 +55,9 @@ const HARNESS_INJECTED_PATTERNS = [
   /^<command-message>/,
   /^<system-reminder>/,
   /^<bash-(stdout|stderr|input)>/,
+  // `<<...>>` sentinels the runtime re-submits through the user slot and
+  // resolves at fire time (e.g. <<autonomous-loop-dynamic>> from /loop wakeups)
+  /^<<[\w-]+>>$/,
 ];
 
 function isHarnessInjected(prompt: string): boolean {
