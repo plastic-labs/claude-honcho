@@ -151,8 +151,7 @@ async function setup(): Promise<void> {
 
   try {
     const honcho = new Honcho(getHonchoClientOptions(config));
-    const session = await honcho.session("setup-test");
-    const peer = await honcho.peer(config.peerName);
+    await honcho.workspaces();
     console.log(s.success("Connected to Honcho API"));
     console.log(`  ${s.label("Workspace")}: ${config.workspace}`);
     console.log(`  ${s.label("Peer")}:      ${config.peerName}`);
@@ -198,6 +197,20 @@ async function setup(): Promise<void> {
 
   installStatusline();
   console.log("");
+
+  // Report availability only — importing lives in /honcho:import.
+  try {
+    const { findTranscripts } = await import("./backfill-runner.js");
+    const transcripts = findTranscripts(30);
+    if (transcripts.length > 0) {
+      console.log(s.section("Import past sessions (optional)"));
+      console.log(s.listItem(`Found ${transcripts.length} local Claude Code session(s) from the last 30 days.`));
+      console.log(s.dim("  Run /honcho:import whenever you'd like to add your past work to Honcho."));
+      console.log("");
+    }
+  } catch {
+    // Non-fatal — the import is optional.
+  }
 
   console.log(s.success("Setup complete -- Honcho memory is ready"));
   console.log("");
