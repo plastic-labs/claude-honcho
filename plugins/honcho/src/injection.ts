@@ -11,6 +11,15 @@
 import type { SessionStartComponent } from "./config.js";
 
 /**
+ * Static memory-usage directives for the "directives" session-start component.
+ */
+export const HONCHO_DIRECTIVES = `You have persistent memory via Honcho. Context about the user, their preferences, and past work is loaded automatically at the start of every session.
+- Trust the Honcho context injected at session start. It contains what you know about the user — act on it. Do not ignore it or ask the user things you already know.
+- Use \`chat\` or \`search\` mid-conversation when you need context beyond what was loaded at startup.
+- Use \`create_conclusion\` to save new insights as you learn them: preferences, decisions, patterns the user likes, things they've asked you not to do.
+- The user should never have to repeat themselves. If they've said something before, you should already know it.`;
+
+/**
  * Data the session-start components render from. Every field is optional: a
  * component's data is only fetched when that component is selected, so an
  * unselected component simply has nothing to render.
@@ -47,6 +56,11 @@ export function renderSessionStart(
 
   for (const component of components) {
     switch (component) {
+      case "directives": {
+        parts.push(`Honcho memory directives:\n${HONCHO_DIRECTIVES}`);
+        labels.push("directives");
+        break;
+      }
       case "summary": {
         const summary = data.summary?.trim();
         if (summary) {
