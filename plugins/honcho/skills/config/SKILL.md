@@ -158,7 +158,7 @@ AskUserQuestion:
       multiSelect: true
       options:
         - label: "Memory directives"
-          description: "How to use memory — trust context, search, save insights"
+          description: "How to use memory — treat as background, search, save insights"
         - label: "Session summary"
           description: "Rolling long summary of prior sessions"
         - label: "Peer card"

@@ -40,9 +40,9 @@ export interface LocalContextConfig {
  * single source of truth: the union type derives from it, and set_config
  * validation builds its allow-set and error text from the same array — so
  * adding a component is a one-line edit with no drift between layers.
- * - "directives": static memory-usage instructions (trust context, use
- *   chat/search, save insights) — formerly a manual "paste this into your
- *   CLAUDE.md" README step; now shipped every session instead.
+ * - "directives": static memory-usage guidance (treat injected memory as
+ *   background, use chat/search, save insights) — formerly a manual "paste
+ *   this into your CLAUDE.md" README step; now shipped every session instead.
  * - "summary": the SDK `session.summaries().long` narrative.
  * - "peerCard" / "peerRepresentation": the two fields of a single context() call,
  *   each injected at full length (no per-field caps — inclusion is the only lever).
