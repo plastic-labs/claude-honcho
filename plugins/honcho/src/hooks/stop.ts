@@ -162,14 +162,11 @@ export async function handleStop(): Promise<void> {
     );
     logApiCall("session.addMessages", "POST", `${turnMessages.length} assistant msg(s), ${messages.length} chunk(s), direct`);
 
-    try {
-      const session = new Session(sessionName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
-      await addMessagesBatched(session, messages);
-    } catch (e) {
+    const session = new Session(sessionName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
+    await addMessagesBatched(session, messages, (e) => {
       logHook("stop", `Direct upload failed, retrying via get-or-create: ${e}`);
-      const session = await honcho.session(sessionName);
-      await addMessagesBatched(session, messages);
-    }
+      return honcho.session(sessionName);
+    });
 
     logHook("stop", `Saved ${turnMessages.length} assistant message(s)`);
     visStopMessage("out", `saved ${turnMessages.length} assistant msg(s)`);

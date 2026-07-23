@@ -399,10 +399,31 @@ export const HONCHO_MAX_BATCH = 100;
 
 type SessionLike = { addMessages: (messages: any[]) => Promise<unknown> };
 
-/** Upload messages, split across calls of ≤100 to stay under Honcho's batch cap. */
-export async function addMessagesBatched(session: SessionLike, messages: any[]): Promise<void> {
+/**
+ * Upload messages, split across calls of ≤100 to stay under Honcho's batch cap.
+ *
+ * When `resolveFallback` is given, a batch failure resolves an alternate session
+ * once and retries only the failed batch (and any remaining ones) on it. This
+ * lets callers front a fast noEnsure session and fall back to get-or-create
+ * without ever replaying batches the first session already accepted.
+ */
+export async function addMessagesBatched(
+  session: SessionLike,
+  messages: any[],
+  resolveFallback?: (error: unknown) => Promise<SessionLike>,
+): Promise<void> {
+  let active = session;
+  let usedFallback = false;
   for (let i = 0; i < messages.length; i += HONCHO_MAX_BATCH) {
-    await session.addMessages(messages.slice(i, i + HONCHO_MAX_BATCH));
+    const batch = messages.slice(i, i + HONCHO_MAX_BATCH);
+    try {
+      await active.addMessages(batch);
+    } catch (e) {
+      if (usedFallback || !resolveFallback) throw e;
+      active = await resolveFallback(e);
+      usedFallback = true;
+      await active.addMessages(batch);
+    }
   }
 }
 

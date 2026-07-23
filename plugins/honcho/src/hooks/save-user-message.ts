@@ -87,12 +87,9 @@ async function postUserMessage(
   );
 
   logApiCall("session.addMessages", "POST", `user prompt (${prompt.length} chars, ${messages.length} msg, direct)`);
-  try {
-    const session = new Session(sessionName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
-    await addMessagesBatched(session, messages);
-  } catch (e) {
+  const session = new Session(sessionName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
+  await addMessagesBatched(session, messages, (e) => {
     logHook("save-user-message", `Direct upload failed, retrying via get-or-create: ${e}`);
-    const session = await honcho.session(sessionName);
-    await addMessagesBatched(session, messages);
-  }
+    return honcho.session(sessionName);
+  });
 }
