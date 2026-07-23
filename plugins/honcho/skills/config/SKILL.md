@@ -177,7 +177,7 @@ Map the selections to component names, then call `set_config` once per surface:
 
 Pass the value as a JSON array (e.g. `["summary","peerCard"]`). An empty selection for a surface means "inject nothing" there — pass `[]`.
 
-Retrieval tuning is intentionally NOT asked here. `injection.searchTopK` (default 10), `injection.maxConclusions` (15), and `injection.searchMaxDistance` (0.4, cosine — lower is stricter) are all configurable via `set_config`, but keep the defaults; only mention they're tunable if the user brings it up, and never prompt for them.
+Retrieval tuning is intentionally NOT asked here. `injection.searchTopK` (default 10), `injection.maxConclusions` (15), `injection.searchMaxDistance` (0.6, cosine — lower is stricter), and `injection.searchQuerySource` ("prompt" | "topics", default "prompt") are all configurable via `set_config`, but keep the defaults; only mention they're tunable if the user brings it up, and never prompt for them.
 
 ### Dangerous fields (Host)
 

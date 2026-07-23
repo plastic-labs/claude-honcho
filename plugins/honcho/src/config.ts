@@ -75,25 +75,24 @@ export interface InjectionConfig {
   /** Max conclusions injected per context() call (default: 15). */
   maxConclusions?: number;
   /** Max cosine distance for context()'s semantic search — lower is stricter
-   *  (default: 0.4). */
+   *  (default: 0.6). */
   searchMaxDistance?: number;
-  /** What drives the per-turn semantic search: extracted "topics" (default)
-   *  or the raw "prompt". */
+  /** What drives the per-turn semantic search: the raw "prompt" (default)
+   *  or extracted "topics". */
   searchQuerySource?: "topics" | "prompt";
 }
 
 /** Resolved injection defaults: session summary + peer card at session start,
- *  a fresh context() per turn. Retrieval knobs are tuned for a lean,
- *  high-precision per-turn block — topK 10 (up from the old literal 5) for
- *  recall, and a tight 0.4 cosine distance (down from 0.7) to cut
- *  low-relevance conclusions. */
+ *  a fresh context() per turn. Retrieval knobs are tuned for a lean per-turn
+ *  block — topK 10 for recall, a 0.6 cosine distance, searching on the raw
+ *  prompt. */
 export const DEFAULT_INJECTION: Required<InjectionConfig> = {
   sessionStart: ["summary", "peerCard"],
   perTurn: ["context"],
   searchTopK: 10,
   maxConclusions: 15,
-  searchMaxDistance: 0.4,
-  searchQuerySource: "topics",
+  searchMaxDistance: 0.6,
+  searchQuerySource: "prompt",
 };
 
 export type ReasoningLevel = "minimal" | "low" | "medium" | "high" | "max";
