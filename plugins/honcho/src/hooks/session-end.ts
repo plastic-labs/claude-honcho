@@ -1,9 +1,6 @@
 import { loadConfig, getSessionName, isPluginEnabled, getCachedStdin } from "../config.js";
 import { existsSync, readFileSync } from "fs";
 import {
-  generateClaudeSummary,
-  saveClaudeLocalContext,
-  loadClaudeLocalContext,
   getInstanceIdForCwd,
 } from "../cache.js";
 import { clearSessionFiles } from "../state.js";
@@ -29,44 +26,8 @@ interface TranscriptEntry {
   content?: string | Array<{ type: string; text?: string }>;
 }
 
-/**
- * Check if assistant content is meaningful prose vs just tool acknowledgment
- */
-function isMeaningfulAssistantContent(content: string): boolean {
-  if (content.length < 50) return false;
-
-  const toolAnnouncements = [
-    /^(I'll|Let me|I'm going to|I will|Now I'll|First,? I'll)\s+(run|use|execute|check|read|look at|search|edit|write|create)/i,
-    /^Running\s+/i,
-    /^Checking\s+/i,
-    /^Looking at\s+/i,
-  ];
-  for (const pattern of toolAnnouncements) {
-    if (pattern.test(content.trim()) && content.length < 200) {
-      return false;
-    }
-  }
-
-  if (/^(The command|The file|The output|This shows|Here's what)/i.test(content.trim()) && content.length < 150) {
-    return false;
-  }
-
-  const meaningfulPatterns = [
-    /\b(because|since|therefore|however|although|this means|in summary|to summarize|the issue is|the problem is|I recommend|you should|we should|this approach|the solution|key point|important|note that)\b/i,
-    /\b(implemented|fixed|resolved|completed|added|created|updated|changed|modified|refactored)\b/i,
-    /\b(error|bug|issue|problem|solution|fix|improvement|optimization)\b/i,
-  ];
-  for (const pattern of meaningfulPatterns) {
-    if (pattern.test(content)) {
-      return true;
-    }
-  }
-
-  return content.length >= 200;
-}
-
-function parseTranscript(transcriptPath: string): Array<{ role: string; content: string; isMeaningful?: boolean; timestamp?: string }> {
-  const messages: Array<{ role: string; content: string; isMeaningful?: boolean; timestamp?: string }> = [];
+function parseTranscript(transcriptPath: string): Array<{ role: string; content: string; timestamp?: string }> {
+  const messages: Array<{ role: string; content: string; timestamp?: string }> = [];
 
   if (!transcriptPath || !existsSync(transcriptPath)) {
     return messages;
@@ -117,12 +78,11 @@ function parseTranscript(transcriptPath: string): Array<{ role: string; content:
           }
 
           if (assistantContent && assistantContent.trim()) {
-            // Feeds the local work summary only — assistant messages upload live
-            // from the stop hook, not here.
+            // Counted for the end-marker message tally only — assistant
+            // messages upload live from the stop hook, not here.
             messages.push({
               role: "assistant",
               content: assistantContent,
-              isMeaningful: isMeaningfulAssistantContent(assistantContent),
               timestamp: entry.timestamp,
             });
           }
@@ -138,37 +98,12 @@ function parseTranscript(transcriptPath: string): Array<{ role: string; content:
   return messages;
 }
 
-function extractWorkItems(assistantMessages: string[]): string[] {
-  const workItems: string[] = [];
-  const actionPatterns = [
-    /(?:created|wrote|added)\s+(?:file\s+)?([^\n.]+)/gi,
-    /(?:edited|modified|updated|fixed)\s+([^\n.]+)/gi,
-    /(?:implemented|built|developed)\s+([^\n.]+)/gi,
-    /(?:refactored|optimized|improved)\s+([^\n.]+)/gi,
-  ];
-
-  for (const msg of assistantMessages.slice(-15)) {
-    for (const pattern of actionPatterns) {
-      const matches = msg.matchAll(pattern);
-      for (const match of matches) {
-        const item = match[1]?.trim();
-        if (item && item.length < 100 && !workItems.includes(item)) {
-          workItems.push(item);
-        }
-      }
-    }
-  }
-
-  return workItems.slice(0, 10);
-}
-
 /**
  * SessionEnd hook — structured for resilience against cancellation.
  *
  * Priority order (most critical first):
- *   1. Local summary (instant, zero risk — survives any cancellation)
- *   2. Parallel: cooldown animation + API uploads (critical data first)
- *   3. Session end marker (nice-to-have metadata)
+ *   1. Parallel: cooldown animation + API uploads (critical data first)
+ *   2. Session end marker (nice-to-have metadata)
  */
 export async function handleSessionEnd(): Promise<void> {
   const config = loadConfig();
@@ -200,39 +135,17 @@ export async function handleSessionEnd(): Promise<void> {
   logHook("session-end", `Session ending`, { reason });
 
   // =========================================================
-  // Phase 1: LOCAL WORK (instant, survives any cancellation)
+  // Phase 1: parse transcript for the end-marker message count.
+  // The on-disk local work summary was retired here — nothing consumed it, and
+  // the server-side session.summaries() long summary now stays fresh on its own
+  // since we upload every turn live.
   // =========================================================
   const transcriptMessages = transcriptPath ? parseTranscript(transcriptPath) : [];
-  const allAssistant = transcriptMessages.filter((msg) => msg.role === "assistant");
-  const meaningful = allAssistant.filter((msg) => msg.isMeaningful);
-  const other = allAssistant.filter((msg) => !msg.isMeaningful);
-  const assistantMessages = [
-    ...meaningful.slice(-25),
-    ...other.slice(-15),
-  ].slice(-40);
-
-  // Save local summary FIRST — even if the hook gets killed after this,
-  // the next session-start will have context about what happened.
-  const workItems = extractWorkItems(assistantMessages.map((m) => m.content));
-  const existingContext = loadClaudeLocalContext();
-  let recentActivity = "";
-  if (existingContext) {
-    const activityMatch = existingContext.match(/## Recent Activity\n([\s\S]*)/);
-    if (activityMatch) {
-      recentActivity = activityMatch[1];
-    }
-  }
-  const newSummary = generateClaudeSummary(
-    sessionName,
-    workItems,
-    assistantMessages.map((m) => m.content)
-  );
-  saveClaudeLocalContext(newSummary + recentActivity);
 
   // No end-of-session upload: messages are saved live by the other hooks, and
   // the [Session ended] marker only ever derived lifecycle exhaust
   // ("claude's session ended at ...") — write-only telemetry, never read back.
-  logHook("session-end", `Session ended (${assistantMessages.length} assistant msgs handled live)`);
+  logHook("session-end", `Session ended (${transcriptMessages.length} msgs handled live)`);
   clearSessionFiles(hookInput.session_id);
   process.exit(0);
 }

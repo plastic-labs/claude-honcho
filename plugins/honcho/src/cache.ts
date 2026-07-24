@@ -121,23 +121,17 @@ interface ContextCache {
   claudeContext?: { data: any; fetchedAt: number };
   summaries?: { data: any; fetchedAt: number };
   messageCount?: number; // Track messages since last refresh
-  lastRefreshMessageCount?: number; // Message count at last knowledge graph refresh
 }
 
-// These are now configurable via config.json, with defaults in getContextRefreshConfig()
+// Now configurable via config.json, with defaults in getContextRefreshConfig()
 function getContextTTL(): number {
   const config = getContextRefreshConfig();
   return (config.ttlSeconds ?? 300) * 1000; // Convert to ms
 }
 
-function getMessageRefreshThreshold(): number {
-  const config = getContextRefreshConfig();
-  return config.messageThreshold ?? 50;
-}
-
 // Known keys in ContextCache — anything else is a ghost from older versions
 const CONTEXT_CACHE_KNOWN_KEYS = new Set([
-  "userContext", "claudeContext", "summaries", "messageCount", "lastRefreshMessageCount",
+  "claudeContext", "summaries", "messageCount",
 ]);
 
 export function loadContextCache(): ContextCache {
@@ -169,26 +163,6 @@ export function saveContextCache(cache: ContextCache): void {
   writeFileSync(CONTEXT_CACHE_FILE, JSON.stringify(cache, null, 2));
 }
 
-export function getCachedUserContext(): any | null {
-  const cache = loadContextCache();
-  if (cache.userContext && Date.now() - cache.userContext.fetchedAt < getContextTTL()) {
-    return cache.userContext.data;
-  }
-  return null;
-}
-
-/** Return cached context even if expired (for timeout fallback) */
-export function getStaleCachedUserContext(): any | null {
-  const cache = loadContextCache();
-  return cache.userContext?.data ?? null;
-}
-
-export function setCachedUserContext(data: any): void {
-  const cache = loadContextCache();
-  cache.userContext = { data, fetchedAt: Date.now() };
-  saveContextCache(cache);
-}
-
 export function getCachedClaudeContext(): any | null {
   const cache = loadContextCache();
   if (cache.claudeContext && Date.now() - cache.claudeContext.fetchedAt < getContextTTL()) {
@@ -201,12 +175,6 @@ export function setCachedClaudeContext(data: any): void {
   const cache = loadContextCache();
   cache.claudeContext = { data, fetchedAt: Date.now() };
   saveContextCache(cache);
-}
-
-export function isContextCacheStale(): boolean {
-  const cache = loadContextCache();
-  if (!cache.userContext) return true;
-  return Date.now() - cache.userContext.fetchedAt >= getContextTTL();
 }
 
 // Track message count for threshold-based refresh
@@ -222,25 +190,9 @@ export function getMessageCount(): number {
   return cache.messageCount || 0;
 }
 
-export function shouldRefreshKnowledgeGraph(): boolean {
-  const cache = loadContextCache();
-  const currentCount = cache.messageCount || 0;
-  const lastRefresh = cache.lastRefreshMessageCount || 0;
-
-  // Refresh if we've sent threshold messages since last refresh
-  return (currentCount - lastRefresh) >= getMessageRefreshThreshold();
-}
-
-export function markKnowledgeGraphRefreshed(): void {
-  const cache = loadContextCache();
-  cache.lastRefreshMessageCount = cache.messageCount || 0;
-  saveContextCache(cache);
-}
-
 export function resetMessageCount(): void {
   const cache = loadContextCache();
   cache.messageCount = 0;
-  cache.lastRefreshMessageCount = 0;
   saveContextCache(cache);
 }
 
@@ -294,50 +246,6 @@ export function appendClaudeWork(workDescription: string): void {
   }
 
   saveClaudeLocalContext(existing + entry);
-}
-
-export function generateClaudeSummary(
-  sessionName: string,
-  workItems: string[],
-  assistantMessages: string[]
-): string {
-  const timestamp = new Date().toISOString();
-
-  // Extract key actions from assistant messages
-  const actions: string[] = [];
-  for (const msg of assistantMessages.slice(-10)) {
-    // Look for action indicators
-    if (msg.includes("Created") || msg.includes("Updated") || msg.includes("Fixed")) {
-      const firstSentence = msg.split(/[.!?\n]/)[0];
-      if (firstSentence.length < 200) {
-        actions.push(firstSentence);
-      }
-    }
-  }
-
-  let summary = `# CLAUDE Work Context
-
-Last updated: ${timestamp}
-Session: ${sessionName}
-
-## What CLAUDE Was Working On
-
-`;
-
-  if (workItems.length > 0) {
-    summary += workItems.map((w) => `- ${w}`).join("\n");
-    summary += "\n\n";
-  }
-
-  if (actions.length > 0) {
-    summary += "## Recent Actions\n\n";
-    summary += actions.slice(-10).map((a) => `- ${a}`).join("\n");
-    summary += "\n\n";
-  }
-
-  summary += "## Recent Activity\n";
-
-  return summary;
 }
 
 // ============================================
@@ -491,10 +399,31 @@ export const HONCHO_MAX_BATCH = 100;
 
 type SessionLike = { addMessages: (messages: any[]) => Promise<unknown> };
 
-/** Upload messages, split across calls of ≤100 to stay under Honcho's batch cap. */
-export async function addMessagesBatched(session: SessionLike, messages: any[]): Promise<void> {
+/**
+ * Upload messages, split across calls of ≤100 to stay under Honcho's batch cap.
+ *
+ * When `resolveFallback` is given, a batch failure resolves an alternate session
+ * once and retries only the failed batch (and any remaining ones) on it. This
+ * lets callers front a fast noEnsure session and fall back to get-or-create
+ * without ever replaying batches the first session already accepted.
+ */
+export async function addMessagesBatched(
+  session: SessionLike,
+  messages: any[],
+  resolveFallback?: (error: unknown) => Promise<SessionLike>,
+): Promise<void> {
+  let active = session;
+  let usedFallback = false;
   for (let i = 0; i < messages.length; i += HONCHO_MAX_BATCH) {
-    await session.addMessages(messages.slice(i, i + HONCHO_MAX_BATCH));
+    const batch = messages.slice(i, i + HONCHO_MAX_BATCH);
+    try {
+      await active.addMessages(batch);
+    } catch (e) {
+      if (usedFallback || !resolveFallback) throw e;
+      active = await resolveFallback(e);
+      usedFallback = true;
+      await active.addMessages(batch);
+    }
   }
 }
 

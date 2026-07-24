@@ -31,7 +31,91 @@ export interface LocalContextConfig {
   maxEntries?: number;
 }
 
-export type ReasoningLevel = "minimal" | "low" | "medium" | "high" | "max";
+// ============================================
+// Composable injection (DEV-2088 + DEV-2024)
+// ============================================
+
+/**
+ * Components the SessionStart hook may emit once per session. The tuple is the
+ * single source of truth: the union type derives from it, and set_config
+ * validation builds its allow-set and error text from the same array — so
+ * adding a component is a one-line edit with no drift between layers.
+ * - "directives": static memory-usage guidance (treat injected memory as
+ *   background, use chat/search, save insights) — formerly a manual "paste
+ *   this into your CLAUDE.md" README step; now shipped every session instead.
+ * - "summary": the SDK `session.summaries().long` narrative.
+ * - "peerCard" / "peerRepresentation": the two fields of a single context() call,
+ *   each injected at full length (no per-field caps — inclusion is the only lever).
+ */
+export const SESSION_START_COMPONENTS = ["directives", "summary", "peerCard", "peerRepresentation"] as const;
+export type SessionStartComponent = (typeof SESSION_START_COMPONENTS)[number];
+
+/**
+ * Components the UserPromptSubmit hook may emit per non-trivial prompt.
+ * - "context": a fresh, prompt-scoped context() blob (representation + peerCard),
+ *   whose semantic retrieval is shaped by the searchTopK/searchMaxDistance/
+ *   maxConclusions knobs below.
+ * - "dialectic": a reasoned peer.chat() answer over the representation, seeded
+ *   from `dialecticTemplate` (the prompt substituted into %{user_query}) at the
+ *   `dialecticReasoning` tier. Off by default — chat() is far slower than
+ *   context() (~12s at medium), so it runs on its own budget, not the 4s
+ *   context race, and stays under the 30s UserPromptSubmit harness ceiling.
+ *
+ * A "search" component (filtered semantic search over inductive conclusions)
+ * was scoped out: `level` is not filterable through the API, so it needs a
+ * honcho-backend + SDK change before it can ship. See the plan.
+ */
+export const PER_TURN_COMPONENTS = ["context", "dialectic"] as const;
+export type PerTurnComponent = (typeof PER_TURN_COMPONENTS)[number];
+
+/**
+ * The `injection` config block: turns the two hardcoded injection surfaces
+ * into a composable, config-driven menu. Each surface selects zero or more
+ * components; the retrieval knobs shape whatever those components emit.
+ */
+export interface InjectionConfig {
+  /** Components emitted once at session open (default: ["directives", "summary", "peerCard"]). */
+  sessionStart?: SessionStartComponent[];
+  /** Components emitted per non-trivial prompt (default: ["context"]). */
+  perTurn?: PerTurnComponent[];
+  /** Top-K conclusions pulled by context()'s semantic search (default: 10). */
+  searchTopK?: number;
+  /** Max conclusions injected per context() call (default: 15). */
+  maxConclusions?: number;
+  /** Max cosine distance for context()'s semantic search — lower is stricter
+   *  (default: 0.6). */
+  searchMaxDistance?: number;
+  /** What drives the per-turn semantic search: the raw "prompt" (default)
+   *  or extracted "topics". */
+  searchQuerySource?: "topics" | "prompt";
+  /** Query template for the per-turn "dialectic" component. The user's prompt
+   *  is substituted into every `%{user_query}` (default: surface anything from
+   *  the user's history relevant to the prompt). */
+  dialecticTemplate?: string;
+  /** Reasoning tier for the per-turn "dialectic" chat() call (default: "low").
+   *  Kept separate from the top-level `reasoningLevel` so per-turn dialectic can
+   *  stay cheap on the hot path without lowering the tier used elsewhere. */
+  dialecticReasoning?: ReasoningLevel;
+}
+
+/** Resolved injection defaults: memory-usage directives + session summary +
+ *  peer card at session start, a fresh context() per turn. Retrieval knobs
+ *  are tuned for a lean per-turn block — topK 10 for recall, a 0.6 cosine
+ *  distance, searching on the raw prompt. */
+export const DEFAULT_INJECTION: Required<InjectionConfig> = {
+  sessionStart: ["directives", "summary", "peerCard"],
+  perTurn: ["context"],
+  searchTopK: 10,
+  maxConclusions: 15,
+  searchMaxDistance: 0.6,
+  searchQuerySource: "prompt",
+  dialecticTemplate:
+    "Return a compact, factual list of anything from the user's history — preferences, prior decisions, relevant past work — that would help with the following. Write in the third person as background notes; do not address the user, ask questions, or offer next steps. If nothing relevant exists, say so in one line. Relevant to: %{user_query}",
+  dialecticReasoning: "medium",
+};
+
+export const REASONING_LEVELS = ["minimal", "low", "medium", "high", "max"] as const;
+export type ReasoningLevel = (typeof REASONING_LEVELS)[number];
 
 export type SessionStrategy = "per-directory" | "git-branch" | "chat-instance";
 
@@ -92,6 +176,8 @@ export interface HostConfig {
   contextRefresh?: ContextRefreshConfig;
   localContext?: LocalContextConfig;
   endpoint?: HonchoEndpointConfig;
+  /** Composable injection config (session-start + per-turn component menus). */
+  injection?: InjectionConfig;
 }
 
 let _detectedHost: HonchoHost | null = null;
@@ -192,6 +278,8 @@ interface HonchoFileConfig {
   observationMode?: ObservationMode;
   /** Memory statusLine visibility: "on" (default) · "off" */
   statusline?: StatuslineMode;
+  /** Composable injection config (session-start + per-turn component menus). */
+  injection?: InjectionConfig;
   hosts?: Record<string, HostConfig>;
   /** When true, flat workspace/aiPeer fields apply to ALL hosts,
    *  ignoring host-specific blocks. When false (default), each host
@@ -245,6 +333,8 @@ export interface HonchoCLAUDEConfig {
   endpoint?: HonchoEndpointConfig;
   /** Local claude-context.md settings */
   localContext?: LocalContextConfig;
+  /** Composable injection config (session-start + per-turn component menus) */
+  injection?: InjectionConfig;
   /** Temporarily disable plugin (default: true) */
   enabled?: boolean;
   /** Enable file logging to ~/.honcho/ (default: true) */
@@ -357,6 +447,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     contextRefresh: hostBlock?.contextRefresh ?? raw.contextRefresh,
     endpoint: hostBlock?.endpoint ?? raw.endpoint,
     localContext: hostBlock?.localContext ?? raw.localContext,
+    injection: hostBlock?.injection ?? raw.injection,
     enabled: hostBlock?.enabled ?? raw.enabled,
     logging: hostBlock?.logging ?? raw.logging,
     globalOverride: raw.globalOverride,
@@ -520,6 +611,7 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   setHostIfExplicit("contextRefresh", config.contextRefresh, existing.contextRefresh);
   setHostIfExplicit("localContext", config.localContext, existing.localContext);
   setHostIfExplicit("endpoint", config.endpoint, existing.endpoint);
+  setHostIfExplicit("injection", config.injection, existing.injection);
 
   // Preserve a host-scoped apiKey already on disk. This integration never writes
   // apiKey (config.apiKey is the *resolved* key — env/root — and must not be
@@ -569,6 +661,36 @@ export function getSessionForPath(cwd: string): string | null {
   return config.sessions[cwd] || null;
 }
 
+export function deriveSessionName(
+  strategy: SessionStrategy,
+  cwd: string,
+  opts: { peerName?: string; sessionPeerPrefix?: boolean; branch?: string; instanceId?: string } = {}
+): string {
+  const usePrefix = opts.sessionPeerPrefix !== false; // default true
+  const peerPart = opts.peerName ? sanitizeForSessionName(opts.peerName) : "user";
+  const repoPart = sanitizeForSessionName(basename(cwd));
+  const base = usePrefix ? `${peerPart}-${repoPart}` : repoPart;
+
+  switch (strategy) {
+    case "git-branch": {
+      if (opts.branch) {
+        const branchPart = sanitizeForSessionName(opts.branch);
+        return `${base}-${branchPart}`;
+      }
+      return base;
+    }
+    case "chat-instance": {
+      if (opts.instanceId) {
+        return usePrefix ? `${peerPart}-chat-${opts.instanceId}` : `chat-${opts.instanceId}`;
+      }
+      return base;
+    }
+    case "per-directory":
+    default:
+      return base;
+  }
+}
+
 /** Session name derived from strategy. Manual overrides only apply to per-directory.
  *  @param instanceId - Explicit instance ID for chat-instance strategy. Falls back to
  *                      per-cwd cache, then global cache. Callers should pass hookInput.session_id
@@ -587,32 +709,23 @@ export function getSessionName(cwd: string, instanceId?: string): string {
     }
   }
 
-  const usePrefix = config?.sessionPeerPrefix !== false; // default true
-  const peerPart = config?.peerName ? sanitizeForSessionName(config.peerName) : "user";
-  const repoPart = sanitizeForSessionName(basename(cwd));
-  const base = usePrefix ? `${peerPart}-${repoPart}` : repoPart;
-
-  switch (strategy) {
-    case "git-branch": {
-      const gitState = captureGitState(cwd);
-      if (gitState) {
-        const branchPart = sanitizeForSessionName(gitState.branch);
-        return `${base}-${branchPart}`;
-      }
-      return base;
-    }
-    case "chat-instance": {
-      // Prefer explicit instanceId > per-cwd cache > global cache (legacy)
-      const resolved = instanceId || getInstanceIdForCwd(cwd) || getClaudeInstanceId();
-      if (resolved) {
-        return usePrefix ? `${peerPart}-chat-${resolved}` : `chat-${resolved}`;
-      }
-      return base;
-    }
-    case "per-directory":
-    default:
-      return base;
+  // Resolve live env state, then delegate to the pure deriver.
+  let branch: string | undefined;
+  if (strategy === "git-branch") {
+    branch = captureGitState(cwd)?.branch;
   }
+  let resolvedInstanceId: string | undefined;
+  if (strategy === "chat-instance") {
+    // Prefer explicit instanceId > per-cwd cache > global cache (legacy)
+    resolvedInstanceId = instanceId || getInstanceIdForCwd(cwd) || getClaudeInstanceId() || undefined;
+  }
+
+  return deriveSessionName(strategy, cwd, {
+    peerName: config?.peerName,
+    sessionPeerPrefix: config?.sessionPeerPrefix,
+    branch,
+    instanceId: resolvedInstanceId,
+  });
 }
 
 export function setSessionForPath(cwd: string, sessionName: string): void {
@@ -660,6 +773,20 @@ export function getLocalContextConfig(): LocalContextConfig {
   return {
     maxEntries: config?.localContext?.maxEntries ?? 50,
   };
+}
+
+/**
+ * Resolved injection config with every field defaulted. Callers get a fully
+ * populated object so they never repeat the fallback literals. Config comes
+ * from parsed JSON, so absent keys simply don't appear — the spread over
+ * DEFAULT_INJECTION defaults them, while an explicit `[]` is preserved.
+ *
+ * Pass the already-loaded config (hooks have it in scope) to avoid a second
+ * disk read + parse on the per-turn hot path; omit it for a standalone lookup.
+ */
+export function getInjectionConfig(config?: HonchoCLAUDEConfig | null): Required<InjectionConfig> {
+  const injection = (config === undefined ? loadConfig() : config)?.injection;
+  return { ...DEFAULT_INJECTION, ...(injection ?? {}) };
 }
 
 export function isLoggingEnabled(): boolean {
@@ -738,7 +865,7 @@ export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClient
     apiKey: config.apiKey,
     baseURL: getHonchoBaseUrl(config),
     workspaceId: config.workspace,
-    timeout: 8000,
+    timeout: 120000,
     maxRetries: 1,
   };
 }

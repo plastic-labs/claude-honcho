@@ -36,7 +36,8 @@
           {
             "type": "command",
             "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-use.ts",
-            "timeout": 10000
+            "timeout": 10,
+            "async": true
           }
         ]
       }
@@ -59,7 +60,13 @@
           {
             "type": "command",
             "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt.ts",
-            "timeout": 7000
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/save-user-message.ts",
+            "timeout": 30000,
+            "async": true
           }
         ]
       }
@@ -92,7 +99,8 @@
           {
             "type": "command",
             "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/stop.ts",
-            "timeout": 10000
+            "timeout": 10,
+            "async": true
           }
         ]
       }
