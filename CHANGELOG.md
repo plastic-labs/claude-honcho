@@ -4,21 +4,6 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
-## [0.2.8] - 2026-07-22
-
-### Changed
-
-- Git events are no longer uploaded by default; opt back in with the `saveGitEvents` flag (`HONCHO_SAVE_GIT_EVENTS` env var).
-
-### Removed
-
-- The `[Session ended]` marker is no longer uploaded — it only ever derived lifecycle exhaust and was never read back (supersedes #37).
-
-### Fixed
-
-- Harness-injected turns and terse acknowledgements no longer pollute user memory (#66).
-- Runtime sentinels (e.g. `<<autonomous-loop-dynamic>>` from `/loop` wakeups) are no longer uploaded as user prompts.
-
 ## [0.2.7] - 2026-07-22
 
 ### Added
