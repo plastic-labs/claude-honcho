@@ -20,10 +20,7 @@ interface HookInput {
   workspace_roots?: string[];
 }
 
-// Terse acknowledgements — genuine human input, but too low-signal to reason
-// over. Still uploaded (for conversational continuity) but with deriver reasoning
-// disabled, so they don't mint content-free conclusions like "user agreed with
-// the statement 'yes'" (issue #66).
+// Terse acknowledgements
 const TRIVIAL_REPLY_PATTERN = /^(yes|no|ok|sure|thanks|y|n|yep|nope|yeah|nah|continue|go ahead|do it|proceed)$/i;
 
 export function isTerseReply(prompt: string): boolean {
@@ -38,9 +35,7 @@ const SKIP_CONTEXT_PATTERNS = [
 
 // Harness-injected turns that Claude Code delivers in the user-message slot but
 // the human never typed: background-task events, slash-command stdout, injected
-// system reminders. Uploading these as user messages makes the deriver mint
-// "facts about the user" from plumbing (issue #66). Mirrors the isRealUserPrompt
-// guard already on the assistant path in stop.ts.
+// system reminders.
 const HARNESS_INJECTED_PATTERNS = [
   /^<task-notification>/,
   /^<local-command-stdout>/,

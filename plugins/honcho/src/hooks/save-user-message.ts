@@ -54,7 +54,6 @@ export async function handleSaveUserMessage(): Promise<void> {
 
   setLogContext(cwd, sessionName);
 
-  // Skip harness-injected turns — plumbing in the user slot, not user input (#66)
   if (isHarnessInjected(prompt)) {
     logHook("save-user-message", "Skipping upload (harness-injected content, not user input)");
     process.exit(0);
@@ -83,7 +82,6 @@ async function postUserMessage(
 
   const userPeer = new Peer(config.peerName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
   const createdAt = new Date().toISOString();
-  // Terse acknowledgements upload without deriver reasoning (#66)
   const configuration = isTerseReply(prompt) ? { reasoning: { enabled: false } } : undefined;
   const messages = chunkContent(prompt).map((chunk) =>
     userPeer.message(chunk, {
