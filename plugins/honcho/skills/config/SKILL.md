@@ -171,15 +171,19 @@ AskUserQuestion:
       options:
         - label: "Relevant conclusions"
           description: "Fresh, prompt-scoped memory pulled every turn"
+        - label: "Dialectic recall"
+          description: "A reasoned answer over your history each turn — richer but slower (off by default)"
 ```
 
 Map the selections to component names, then call `set_config` once per surface:
 - Session start → `injection.sessionStart`, mapping "Memory directives"→`directives`, "Session summary"→`summary`, "Peer card"→`peerCard`, "Representation"→`peerRepresentation`.
-- Per turn → `injection.perTurn`, mapping "Relevant conclusions"→`context`.
+- Per turn → `injection.perTurn`, mapping "Relevant conclusions"→`context`, "Dialectic recall"→`dialectic`.
 
 Pass the value as a JSON array (e.g. `["directives","summary","peerCard"]`). An empty selection for a surface means "inject nothing" there — pass `[]`.
 
 Retrieval tuning is intentionally NOT asked here. `injection.searchTopK` (default 10), `injection.maxConclusions` (15), `injection.searchMaxDistance` (0.6, cosine — lower is stricter), and `injection.searchQuerySource` ("prompt" | "topics", default "prompt") are all configurable via `set_config`, but keep the defaults; only mention they're tunable if the user brings it up, and never prompt for them.
+
+If the user enables "Dialectic recall", note the two knobs that shape it — `injection.dialecticTemplate` (the query, with a `%{user_query}` placeholder) and `injection.dialecticReasoning` (tier, default "low") — both via `set_config`. Flag the trade-off: it fires a `chat()` call every non-trivial turn (~12s at medium), on its own budget under the 30s hook ceiling, so it adds real per-turn latency. Keep it off unless the user wants it.
 
 ### Dangerous fields (Host)
 

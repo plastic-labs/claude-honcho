@@ -75,6 +75,17 @@ export function visInjectionMessage(hookName: string, opts: {
 }
 
 /**
+ * Build the per-turn systemMessage for the "dialectic" component: a status line
+ * (tier · elapsed) followed by the full reasoned answer, so the user sees
+ * exactly what was injected. The answer is prose and can be long — that's the
+ * intended trade-off; it also lands in additionalContext for the model.
+ */
+export function visDialecticMessage(hookName: string, reasoning: string, elapsedMs: number, answer: string): string {
+  const head = formatLine("in", hookName, `injected dialectic (${reasoning} · ${(elapsedMs / 1000).toFixed(1)}s)`);
+  return answer.trim() ? `${head}\n${answer.trim()}` : head;
+}
+
+/**
  * Build the systemMessage for the SessionStart composition: a single status
  * line naming which components were injected (e.g. "injected summary + peer
  * card (12 items)"). Session start is a once-per-session surface, so unlike the

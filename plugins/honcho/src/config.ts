@@ -55,12 +55,17 @@ export type SessionStartComponent = (typeof SESSION_START_COMPONENTS)[number];
  * - "context": a fresh, prompt-scoped context() blob (representation + peerCard),
  *   whose semantic retrieval is shaped by the searchTopK/searchMaxDistance/
  *   maxConclusions knobs below.
+ * - "dialectic": a reasoned peer.chat() answer over the representation, seeded
+ *   from `dialecticTemplate` (the prompt substituted into %{user_query}) at the
+ *   `dialecticReasoning` tier. Off by default — chat() is far slower than
+ *   context() (~12s at medium), so it runs on its own budget, not the 4s
+ *   context race, and stays under the 30s UserPromptSubmit harness ceiling.
  *
  * A "search" component (filtered semantic search over inductive conclusions)
  * was scoped out: `level` is not filterable through the API, so it needs a
  * honcho-backend + SDK change before it can ship. See the plan.
  */
-export const PER_TURN_COMPONENTS = ["context"] as const;
+export const PER_TURN_COMPONENTS = ["context", "dialectic"] as const;
 export type PerTurnComponent = (typeof PER_TURN_COMPONENTS)[number];
 
 /**
@@ -83,6 +88,14 @@ export interface InjectionConfig {
   /** What drives the per-turn semantic search: the raw "prompt" (default)
    *  or extracted "topics". */
   searchQuerySource?: "topics" | "prompt";
+  /** Query template for the per-turn "dialectic" component. The user's prompt
+   *  is substituted into every `%{user_query}` (default: surface anything from
+   *  the user's history relevant to the prompt). */
+  dialecticTemplate?: string;
+  /** Reasoning tier for the per-turn "dialectic" chat() call (default: "low").
+   *  Kept separate from the top-level `reasoningLevel` so per-turn dialectic can
+   *  stay cheap on the hot path without lowering the tier used elsewhere. */
+  dialecticReasoning?: ReasoningLevel;
 }
 
 /** Resolved injection defaults: memory-usage directives + session summary +
@@ -96,9 +109,13 @@ export const DEFAULT_INJECTION: Required<InjectionConfig> = {
   maxConclusions: 15,
   searchMaxDistance: 0.6,
   searchQuerySource: "prompt",
+  dialecticTemplate:
+    "Return a compact, factual list of anything from the user's history — preferences, prior decisions, relevant past work — that would help with the following. Write in the third person as background notes; do not address the user, ask questions, or offer next steps. If nothing relevant exists, say so in one line. Relevant to: %{user_query}",
+  dialecticReasoning: "medium",
 };
 
-export type ReasoningLevel = "minimal" | "low" | "medium" | "high" | "max";
+export const REASONING_LEVELS = ["minimal", "low", "medium", "high", "max"] as const;
+export type ReasoningLevel = (typeof REASONING_LEVELS)[number];
 
 export type SessionStrategy = "per-directory" | "git-branch" | "chat-instance";
 
@@ -838,7 +855,7 @@ export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClient
     apiKey: config.apiKey,
     baseURL: getHonchoBaseUrl(config),
     workspaceId: config.workspace,
-    timeout: 8000,
+    timeout: 120000,
     maxRetries: 1,
   };
 }

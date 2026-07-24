@@ -28,6 +28,7 @@ import {
   type PerTurnComponent,
   SESSION_START_COMPONENTS,
   PER_TURN_COMPONENTS,
+  REASONING_LEVELS,
   getObservationMode,
 } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
@@ -541,6 +542,26 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.injection.searchQuerySource = value;
       break;
 
+    case "injection.dialecticTemplate":
+      previousValue = cfg.injection?.dialecticTemplate;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.dialecticTemplate = String(value);
+      break;
+
+    case "injection.dialecticReasoning": {
+      const level = String(value);
+      if (!REASONING_LEVELS.includes(level as ReasoningLevel)) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: `injection.dialecticReasoning must be one of: ${REASONING_LEVELS.join(", ")}` }, null, 2) }],
+          isError: true,
+        };
+      }
+      previousValue = cfg.injection?.dialecticReasoning;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.dialecticReasoning = level as ReasoningLevel;
+      break;
+    }
+
     case "sessions.set": {
       const obj = value as Record<string, unknown>;
       const path = obj?.path;
@@ -831,6 +852,8 @@ export async function runMcpServer(): Promise<void> {
                   "injection.maxConclusions",
                   "injection.searchMaxDistance",
                   "injection.searchQuerySource",
+                  "injection.dialecticTemplate",
+                  "injection.dialecticReasoning",
                   "sessions.set",
                   "sessions.remove",
                 ],
