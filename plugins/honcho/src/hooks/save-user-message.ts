@@ -2,6 +2,7 @@ import { Honcho, Session, Peer } from "@honcho-ai/sdk";
 import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
 import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { isHarnessInjected, isTerseReply } from "./user-prompt.js";
 
 interface HookInput {
   prompt?: string;
@@ -53,6 +54,11 @@ export async function handleSaveUserMessage(): Promise<void> {
 
   setLogContext(cwd, sessionName);
 
+  if (isHarnessInjected(prompt)) {
+    logHook("save-user-message", "Skipping upload (harness-injected content, not user input)");
+    process.exit(0);
+  }
+
   try {
     await postUserMessage(config, prompt, instanceId || undefined, sessionName);
   } catch (e) {
@@ -76,6 +82,7 @@ async function postUserMessage(
 
   const userPeer = new Peer(config.peerName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
   const createdAt = new Date().toISOString();
+  const configuration = isTerseReply(prompt) ? { reasoning: { enabled: false } } : undefined;
   const messages = chunkContent(prompt).map((chunk) =>
     userPeer.message(chunk, {
       createdAt,
@@ -83,6 +90,7 @@ async function postUserMessage(
         instance_id: instanceId || undefined,
         session_affinity: sessionName,
       },
+      ...(configuration ? { configuration } : {}),
     })
   );
 

@@ -161,6 +161,7 @@ export interface HostConfig {
   logging?: boolean;
   saveMessages?: boolean;
   saveToolUse?: boolean;
+  saveGitEvents?: boolean;
   sessionStrategy?: SessionStrategy;
   sessionPeerPrefix?: boolean;
   /** Default reasoning level for Honcho dialectic calls (default: "medium") */
@@ -260,6 +261,8 @@ interface HonchoFileConfig {
   saveMessages?: boolean;
   /** Save [Tool] action summaries to Honcho (default: false) */
   saveToolUse?: boolean;
+  /** Save [Git External] state-change events to Honcho (default: false) */
+  saveGitEvents?: boolean;
   messageUpload?: MessageUploadConfig;
   contextRefresh?: ContextRefreshConfig;
   endpoint?: HonchoEndpointConfig;
@@ -310,6 +313,8 @@ export interface HonchoCLAUDEConfig {
   saveMessages?: boolean;
   /** Save [Tool] action summaries to Honcho (default: false — low signal, redundant with assistant reasoning) */
   saveToolUse?: boolean;
+  /** Save [Git External] state-change events to Honcho (default: false — machine plumbing, not user input) */
+  saveGitEvents?: boolean;
   /** Default reasoning level for Honcho dialectic calls (default: "medium") */
   reasoningLevel?: ReasoningLevel;
   /**
@@ -435,6 +440,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     sessions: raw.sessions,
     saveMessages: hostBlock?.saveMessages ?? raw.saveMessages,
     saveToolUse: hostBlock?.saveToolUse ?? raw.saveToolUse,
+    saveGitEvents: hostBlock?.saveGitEvents ?? raw.saveGitEvents,
     reasoningLevel: hostBlock?.reasoningLevel ?? raw.reasoningLevel,
     observationMode: hostBlock?.observationMode ?? raw.observationMode,
     messageUpload: hostBlock?.messageUpload ?? raw.messageUpload,
@@ -477,6 +483,7 @@ export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null 
     aiPeer,
     saveMessages: process.env.HONCHO_SAVE_MESSAGES !== "false",
     saveToolUse: process.env.HONCHO_SAVE_TOOL_USE === "true",
+    saveGitEvents: process.env.HONCHO_SAVE_GIT_EVENTS === "true",
     enabled: process.env.HONCHO_ENABLED !== "false",
     logging: process.env.HONCHO_LOGGING !== "false",
   };
@@ -515,6 +522,9 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   }
   if (process.env.HONCHO_SAVE_TOOL_USE !== undefined) {
     config.saveToolUse = process.env.HONCHO_SAVE_TOOL_USE === "true";
+  }
+  if (process.env.HONCHO_SAVE_GIT_EVENTS !== undefined) {
+    config.saveGitEvents = process.env.HONCHO_SAVE_GIT_EVENTS === "true";
   }
   return config;
 }
