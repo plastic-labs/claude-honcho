@@ -4,6 +4,22 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-07-27
+
+### Added
+
+- `/honcho:import` skill to backfill past Claude Code sessions into Honcho memory.
+- Composable, config-driven memory injection — `injection` config block with per-surface component menus (`sessionStart` / `perTurn`) and retrieval tuning (`searchTopK`, `maxConclusions`, `searchMaxDistance`).
+- Memory-usage directives now ship automatically as SessionStart context — no more manual CLAUDE.md paste.
+- Optional dialectic summary component for the user-prompt hook.
+- `honcho_remember` MCP tool for mid-conversation recall (batched questions, configurable reasoning tier) — opt in via the `rememberTool` config flag; session-start directives nudge proactive use when enabled.
+
+### Fixed
+
+- Machine plumbing (runtime `<<...>>` sentinels, `[Session ended]` markers) is no longer attributed to the user peer.
+- Batched message uploads no longer replay already-accepted batches after a partial failure.
+- SessionEnd hook does nothing beyond logging and state cleanup, so `/exit` can no longer surface "Hook cancelled".
+
 ## [0.2.7] - 2026-07-22
 
 ### Added
