@@ -38,10 +38,12 @@ export function setMemoryState(phase: MemoryPhase, detail?: string, sessionId?: 
 }
 
 // The hooks own the workspace + session-name math, so they write the resolved
-// web URL here for the statusline to render as a clickable link.
-export function setSessionLink(url: string, name: string | undefined, sessionId?: string): void {
+// web URL here for the statusline to render as a clickable link. A null url
+// (local/custom endpoint, no dashboard configured) writes the name alone and
+// the statusline renders it without a link.
+export function setSessionLink(url: string | null, name: string | undefined, sessionId?: string): void {
   try {
-    writeFileSync(sessionFile(sessionId), JSON.stringify({ url, name }));
+    writeFileSync(sessionFile(sessionId), JSON.stringify({ url: url ?? undefined, name }));
   } catch {
     // best-effort — statusline just omits the link if this is missing
   }

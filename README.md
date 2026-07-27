@@ -199,8 +199,10 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
 
   // Endpoint
   "endpoint": {
-    "environment": "production"       // "production" | "local"
+    "environment": "production",      // "production" | "local"
     // or: "baseUrl": "http://your-server:8000/v3"
+    // Self-hosted GUI on a different host than the API? Point session links at it:
+    "dashboardUrl": "https://dashboard.your-server.com"
   },
 
   // Miscellaneous
@@ -384,6 +386,7 @@ Environment variables work for initial bootstrap (before a config file exists). 
 | `HONCHO_AI_PEER`       | No       | `claude`      | AI peer name                                                      |
 | `HONCHO_HOST`          | No       | auto-detected | Force host detection: `claude_code`, `cursor`, or `obsidian`      |
 | `HONCHO_ENDPOINT`      | No       | `production`  | `production`, `local`, or a full URL                              |
+| `HONCHO_DASHBOARD_URL` | No       | `https://app.honcho.dev` | GUI base URL for session links (for self-hosted dashboards) |
 | `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
 | `HONCHO_SAVE_MESSAGES` | No       | `true`        | Set to `false` to stop saving messages                            |
 | `HONCHO_LOGGING`       | No       | `true`        | Set to `false` to disable file logging to `~/.honcho/`            |
@@ -459,6 +462,18 @@ Or via env var:
 export HONCHO_ENDPOINT="local"  # Uses localhost:8000
 # or
 export HONCHO_ENDPOINT="http://your-server:8000/v3"
+```
+
+On the hosted platform, session links printed by the plugin point at
+`https://app.honcho.dev`. On a local or custom endpoint the links are suppressed
+entirely — there's no hosted GUI for your data. If you self-host the dashboard
+(often on a different host than the API), point the links at your own GUI to
+bring them back:
+```json
+{ "endpoint": { "baseUrl": "https://honcho.your-server.com/v3", "dashboardUrl": "https://dashboard.your-server.com" } }
+```
+```bash
+export HONCHO_DASHBOARD_URL="https://dashboard.your-server.com"
 ```
 
 ### Temporarily disabling memory

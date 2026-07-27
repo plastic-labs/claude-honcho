@@ -1,7 +1,7 @@
 import { Honcho } from "@honcho-ai/sdk";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, getInjectionConfig, type InjectionConfig } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, getInjectionConfig, getDashboardUrl, type InjectionConfig } from "../config.js";
 import {
   getMessageCount,
   incrementMessageCount,
@@ -171,7 +171,10 @@ export async function handleUserPrompt(): Promise<void> {
   }
 
   logHook("user-prompt", `Prompt received (${prompt.length} chars)`);
-  setSessionLink(honchoSessionUrl(config.workspace, sessionName), sessionName, hookInput.session_id);
+  // Null for local/custom endpoints with no dashboard configured — the link is
+  // suppressed everywhere it would otherwise surface.
+  const sessionUrl = honchoSessionUrl(config.workspace, sessionName, getDashboardUrl(config));
+  setSessionLink(sessionUrl, sessionName, hookInput.session_id);
 
   // The prompt upload runs as a separate async hook (save-user-message.ts) so
   // the write never blocks this turn's injection. This hook is read-only.
@@ -195,11 +198,12 @@ export async function handleUserPrompt(): Promise<void> {
   // The nag flag is written at SessionStart and stable for the session, so
   // its presence on message 2 tells us the link hasn't been shown yet.
   const nag = readVersionNag();
+  const guiLink = sessionUrl ? formatSessionLink(sessionUrl) : undefined;
   const sessionLink =
     messageCountBefore === 0
-      ? nag ?? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
+      ? nag ?? guiLink
       : messageCountBefore === 1 && nag
-        ? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
+        ? guiLink
         : undefined;
 
   // Skip trivial prompts — no context needed for "y", "ok", etc.
