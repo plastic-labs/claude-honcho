@@ -178,6 +178,8 @@ export interface HostConfig {
   endpoint?: HonchoEndpointConfig;
   /** Composable injection config (session-start + per-turn component menus). */
   injection?: InjectionConfig;
+  /** Register the on-demand `honcho_remember` MCP tool (default: false). */
+  rememberTool?: boolean;
 }
 
 let _detectedHost: HonchoHost | null = null;
@@ -280,6 +282,8 @@ interface HonchoFileConfig {
   statusline?: StatuslineMode;
   /** Composable injection config (session-start + per-turn component menus). */
   injection?: InjectionConfig;
+  /** Register the on-demand `honcho_remember` MCP tool (default: false). */
+  rememberTool?: boolean;
   hosts?: Record<string, HostConfig>;
   /** When true, flat workspace/aiPeer fields apply to ALL hosts,
    *  ignoring host-specific blocks. When false (default), each host
@@ -335,6 +339,9 @@ export interface HonchoCLAUDEConfig {
   localContext?: LocalContextConfig;
   /** Composable injection config (session-start + per-turn component menus) */
   injection?: InjectionConfig;
+  /** Register the on-demand `honcho_remember` MCP tool (default: false).
+   *  Not a hook-injection surface — a deliberate, model-invoked recall tool. */
+  rememberTool?: boolean;
   /** Temporarily disable plugin (default: true) */
   enabled?: boolean;
   /** Enable file logging to ~/.honcho/ (default: true) */
@@ -448,6 +455,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     endpoint: hostBlock?.endpoint ?? raw.endpoint,
     localContext: hostBlock?.localContext ?? raw.localContext,
     injection: hostBlock?.injection ?? raw.injection,
+    rememberTool: hostBlock?.rememberTool ?? raw.rememberTool,
     enabled: hostBlock?.enabled ?? raw.enabled,
     logging: hostBlock?.logging ?? raw.logging,
     globalOverride: raw.globalOverride,
@@ -612,6 +620,7 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   setHostIfExplicit("localContext", config.localContext, existing.localContext);
   setHostIfExplicit("endpoint", config.endpoint, existing.endpoint);
   setHostIfExplicit("injection", config.injection, existing.injection);
+  setHostIfExplicit("rememberTool", config.rememberTool, existing.rememberTool);
 
   // Preserve a host-scoped apiKey already on disk. This integration never writes
   // apiKey (config.apiKey is the *resolved* key — env/root — and must not be
