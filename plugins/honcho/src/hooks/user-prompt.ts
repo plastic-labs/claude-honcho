@@ -202,10 +202,11 @@ export async function handleUserPrompt(): Promise<void> {
         ? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
         : undefined;
 
-  // Skip trivial prompts — no context needed for "y", "ok", etc.
-  if (shouldSkipContextRetrieval(prompt)) {
-    logHook("user-prompt", "Skipping context (trivial prompt)");
-    visSkipMessage("user-prompt", sessionLink ? `${sessionLink} · trivial prompt` : "trivial prompt");
+  // Skip trivial prompts — no context needed for "y", "ok", etc. Harness-injected
+  // turns are excluded from storage; don't use them as retrieval queries either.
+  if (isHarnessInjected(prompt) || shouldSkipContextRetrieval(prompt)) {
+    logHook("user-prompt", "Skipping context (harness-injected or trivial prompt)");
+    visSkipMessage("user-prompt", sessionLink ? `${sessionLink} · skipped` : "skipped");
     process.exit(0);
   }
 
