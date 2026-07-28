@@ -534,11 +534,19 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.injection.searchMaxDistance = Number(value);
       break;
 
-    case "injection.sessionContextTokens":
+    case "injection.sessionContextTokens": {
+      const tokens = Number(value);
+      if (!Number.isFinite(tokens) || tokens <= 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: "injection.sessionContextTokens must be a positive number" }, null, 2) }],
+          isError: true,
+        };
+      }
       previousValue = cfg.injection?.sessionContextTokens;
       if (!cfg.injection) cfg.injection = {};
-      cfg.injection.sessionContextTokens = Number(value);
+      cfg.injection.sessionContextTokens = tokens;
       break;
+    }
 
     case "rememberTool":
       previousValue = cfg.rememberTool;

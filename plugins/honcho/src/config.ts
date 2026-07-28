@@ -809,7 +809,10 @@ export function getLocalContextConfig(): LocalContextConfig {
 export function getInjectionConfig(config?: HonchoCLAUDEConfig | null): Required<InjectionConfig> {
   const injection = (config === undefined ? loadConfig() : config)?.injection;
   const resolved = { ...DEFAULT_INJECTION, ...(injection ?? {}) };
-  resolved.perTurn = normalizePerTurn(resolved.perTurn);
+  // Guard hand-edited configs: a non-array perTurn falls back to the default.
+  resolved.perTurn = Array.isArray(resolved.perTurn)
+    ? normalizePerTurn(resolved.perTurn)
+    : DEFAULT_INJECTION.perTurn;
   return resolved;
 }
 
