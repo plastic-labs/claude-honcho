@@ -6,6 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { Honcho } from "@honcho-ai/sdk";
 import { existsSync, readFileSync } from "fs";
+import { fileURLToPath } from "url";
 import {
   loadConfig,
   saveConfig,
@@ -713,7 +714,7 @@ const REMEMBER_TOOL = {
 /** Plugin version from the manifest next to the running entry point. */
 function pluginVersion(): string {
   for (const dir of ["..", "../.."]) {
-    const manifest = new URL(`${dir}/.claude-plugin/plugin.json`, import.meta.url).pathname;
+    const manifest = fileURLToPath(new URL(`${dir}/.claude-plugin/plugin.json`, import.meta.url));
     try {
       return JSON.parse(readFileSync(manifest, "utf-8")).version ?? "unknown";
     } catch {

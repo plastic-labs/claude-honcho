@@ -55,8 +55,9 @@ jobs:
       # latest backwards. Prereleases are exempt (they publish under next).
       - name: Validate version
         id: version
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${{ inputs.version }}"
           if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "::error::'$VERSION' is not a valid semver version"
             exit 1
@@ -65,11 +66,14 @@ jobs:
             *-*) DIST_TAG=next; PRERELEASE=true ;;
             *)   DIST_TAG=latest; PRERELEASE=false ;;
           esac
+          # Equal versions pass through: re-dispatching a published version is
+          # the retry path, and the later publish/release steps skip what
+          # already exists.
           CURRENT="$(npm view @honcho-ai/claude-plugin dist-tags.latest 2>/dev/null || true)"
-          if [ "$DIST_TAG" = "latest" ] && [ -n "$CURRENT" ]; then
+          if [ "$DIST_TAG" = "latest" ] && [ -n "$CURRENT" ] && [ "$CURRENT" != "$VERSION" ]; then
             HIGHEST="$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -n1)"
-            if [ "$HIGHEST" != "$VERSION" ] || [ "$CURRENT" = "$VERSION" ]; then
-              echo "::error::$VERSION is not greater than the published latest ($CURRENT)"
+            if [ "$HIGHEST" != "$VERSION" ]; then
+              echo "::error::$VERSION is lower than the published latest ($CURRENT)"
               exit 1
             fi
           fi

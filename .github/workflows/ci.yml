@@ -49,7 +49,7 @@ jobs:
           cd "$SMOKE"
           for hook in dist/hooks/*.js; do
             echo "smoke: $hook"
-            echo '{"session_id":"ci","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup"}' | node "$hook"
+            echo '{"session_id":"ci","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup"}' | timeout 15 node "$hook"
           done
           echo "smoke: dist/mcp-server.js"
           printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}\n' \
