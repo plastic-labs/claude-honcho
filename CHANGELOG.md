@@ -4,6 +4,12 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-07-28
+
+### Changed
+
+- Per-turn injection's `context` component split into three independently selectable components: `userContext` (the former `context`), `assistantContext` (the same fetch for the AI peer), and `sessionContext` (the mapped Honcho session's rolling summary via `session.context()`). Stored configs using `context` keep working — it resolves to `userContext`.
+
 ## [0.2.8] - 2026-07-27
 
 ### Added
