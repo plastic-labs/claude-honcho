@@ -93,7 +93,7 @@ await Bun.write(
       description: pluginManifest.description,
       author: "Plastic Labs <hello@plasticlabs.ai>",
       license: pluginManifest.license,
-      repository: pluginManifest.repository,
+      repository: { type: "git", url: `git+${pluginManifest.repository}.git` },
       keywords: pluginManifest.keywords,
     },
     null,
