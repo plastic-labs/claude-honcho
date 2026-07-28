@@ -36,6 +36,12 @@ if (!result.success) {
 // stage runs under node, dev runs .ts under bun), then verify every
 // rewritten path exists in the stage.
 function assertStagedPaths(relPath: string, text: string): void {
+  // A rewrite miss leaves a .ts reference behind, which the stage can't serve.
+  const missed = text.match(/"[^"]*\$\{CLAUDE_PLUGIN_ROOT\}[^"]*\.ts[^"]*"/);
+  if (missed) {
+    console.error(`${relPath} still references source TypeScript after rewrite: ${missed[0]}`);
+    process.exit(1);
+  }
   for (const [, staged] of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(dist\/[\w/-]+\.js)/g)) {
     if (!existsSync(join(STAGE, staged))) {
       console.error(`${relPath} references ${staged}, which the build did not produce`);
