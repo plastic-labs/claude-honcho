@@ -18,7 +18,8 @@ import {
 } from "../config.js";
 import * as s from "../styles.js";
 import { copyFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 
 // Installs the memory statusLine: ships the renderer to a stable path and
 // registers it in the user's global Claude Code settings. Plugins can't
@@ -28,7 +29,7 @@ import { join } from "path";
 function installStatusline(): void {
   console.log(s.section("Installing memory statusLine"));
 
-  const src = join(import.meta.dir, "..", "..", "scripts", "honcho-statusline.sh");
+  const src = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "scripts", "honcho-statusline.sh");
   const dest = join(getConfigDir(), "honcho-statusline.sh");
   try {
     if (!existsSync(getConfigDir())) mkdirSync(getConfigDir(), { recursive: true });

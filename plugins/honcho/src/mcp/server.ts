@@ -713,6 +713,8 @@ const REMEMBER_TOOL = {
 
 /** Plugin version from the manifest next to the running entry point. */
 function pluginVersion(): string {
+  // ".." resolves for the bundled layout (dist/mcp-server.js), "../.." for
+  // dev source (src/mcp/server.ts).
   for (const dir of ["..", "../.."]) {
     const manifest = fileURLToPath(new URL(`${dir}/.claude-plugin/plugin.json`, import.meta.url));
     try {

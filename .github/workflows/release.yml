@@ -69,7 +69,7 @@ jobs:
           # Equal versions pass through: re-dispatching a published version is
           # the retry path, and the later publish/release steps skip what
           # already exists.
-          CURRENT="$(npm view @honcho-ai/claude-plugin dist-tags.latest 2>/dev/null || true)"
+          CURRENT="$(npm view @honcho-ai/claude-honcho dist-tags.latest 2>/dev/null || true)"
           if [ "$DIST_TAG" = "latest" ] && [ -n "$CURRENT" ] && [ "$CURRENT" != "$VERSION" ]; then
             HIGHEST="$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -n1)"
             if [ "$HIGHEST" != "$VERSION" ]; then
@@ -97,25 +97,12 @@ jobs:
           claude plugin validate .stage --strict
 
       - name: Smoke test bundled entry points
-        run: |
-          SMOKE="$(mktemp -d)"
-          cp -R .stage/. "$SMOKE"
-          export HOME="$(mktemp -d)"
-          mkdir -p "$HOME/.honcho"
-          echo '{"apiKey":"smoke","enabled":false}' > "$HOME/.honcho/config.json"
-          cd "$SMOKE"
-          for hook in dist/hooks/*.js; do
-            echo "smoke: $hook"
-            echo '{"session_id":"ci","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup"}' | timeout 15 node "$hook"
-          done
-          echo "smoke: dist/mcp-server.js"
-          printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}\n' \
-            | timeout 15 node dist/mcp-server.js | grep -q '"serverInfo"'
+        run: bash scripts/smoke.sh .stage
 
       - name: Publish to npm
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          if npm view "@honcho-ai/claude-plugin@$VERSION" version >/dev/null 2>&1; then
+          if npm view "@honcho-ai/claude-honcho@$VERSION" version >/dev/null 2>&1; then
             echo "$VERSION already on npm; skipping publish"
           else
             npm publish .stage --provenance --access public --tag "${{ steps.version.outputs.dist-tag }}"

@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
-// Stage a self-contained release tree in .stage/: bundle every hook entry
-// point and the MCP server, rewrite manifest paths to the bundled output,
-// and stamp the version. The version comes from RELEASE_VERSION (set by the
-// release workflow; source carries no release version), falling back to
-// package.json for local builds. Nothing in .stage/ is committed.
+// Stage a self-contained release tree in .stage/: bundle every entry point
+// (hooks, MCP server, skill runners), rewrite manifest and skill paths to
+// the bundled output, and stamp the version. The version comes from
+// RELEASE_VERSION (set by the release workflow), falling back to
+// package.json for local builds; the version fields left in source are
+// dev-only fallbacks, never published. Nothing in .stage/ is committed.
 import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -36,28 +37,55 @@ if (!result.success) {
   process.exit(1);
 }
 
-// Manifests: rewrite source entry points to their bundled locations (the
-// stage runs under node, dev runs .ts under bun), then verify every
-// rewritten path exists in the stage.
+// Skill runners: separate build rooted at src/ so entries land in
+// dist/skills/, where setup-runner's ../../scripts hop finds the staged
+// statusline script.
+const runnerEntries = (await readdir(join(ROOT, "src/skills")))
+  .filter((f) => f.endsWith("-runner.ts"))
+  .map((f) => join(ROOT, "src/skills", f));
+
+const runnerResult = await Bun.build({
+  entrypoints: runnerEntries,
+  outdir: join(STAGE, "dist"),
+  root: join(ROOT, "src"),
+  target: "node",
+  splitting: true,
+  sourcemap: "linked",
+});
+if (!runnerResult.success) {
+  for (const log of runnerResult.logs) console.error(log);
+  process.exit(1);
+}
+
+// Scripts stage before the manifests so the resolution check below can see
+// them.
+await mkdir(join(STAGE, "scripts"), { recursive: true });
+await cp(join(ROOT, "scripts/check-version.sh"), join(STAGE, "scripts/check-version.sh"));
+await cp(join(ROOT, "scripts/honcho-statusline.sh"), join(STAGE, "scripts/honcho-statusline.sh"));
+
+// Every ${CLAUDE_PLUGIN_ROOT} reference in a staged file must resolve within
+// the stage, and none may point at source TypeScript (a rewrite miss).
 function assertStagedPaths(relPath: string, text: string): void {
-  // A rewrite miss leaves a .ts reference behind, which the stage can't serve.
-  const missed = text.match(/"[^"]*\$\{CLAUDE_PLUGIN_ROOT\}[^"]*\.ts[^"]*"/);
-  if (missed) {
-    console.error(`${relPath} still references source TypeScript after rewrite: ${missed[0]}`);
-    process.exit(1);
-  }
-  for (const [, staged] of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(dist\/[\w/-]+\.js)/g)) {
+  for (const [token] of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/[^\s"'`)\\]+/g)) {
+    const staged = token.replace("${CLAUDE_PLUGIN_ROOT}/", "");
+    if (staged.endsWith(".ts")) {
+      console.error(`${relPath} still references source TypeScript after rewrite: ${token}`);
+      process.exit(1);
+    }
     if (!existsSync(join(STAGE, staged))) {
-      console.error(`${relPath} references ${staged}, which the build did not produce`);
+      console.error(`${relPath} references ${staged}, which is not in the stage`);
       process.exit(1);
     }
   }
 }
 
-const hooksJson = (await Bun.file(join(ROOT, "hooks/hooks.json")).text()).replace(
-  /bun run \$\{CLAUDE_PLUGIN_ROOT\}\/(hooks\/[\w-]+)\.ts/g,
-  "node ${CLAUDE_PLUGIN_ROOT}/dist/$1.js",
-);
+function rewriteEntryPoints(text: string): string {
+  return text
+    .replace(/bun run ("?)\$\{CLAUDE_PLUGIN_ROOT\}\/(hooks\/[\w-]+|mcp-server)\.ts\1/g, 'node $1${CLAUDE_PLUGIN_ROOT}/dist/$2.js$1')
+    .replace(/bun run ("?)\$\{CLAUDE_PLUGIN_ROOT\}\/src\/(skills\/[\w-]+)\.ts\1/g, 'node $1${CLAUDE_PLUGIN_ROOT}/dist/$2.js$1');
+}
+
+const hooksJson = rewriteEntryPoints(await Bun.file(join(ROOT, "hooks/hooks.json")).text());
 assertStagedPaths("hooks/hooks.json", hooksJson);
 await Bun.write(join(STAGE, "hooks/hooks.json"), hooksJson);
 
@@ -87,7 +115,7 @@ await Bun.write(
   join(STAGE, "package.json"),
   JSON.stringify(
     {
-      name: "@honcho-ai/claude-plugin",
+      name: "@honcho-ai/claude-honcho",
       version,
       type: "module",
       description: pluginManifest.description,
@@ -101,9 +129,17 @@ await Bun.write(
   ) + "\n",
 );
 
+// Skills: copy verbatim except SKILL.md, which gets the same entry-point
+// rewrite and resolution check as the manifests.
 await cp(join(ROOT, "skills"), join(STAGE, "skills"), { recursive: true });
-await mkdir(join(STAGE, "scripts"), { recursive: true });
-await cp(join(ROOT, "scripts/check-version.sh"), join(STAGE, "scripts/check-version.sh"));
+for (const skill of await readdir(join(STAGE, "skills"))) {
+  const skillMd = join(STAGE, "skills", skill, "SKILL.md");
+  if (!existsSync(skillMd)) continue;
+  const text = rewriteEntryPoints(await Bun.file(skillMd).text());
+  assertStagedPaths(`skills/${skill}/SKILL.md`, text);
+  await Bun.write(skillMd, text);
+}
 
-const bundled = result.outputs.reduce((sum, artifact) => sum + artifact.size, 0);
-console.log(`staged ${version} -> .stage/ (${result.outputs.length} files, ${(bundled / 1024 / 1024).toFixed(1)} MB bundled)`);
+const outputs = [...result.outputs, ...runnerResult.outputs];
+const bundled = outputs.reduce((sum, artifact) => sum + artifact.size, 0);
+console.log(`staged ${version} -> .stage/ (${outputs.length} files, ${(bundled / 1024 / 1024).toFixed(1)} MB bundled)`);
