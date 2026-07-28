@@ -8,7 +8,7 @@ import {
   getInstanceIdForCwd,
 } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
-import { visInjectionMessage, visDialecticMessage, visSkipMessage, addSystemMessage, verboseApiResult, verboseList } from "../visual.js";
+import { visInjectionMessage, visDialecticMessage, visSessionContextMessage, visSkipMessage, addSystemMessage, verboseApiResult, verboseList } from "../visual.js";
 import type { ReasoningLevel } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
 import { setMemoryState, setSessionLink } from "../state.js";
@@ -211,10 +211,12 @@ export async function handleUserPrompt(): Promise<void> {
   }
 
   const injection = getInjectionConfig(config);
-  const wantContext = injection.perTurn.includes("context");
+  const wantUserContext = injection.perTurn.includes("userContext");
+  const wantAssistantContext = injection.perTurn.includes("assistantContext");
+  const wantSessionContext = injection.perTurn.includes("sessionContext");
   const wantDialectic = injection.perTurn.includes("dialectic");
 
-  if (!wantContext && !wantDialectic) {
+  if (!wantUserContext && !wantAssistantContext && !wantSessionContext && !wantDialectic) {
     logHook("user-prompt", "No per-turn injection components selected");
     visSkipMessage("user-prompt", sessionLink ? `${sessionLink} · injection off` : "injection off");
     process.exit(0);
@@ -222,44 +224,62 @@ export async function handleUserPrompt(): Promise<void> {
 
   setMemoryState("recalling", undefined, hookInput.session_id);
 
-  // Both components run concurrently on independent budgets: context on the tight
-  // 4s race, dialectic on its own ~25s budget. Neither blocks the other, and the
-  // hook completes as soon as the slowest selected component resolves or times out.
-  const [ctxResult, dialectic] = await Promise.all([
-    wantContext ? raceTimeout(fetchFreshContext(config, prompt, injection), FETCH_TIMEOUT_MS) : Promise.resolve(null),
+  // All components run concurrently on independent budgets: the context fetches
+  // each on the tight 4s race, dialectic on its own budget. None blocks another,
+  // and the hook completes as soon as the slowest selected component resolves or
+  // times out.
+  const [userCtxResult, assistantCtxResult, sessionCtx, dialectic] = await Promise.all([
+    wantUserContext ? raceTimeout(fetchUserContext(config, prompt, injection), FETCH_TIMEOUT_MS) : Promise.resolve(null),
+    wantAssistantContext ? raceTimeout(fetchAssistantContext(config, prompt, injection), FETCH_TIMEOUT_MS) : Promise.resolve(null),
+    wantSessionContext ? raceTimeout(fetchSessionContext(config, sessionName, injection), FETCH_TIMEOUT_MS) : Promise.resolve(null),
     wantDialectic ? raceTimeout(fetchDialectic(config, prompt, injection), DIALECTIC_TIMEOUT_MS) : Promise.resolve(null),
   ]);
 
-  const ctx: { context: any; matched?: string[]; queryLabel?: string } | null =
-    ctxResult?.context
-      ? { context: ctxResult.context, matched: ctxResult.matched, queryLabel: ctxResult.queryLabel }
+  const userCtx: { context: any; matched?: string[]; queryLabel?: string } | null =
+    userCtxResult?.context
+      ? { context: userCtxResult.context, matched: userCtxResult.matched, queryLabel: userCtxResult.queryLabel }
       : null;
 
-  emitPerTurn(config.peerName, ctx, dialectic, sessionLink);
+  emitPerTurn(config, userCtx, assistantCtxResult?.context ?? null, sessionCtx, dialectic, sessionLink);
   process.exit(0);
 }
 
 /**
- * Emit the per-turn injection: the selected components ("context" and/or
- * "dialectic") composed into one additionalContext payload plus a per-component
- * systemMessage summary. Exits silently when nothing resolved to content —
- * mirroring the old no-cache fall-through.
+ * Emit the per-turn injection: the selected components composed into one
+ * additionalContext payload plus a per-component systemMessage summary.
+ * Exits silently when nothing resolved to content — mirroring the old
+ * no-cache fall-through.
  */
 function emitPerTurn(
-  peerName: string,
-  ctx: { context: any; matched?: string[]; queryLabel?: string } | null,
+  config: any,
+  userCtx: { context: any; matched?: string[]; queryLabel?: string } | null,
+  assistantCtx: any | null,
+  sessionCtx: SessionContextResult | null,
   dialectic: DialecticResult | null,
   sessionLink?: string,
 ): void {
   const parts: string[] = [];
   const visLines: string[] = [];
 
-  if (ctx) {
-    const conclusions = extractConclusions(ctx.context);
+  if (userCtx) {
+    const conclusions = extractConclusions(userCtx.context);
     if (conclusions.length > 0) {
       parts.push(`Relevant conclusions: ${conclusions.join("; ")}`);
-      visLines.push(visInjectionMessage("user-prompt", { conclusions, matched: ctx.matched, queryLabel: ctx.queryLabel }));
+      visLines.push(visInjectionMessage("user-prompt", { conclusions, matched: userCtx.matched, queryLabel: userCtx.queryLabel }));
     }
+  }
+
+  if (assistantCtx) {
+    const conclusions = extractConclusions(assistantCtx);
+    if (conclusions.length > 0) {
+      parts.push(`Conclusions about the assistant (${config.aiPeer}): ${conclusions.join("; ")}`);
+      visLines.push(visInjectionMessage("user-prompt", { conclusions, queryLabel: `assistant ${config.aiPeer}` }));
+    }
+  }
+
+  if (sessionCtx) {
+    parts.push(`Recent Honcho session messages:\n${sessionCtx.lines.join("\n")}`);
+    visLines.push(visSessionContextMessage("user-prompt", sessionCtx.lines, sessionCtx.tokenCount));
   }
 
   if (dialectic) {
@@ -270,7 +290,7 @@ function emitPerTurn(
   if (parts.length === 0) return;
 
   const visMsg = visLines.join("\n");
-  outputContext(peerName, parts, sessionLink ? `${sessionLink}\n${visMsg}` : visMsg);
+  outputContext(config.peerName, parts, sessionLink ? `${sessionLink}\n${visMsg}` : visMsg);
 }
 
 interface DialecticResult {
@@ -314,7 +334,11 @@ async function fetchDialectic(config: any, prompt: string, injection: InjectionC
   }
 }
 
-async function fetchFreshContext(config: any, prompt: string, injection: InjectionConfig): Promise<{ context: any; matched: string[]; queryLabel?: string }> {
+/**
+ * Per-turn "userContext" component: a prompt-scoped peer.context() fetch for
+ * the user peer, observation-mode aware.
+ */
+async function fetchUserContext(config: any, prompt: string, injection: InjectionConfig): Promise<{ context: any; matched: string[]; queryLabel?: string }> {
   const honcho = new Honcho(getHonchoClientOptions(config));
   const observationMode = getObservationMode(config);
 
@@ -364,6 +388,76 @@ async function fetchFreshContext(config: any, prompt: string, injection: Injecti
   }
 
   return { context: contextResult, matched, queryLabel: usePrompt ? "prompt" : undefined };
+}
+
+/**
+ * Per-turn "assistantContext" component: the same prompt-scoped peer.context()
+ * fetch, but for the AI peer's own representation — what Honcho has derived
+ * about the assistant. Always the peer's global (self) view, regardless of
+ * observation mode: there is no directional "assistant observed by user"
+ * collection to fall back to.
+ */
+async function fetchAssistantContext(config: any, prompt: string, injection: InjectionConfig): Promise<{ context: any } | null> {
+  const honcho = new Honcho(getHonchoClientOptions(config));
+  const aiPeer = await honcho.peer(config.aiPeer);
+
+  const usePrompt = injection.searchQuerySource === "prompt";
+  const { topics } = usePrompt ? { topics: [] } : extractTopics(prompt);
+  const searchQuery = usePrompt || topics.length === 0 ? prompt : topics.join(" ");
+
+  const startTime = Date.now();
+  try {
+    const context = await aiPeer.context({
+      searchQuery,
+      searchTopK: injection.searchTopK,
+      searchMaxDistance: injection.searchMaxDistance,
+      maxConclusions: injection.maxConclusions,
+      includeMostFrequent: false,
+    });
+    logApiCall("aiPeer.context (assistant)", "GET", `search: ${searchQuery.slice(0, 60)}`, Date.now() - startTime, true);
+    verboseApiResult("aiPeer.context() -> representation (assistant)", (context as any)?.representation);
+    return { context };
+  } catch (e) {
+    logHook("user-prompt", `Assistant context fetch failed: ${e}`);
+    return null;
+  }
+}
+
+interface SessionContextResult {
+  /** "peer: content" lines, oldest first. */
+  lines: string[];
+  tokenCount: number;
+}
+
+/**
+ * Per-turn "sessionContext" component: recent raw messages from the currently
+ * mapped Honcho session, within a token budget. Summary is off — it's the same
+ * stored row the sessionStart "summary" component injects — and no peer target
+ * or search query is passed, keeping this a plain message-window fetch rather
+ * than another semantic retrieval. The value is turns from other instances
+ * sharing the session name (per-directory strategy). Returns null when the
+ * session has no messages.
+ */
+async function fetchSessionContext(config: any, sessionName: string, injection: InjectionConfig): Promise<SessionContextResult | null> {
+  const honcho = new Honcho(getHonchoClientOptions(config));
+  const startTime = Date.now();
+  try {
+    const session = await honcho.session(sessionName);
+    const context = await session.context({
+      summary: false,
+      tokens: injection.sessionContextTokens ?? 1500,
+    });
+    logApiCall("session.context", "GET", sessionName, Date.now() - startTime, true);
+    const messages = context?.messages ?? [];
+    if (!messages.length) return null;
+    const lines = messages.map((m: any) => `${m.peerId}: ${m.content}`);
+    const tokenCount = messages.reduce((sum: number, m: any) => sum + (m.tokenCount ?? 0), 0);
+    verboseApiResult("session.context() -> messages", lines.join("\n"));
+    return { lines, tokenCount };
+  } catch (e) {
+    logHook("user-prompt", `Session context fetch failed: ${e}`);
+    return null;
+  }
 }
 
 // Per-turn context injects representation-derived conclusions ONLY. The full

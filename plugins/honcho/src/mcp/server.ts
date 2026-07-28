@@ -28,6 +28,7 @@ import {
   type PerTurnComponent,
   SESSION_START_COMPONENTS,
   PER_TURN_COMPONENTS,
+  normalizePerTurn,
   REASONING_LEVELS,
   getObservationMode,
 } from "../config.js";
@@ -505,7 +506,9 @@ function handleSetConfig(args: Record<string, unknown>) {
     }
 
     case "injection.perTurn": {
-      const arr = validateComponentArray(value, PER_TURN_COMPONENTS, field);
+      // Accept the pre-split "context" name and store its replacement.
+      const raw = coerceStringArray(value);
+      const arr = validateComponentArray(raw ? normalizePerTurn(raw) : value, PER_TURN_COMPONENTS, field);
       if (!Array.isArray(arr)) return arr;
       previousValue = cfg.injection?.perTurn;
       if (!cfg.injection) cfg.injection = {};
@@ -530,6 +533,20 @@ function handleSetConfig(args: Record<string, unknown>) {
       if (!cfg.injection) cfg.injection = {};
       cfg.injection.searchMaxDistance = Number(value);
       break;
+
+    case "injection.sessionContextTokens": {
+      const tokens = Number(value);
+      if (!Number.isFinite(tokens) || tokens <= 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: "injection.sessionContextTokens must be a positive number" }, null, 2) }],
+          isError: true,
+        };
+      }
+      previousValue = cfg.injection?.sessionContextTokens;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.sessionContextTokens = tokens;
+      break;
+    }
 
     case "rememberTool":
       previousValue = cfg.rememberTool;
@@ -909,6 +926,7 @@ export async function runMcpServer(): Promise<void> {
                   "injection.maxConclusions",
                   "injection.searchMaxDistance",
                   "injection.searchQuerySource",
+                  "injection.sessionContextTokens",
                   "injection.dialecticTemplate",
                   "injection.dialecticReasoning",
                   "rememberTool",

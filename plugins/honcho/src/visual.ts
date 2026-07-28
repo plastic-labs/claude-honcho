@@ -86,6 +86,26 @@ export function visDialecticMessage(hookName: string, reasoning: string, elapsed
 }
 
 /**
+ * Build the per-turn systemMessage for the "sessionContext" component: a
+ * status line with the message and token counts, then every injected message
+ * as a bullet. Each message is collapsed to a single truncated line — the
+ * full text goes to additionalContext; this listing is for visibility into
+ * what was injected. The count has no display cutoff: it's bounded upstream
+ * by the sessionContextTokens budget passed to session.context().
+ */
+export function visSessionContextMessage(hookName: string, lines: string[], tokenCount: number): string {
+  const noun = lines.length === 1 ? "message" : "messages";
+  const head = formatLine("in", hookName, `injected ${lines.length} session ${noun} (~${tokenCount} tokens)`);
+  const body = lines
+    .map((l) => {
+      const flat = l.replace(/\s+/g, " ").trim();
+      return `  ${sym.bullet} ${flat.length > 150 ? `${flat.slice(0, 149)}…` : flat}`;
+    })
+    .join("\n");
+  return body ? `${head}\n${body}` : head;
+}
+
+/**
  * Build the systemMessage for the SessionStart composition: a single status
  * line naming which components were injected (e.g. "injected summary + peer
  * card (12 items)"). Session start is a once-per-session surface, so unlike the

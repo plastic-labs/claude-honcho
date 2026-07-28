@@ -52,9 +52,14 @@ export type SessionStartComponent = (typeof SESSION_START_COMPONENTS)[number];
 
 /**
  * Components the UserPromptSubmit hook may emit per non-trivial prompt.
- * - "context": a fresh, prompt-scoped context() blob (representation + peerCard),
- *   whose semantic retrieval is shaped by the searchTopK/searchMaxDistance/
- *   maxConclusions knobs below.
+ * - "userContext": a fresh, prompt-scoped peer.context() blob for the user
+ *   peer, whose semantic retrieval is shaped by the searchTopK/
+ *   searchMaxDistance/maxConclusions knobs below.
+ * - "assistantContext": the same peer.context() fetch, but for the AI peer —
+ *   what Honcho has derived about the assistant itself.
+ * - "sessionContext": recent raw messages from the currently mapped Honcho
+ *   session via session.context() (summary off, no search), which can span
+ *   other Claude instances sharing the session name.
  * - "dialectic": a reasoned peer.chat() answer over the representation, seeded
  *   from `dialecticTemplate` (the prompt substituted into %{user_query}) at the
  *   `dialecticReasoning` tier. Off by default — chat() is far slower than
@@ -65,8 +70,13 @@ export type SessionStartComponent = (typeof SESSION_START_COMPONENTS)[number];
  * was scoped out: `level` is not filterable through the API, so it needs a
  * honcho-backend + SDK change before it can ship. See the plan.
  */
-export const PER_TURN_COMPONENTS = ["context", "dialectic"] as const;
+export const PER_TURN_COMPONENTS = ["userContext", "assistantContext", "sessionContext", "dialectic"] as const;
 export type PerTurnComponent = (typeof PER_TURN_COMPONENTS)[number];
+
+/** Pre-split configs stored `"context"` for what is now "userContext". */
+export function normalizePerTurn(components: string[]): PerTurnComponent[] {
+  return components.map((c) => (c === "context" ? "userContext" : c)) as PerTurnComponent[];
+}
 
 /**
  * The `injection` config block: turns the two hardcoded injection surfaces
@@ -76,7 +86,7 @@ export type PerTurnComponent = (typeof PER_TURN_COMPONENTS)[number];
 export interface InjectionConfig {
   /** Components emitted once at session open (default: ["directives", "summary", "peerCard"]). */
   sessionStart?: SessionStartComponent[];
-  /** Components emitted per non-trivial prompt (default: ["context"]). */
+  /** Components emitted per non-trivial prompt (default: ["userContext"]). */
   perTurn?: PerTurnComponent[];
   /** Top-K conclusions pulled by context()'s semantic search (default: 10). */
   searchTopK?: number;
@@ -88,6 +98,8 @@ export interface InjectionConfig {
   /** What drives the per-turn semantic search: the raw "prompt" (default)
    *  or extracted "topics". */
   searchQuerySource?: "topics" | "prompt";
+  /** Token budget for the per-turn "sessionContext" message fetch (default: 1500). */
+  sessionContextTokens?: number;
   /** Query template for the per-turn "dialectic" component. The user's prompt
    *  is substituted into every `%{user_query}` (default: surface anything from
    *  the user's history relevant to the prompt). */
@@ -99,16 +111,17 @@ export interface InjectionConfig {
 }
 
 /** Resolved injection defaults: memory-usage directives + session summary +
- *  peer card at session start, a fresh context() per turn. Retrieval knobs
+ *  peer card at session start, a fresh user-peer context() per turn. Retrieval knobs
  *  are tuned for a lean per-turn block — topK 10 for recall, a 0.6 cosine
  *  distance, searching on the raw prompt. */
 export const DEFAULT_INJECTION: Required<InjectionConfig> = {
   sessionStart: ["directives", "summary", "peerCard"],
-  perTurn: ["context"],
+  perTurn: ["userContext"],
   searchTopK: 10,
   maxConclusions: 15,
   searchMaxDistance: 0.6,
   searchQuerySource: "prompt",
+  sessionContextTokens: 1500,
   dialecticTemplate:
     "Return a compact, factual list of anything from the user's history — preferences, prior decisions, relevant past work — that would help with the following. Write in the third person as background notes; do not address the user, ask questions, or offer next steps. If nothing relevant exists, say so in one line. Relevant to: %{user_query}",
   dialecticReasoning: "medium",
@@ -795,7 +808,12 @@ export function getLocalContextConfig(): LocalContextConfig {
  */
 export function getInjectionConfig(config?: HonchoCLAUDEConfig | null): Required<InjectionConfig> {
   const injection = (config === undefined ? loadConfig() : config)?.injection;
-  return { ...DEFAULT_INJECTION, ...(injection ?? {}) };
+  const resolved = { ...DEFAULT_INJECTION, ...(injection ?? {}) };
+  // Guard hand-edited configs: a non-array perTurn falls back to the default.
+  resolved.perTurn = Array.isArray(resolved.perTurn)
+    ? normalizePerTurn(resolved.perTurn)
+    : DEFAULT_INJECTION.perTurn;
+  return resolved;
 }
 
 export function isLoggingEnabled(): boolean {
