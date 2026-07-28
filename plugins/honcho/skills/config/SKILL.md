@@ -173,15 +173,15 @@ AskUserQuestion:
           description: "Fresh, prompt-scoped memory about you pulled every turn"
         - label: "Assistant conclusions"
           description: "Same fetch, but for the AI peer — what Honcho knows about the assistant"
-        - label: "Session summary"
-          description: "The mapped Honcho session's rolling summary, refetched each turn"
+        - label: "Session messages"
+          description: "Recent raw messages from the mapped Honcho session — useful when other instances share the session"
         - label: "Dialectic recall"
           description: "A reasoned answer over your history each turn — richer but slower (off by default)"
 ```
 
 Map the selections to component names, then call `set_config` once per surface:
 - Session start → `injection.sessionStart`, mapping "Memory directives"→`directives`, "Session summary"→`summary`, "Peer card"→`peerCard`, "Representation"→`peerRepresentation`.
-- Per turn → `injection.perTurn`, mapping "User conclusions"→`userContext`, "Assistant conclusions"→`assistantContext`, "Session summary"→`sessionContext`, "Dialectic recall"→`dialectic`.
+- Per turn → `injection.perTurn`, mapping "User conclusions"→`userContext`, "Assistant conclusions"→`assistantContext`, "Session messages"→`sessionContext`, "Dialectic recall"→`dialectic`.
 
 Pass the value as a JSON array (e.g. `["directives","summary","peerCard"]`). An empty selection for a surface means "inject nothing" there — pass `[]`.
 

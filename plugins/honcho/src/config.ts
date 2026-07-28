@@ -57,9 +57,9 @@ export type SessionStartComponent = (typeof SESSION_START_COMPONENTS)[number];
  *   searchMaxDistance/maxConclusions knobs below.
  * - "assistantContext": the same peer.context() fetch, but for the AI peer —
  *   what Honcho has derived about the assistant itself.
- * - "sessionContext": the SDK session.context() summary for the currently
- *   mapped Honcho session, which can span other Claude instances sharing the
- *   session name.
+ * - "sessionContext": recent raw messages from the currently mapped Honcho
+ *   session via session.context() (summary off, no search), which can span
+ *   other Claude instances sharing the session name.
  * - "dialectic": a reasoned peer.chat() answer over the representation, seeded
  *   from `dialecticTemplate` (the prompt substituted into %{user_query}) at the
  *   `dialecticReasoning` tier. Off by default — chat() is far slower than
@@ -98,6 +98,8 @@ export interface InjectionConfig {
   /** What drives the per-turn semantic search: the raw "prompt" (default)
    *  or extracted "topics". */
   searchQuerySource?: "topics" | "prompt";
+  /** Token budget for the per-turn "sessionContext" message fetch (default: 1500). */
+  sessionContextTokens?: number;
   /** Query template for the per-turn "dialectic" component. The user's prompt
    *  is substituted into every `%{user_query}` (default: surface anything from
    *  the user's history relevant to the prompt). */
@@ -119,6 +121,7 @@ export const DEFAULT_INJECTION: Required<InjectionConfig> = {
   maxConclusions: 15,
   searchMaxDistance: 0.6,
   searchQuerySource: "prompt",
+  sessionContextTokens: 1500,
   dialecticTemplate:
     "Return a compact, factual list of anything from the user's history — preferences, prior decisions, relevant past work — that would help with the following. Write in the third person as background notes; do not address the user, ask questions, or offer next steps. If nothing relevant exists, say so in one line. Relevant to: %{user_query}",
   dialecticReasoning: "medium",

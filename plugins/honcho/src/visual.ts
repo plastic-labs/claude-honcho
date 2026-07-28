@@ -87,11 +87,12 @@ export function visDialecticMessage(hookName: string, reasoning: string, elapsed
 
 /**
  * Build the per-turn systemMessage for the "sessionContext" component: a
- * status line with the summary's token count. The summary itself goes to
- * additionalContext only — it's long-lived session prose, not per-turn news.
+ * status line with the message and token counts. The messages themselves go
+ * to additionalContext only.
  */
-export function visSessionSummaryMessage(hookName: string, tokenCount: number): string {
-  return formatLine("in", hookName, `injected session summary (${tokenCount} tokens)`);
+export function visSessionContextMessage(hookName: string, messageCount: number, tokenCount: number): string {
+  const noun = messageCount === 1 ? "message" : "messages";
+  return formatLine("in", hookName, `injected ${messageCount} session ${noun} (~${tokenCount} tokens)`);
 }
 
 /**

@@ -534,6 +534,12 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.injection.searchMaxDistance = Number(value);
       break;
 
+    case "injection.sessionContextTokens":
+      previousValue = cfg.injection?.sessionContextTokens;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.sessionContextTokens = Number(value);
+      break;
+
     case "rememberTool":
       previousValue = cfg.rememberTool;
       cfg.rememberTool = Boolean(value);
@@ -912,6 +918,7 @@ export async function runMcpServer(): Promise<void> {
                   "injection.maxConclusions",
                   "injection.searchMaxDistance",
                   "injection.searchQuerySource",
+                  "injection.sessionContextTokens",
                   "injection.dialecticTemplate",
                   "injection.dialecticReasoning",
                   "rememberTool",
