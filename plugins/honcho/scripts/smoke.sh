@@ -16,7 +16,9 @@ cp -R "$STAGE_DIR/." "$SMOKE"
 cd "$SMOKE"
 
 # Hooks + MCP server: disabled config, exits after config load.
-export HOME="$(mktemp -d)"
+# (Standalone assignment so a mktemp failure propagates under set -e.)
+TMP_HOME="$(mktemp -d)"
+export HOME="$TMP_HOME"
 mkdir -p "$HOME/.honcho"
 echo '{"apiKey":"smoke","enabled":false}' > "$HOME/.honcho/config.json"
 
@@ -37,7 +39,8 @@ bounded node dist/skills/backfill-runner.js --dry-run </dev/null >/dev/null
 
 # Setup and status with no config and no key exercise their offline
 # not-configured paths (a configured run would validate the connection).
-export HOME="$(mktemp -d)"
+TMP_HOME="$(mktemp -d)"
+export HOME="$TMP_HOME"
 unset HONCHO_API_KEY
 
 # Setup exits 1 by design when no key is found; assert it reached that

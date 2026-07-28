@@ -58,7 +58,9 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+          # Whole-string match: [[ =~ ]] anchors reject embedded CR/LF, which
+          # a line-based grep would let through into GITHUB_OUTPUT.
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::'$VERSION' is not a valid semver version"
             exit 1
           fi
@@ -68,8 +70,20 @@ jobs:
           esac
           # Equal versions pass through: re-dispatching a published version is
           # the retry path, and the later publish/release steps skip what
-          # already exists.
-          CURRENT="$(npm view @honcho-ai/claude-honcho dist-tags.latest 2>/dev/null || true)"
+          # already exists. Lookups fail closed: only a confirmed E404 (no
+          # package yet) counts as absence.
+          set +e
+          CURRENT_OUT="$(npm view @honcho-ai/claude-honcho dist-tags.latest 2>&1)"
+          CURRENT_STATUS=$?
+          set -e
+          if [ "$CURRENT_STATUS" -eq 0 ]; then
+            CURRENT="$CURRENT_OUT"
+          elif echo "$CURRENT_OUT" | grep -q "E404"; then
+            CURRENT=""
+          else
+            echo "::error::npm lookup for dist-tags.latest failed: $CURRENT_OUT"
+            exit 1
+          fi
           if [ "$DIST_TAG" = "latest" ] && [ -n "$CURRENT" ] && [ "$CURRENT" != "$VERSION" ]; then
             HIGHEST="$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -n1)"
             if [ "$HIGHEST" != "$VERSION" ]; then
@@ -100,34 +114,48 @@ jobs:
         run: bash scripts/smoke.sh .stage
 
       - name: Publish to npm
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          if npm view "@honcho-ai/claude-honcho@$VERSION" version >/dev/null 2>&1; then
-            echo "$VERSION already on npm; skipping publish"
-          else
-            npm publish .stage --provenance --access public --tag "${{ steps.version.outputs.dist-tag }}"
-          fi
         env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DIST_TAG: ${{ steps.version.outputs.dist-tag }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # Fail closed: publish only on a confirmed E404 for this version.
+          set +e
+          EXISTS_OUT="$(npm view "@honcho-ai/claude-honcho@$VERSION" version 2>&1)"
+          EXISTS_STATUS=$?
+          set -e
+          if [ "$EXISTS_STATUS" -eq 0 ] && [ -n "$EXISTS_OUT" ]; then
+            echo "$VERSION already on npm; skipping publish"
+          elif [ "$EXISTS_STATUS" -ne 0 ] && ! echo "$EXISTS_OUT" | grep -q "E404"; then
+            echo "::error::npm lookup for $VERSION failed: $EXISTS_OUT"
+            exit 1
+          else
+            npm publish .stage --provenance --access public --tag "$DIST_TAG"
+          fi
 
       # Standby distribution channel: the same staged tree on an orphan
       # branch, so marketplace.json can switch to a github source with a
       # one-line change if npm distribution ever becomes a problem.
       - name: Push release branch
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           cd .stage
           git init -b release/honcho
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "honcho v${{ steps.version.outputs.version }}"
+          git commit -m "honcho v$VERSION"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" release/honcho
 
       # gh release create makes the tag server-side at --target, so the tag
       # always lands on the exact commit that was published.
       - name: Create GitHub Release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           TAG="honcho-v$VERSION"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "$TAG release already exists; skipping"
@@ -136,7 +164,5 @@ jobs:
               --target "${{ github.sha }}" \
               --title "honcho v$VERSION" \
               --generate-notes \
-              $([ "${{ steps.version.outputs.prerelease }}" = "true" ] && echo --prerelease)
+              $([ "$PRERELEASE" = "true" ] && echo --prerelease)
           fi
-        env:
-          GH_TOKEN: ${{ github.token }}
