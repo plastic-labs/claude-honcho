@@ -16,6 +16,10 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -32,9 +36,10 @@ jobs:
           claude plugin validate . --strict
           claude plugin validate ../honcho-dev --strict
 
-      # Every bundled hook must run from a bare directory: no node_modules on
-      # the resolution path, config disabled so hooks exit without network.
-      - name: Smoke test bundled hooks
+      # Every bundled entry point must run under node (the shipped runtime)
+      # from a bare directory: no node_modules on the resolution path, config
+      # disabled so hooks exit without network.
+      - name: Smoke test bundled entry points
         run: |
           SMOKE="$(mktemp -d)"
           cp -R .stage/. "$SMOKE"
@@ -44,5 +49,8 @@ jobs:
           cd "$SMOKE"
           for hook in dist/hooks/*.js; do
             echo "smoke: $hook"
-            echo '{"session_id":"ci","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup"}' | bun run "$hook"
+            echo '{"session_id":"ci","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup"}' | node "$hook"
           done
+          echo "smoke: dist/mcp-server.js"
+          printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}\n' \
+            | timeout 15 node dist/mcp-server.js | grep -q '"serverInfo"'

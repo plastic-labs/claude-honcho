@@ -710,6 +710,19 @@ const REMEMBER_TOOL = {
   },
 };
 
+/** Plugin version from the manifest next to the running entry point. */
+function pluginVersion(): string {
+  for (const dir of ["..", "../.."]) {
+    const manifest = new URL(`${dir}/.claude-plugin/plugin.json`, import.meta.url).pathname;
+    try {
+      return JSON.parse(readFileSync(manifest, "utf-8")).version ?? "unknown";
+    } catch {
+      // Try the next candidate
+    }
+  }
+  return "unknown";
+}
+
 export async function runMcpServer(): Promise<void> {
   setDetectedHost("claude_code");
   const config = loadConfig();
@@ -721,7 +734,7 @@ export async function runMcpServer(): Promise<void> {
   const server = new Server(
     {
       name: "honcho",
-      version: "0.2.6",
+      version: pluginVersion(),
     },
     {
       capabilities: {

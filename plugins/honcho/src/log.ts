@@ -9,7 +9,7 @@
 
 import { homedir } from "os";
 import { join } from "path";
-import { existsSync, appendFileSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { symbols, arrows, box } from "./unicode.js";
 import { isLoggingEnabled } from "./config.js";
 
@@ -138,11 +138,11 @@ export function logActivity(
   try {
     // Check file size and truncate if needed
     if (existsSync(LOG_FILE)) {
-      const stats = Bun.file(LOG_FILE).size;
+      const stats = statSync(LOG_FILE).size;
       if (stats > MAX_LOG_SIZE) {
         const content = readFileSync(LOG_FILE, "utf-8");
         const truncated = content.slice(-50 * 1024);
-        Bun.write(LOG_FILE, truncated);
+        writeFileSync(LOG_FILE, truncated);
       }
     }
 

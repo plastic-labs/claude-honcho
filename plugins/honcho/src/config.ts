@@ -235,13 +235,20 @@ export function getCachedStdin(): string | null {
   return _stdinText;
 }
 
+/** Runtime-agnostic stdin read (hooks run under bun in dev, node when bundled). */
+export async function readStdinText(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf-8");
+}
+
 /**
  * Shared hook entry point initialization.
  * Reads stdin once, caches it, detects host, and exits early for unsupported hosts.
  * Must be called at the top of every hook entry point before the handler.
  */
 export async function initHook(): Promise<void> {
-  const stdinText = await Bun.stdin.text();
+  const stdinText = await readStdinText();
   cacheStdin(stdinText);
   let input: Record<string, unknown> = {};
   try { input = JSON.parse(stdinText || "{}"); } catch { process.exit(0); }

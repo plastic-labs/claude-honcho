@@ -23,7 +23,7 @@ const result = await Bun.build({
   entrypoints: [...hookEntries, join(ROOT, "mcp-server.ts")],
   outdir: join(STAGE, "dist"),
   root: ROOT,
-  target: "bun",
+  target: "node",
   splitting: true,
   sourcemap: "linked",
 });
@@ -32,24 +32,36 @@ if (!result.success) {
   process.exit(1);
 }
 
-// Manifests: rewrite source entry points to their bundled locations, then
-// verify every rewritten path exists in the stage.
-async function stageManifest(relPath: string): Promise<void> {
-  let text = await Bun.file(join(ROOT, relPath)).text();
-  text = text.replace(
-    /\$\{CLAUDE_PLUGIN_ROOT\}\/(hooks\/[\w-]+|mcp-server)\.ts/g,
-    "${CLAUDE_PLUGIN_ROOT}/dist/$1.js",
-  );
+// Manifests: rewrite source entry points to their bundled locations (the
+// stage runs under node, dev runs .ts under bun), then verify every
+// rewritten path exists in the stage.
+function assertStagedPaths(relPath: string, text: string): void {
   for (const [, staged] of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(dist\/[\w/-]+\.js)/g)) {
     if (!existsSync(join(STAGE, staged))) {
       console.error(`${relPath} references ${staged}, which the build did not produce`);
       process.exit(1);
     }
   }
-  await Bun.write(join(STAGE, relPath), text);
 }
-await stageManifest("hooks/hooks.json");
-await stageManifest("mcp-servers.json");
+
+const hooksJson = (await Bun.file(join(ROOT, "hooks/hooks.json")).text()).replace(
+  /bun run \$\{CLAUDE_PLUGIN_ROOT\}\/(hooks\/[\w-]+)\.ts/g,
+  "node ${CLAUDE_PLUGIN_ROOT}/dist/$1.js",
+);
+assertStagedPaths("hooks/hooks.json", hooksJson);
+await Bun.write(join(STAGE, "hooks/hooks.json"), hooksJson);
+
+const mcpServers = await Bun.file(join(ROOT, "mcp-servers.json")).json();
+for (const server of Object.values(mcpServers) as Array<{ command: string; args: string[] }>) {
+  if (server.command !== "bun") continue;
+  server.command = "node";
+  server.args = server.args
+    .filter((arg) => arg !== "run")
+    .map((arg) => arg.replace(/\$\{CLAUDE_PLUGIN_ROOT\}\/([\w-]+)\.ts/, "${CLAUDE_PLUGIN_ROOT}/dist/$1.js"));
+}
+const mcpJson = JSON.stringify(mcpServers, null, 2) + "\n";
+assertStagedPaths("mcp-servers.json", mcpJson);
+await Bun.write(join(STAGE, "mcp-servers.json"), mcpJson);
 
 // plugin.json: version stamped from package.json. hooks/hooks.json and
 // skills/ are auto-discovered, so neither needs a manifest field.
@@ -67,6 +79,7 @@ await Bun.write(
     {
       name: "@honcho-ai/claude-plugin",
       version,
+      type: "module",
       description: pluginManifest.description,
       author: "Plastic Labs <hello@plasticlabs.ai>",
       license: pluginManifest.license,

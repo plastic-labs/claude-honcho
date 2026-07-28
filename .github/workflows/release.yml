@@ -1,0 +1,121 @@
+name: Release
+
+# Releases the honcho plugin: bumps the single version field in
+# plugins/honcho/package.json, builds the self-contained stage, publishes it
+# to npm (with provenance) and to the release/honcho branch, then commits the
+# bump, tags, and cuts a GitHub Release. The npm publish comes after the bump
+# commit so a failed publish leaves a committed version that a rerun with
+# bump=none can retry.
+#
+# Requires the NPM_TOKEN secret: an npm automation token with publish rights
+# on the @honcho-ai scope.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump (none reuses the committed version, e.g. to retry a failed publish)
+        type: choice
+        required: true
+        default: patch
+        options: [patch, minor, major, prepatch, preminor, premajor, prerelease, none]
+      dist-tag:
+        description: npm dist-tag (use next for release candidates)
+        type: choice
+        required: true
+        default: latest
+        options: [latest, next]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write # npm provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/honcho
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Bump version
+        id: version
+        run: |
+          if [ "${{ inputs.bump }}" != "none" ]; then
+            npm version "${{ inputs.bump }}" --preid=rc --no-git-tag-version
+          fi
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Build release stage
+        run: bun run scripts/build.ts
+
+      - name: Validate staged plugin
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate .stage --strict
+
+      - name: Smoke test bundled entry points
+        run: |
+          SMOKE="$(mktemp -d)"
+          cp -R .stage/. "$SMOKE"
+          export HOME="$(mktemp -d)"
+          mkdir -p "$HOME/.honcho"
+          echo '{"apiKey":"smoke","enabled":false}' > "$HOME/.honcho/config.json"
+          cd "$SMOKE"
+          for hook in dist/hooks/*.js; do
+            echo '{"session_id":"ci","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup"}' | node "$hook"
+          done
+          printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}\n' \
+            | timeout 15 node dist/mcp-server.js | grep -q '"serverInfo"'
+
+      - name: Commit bump and tag
+        if: inputs.bump != 'none'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "chore(release): honcho v${{ steps.version.outputs.version }}"
+          git tag "honcho-v${{ steps.version.outputs.version }}"
+          git push origin main --follow-tags
+
+      - name: Publish to npm
+        run: npm publish .stage --provenance --access public --tag "${{ inputs.dist-tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Standby distribution channel: the same staged tree on an orphan
+      # branch, so marketplace.json can switch to a github source with a
+      # one-line change if npm distribution ever becomes a problem.
+      - name: Push release branch
+        run: |
+          cd .stage
+          git init -b release/honcho
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "honcho v${{ steps.version.outputs.version }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" release/honcho
+
+      - name: Create GitHub Release
+        if: inputs.bump != 'none'
+        run: gh release create "honcho-v${{ steps.version.outputs.version }}" --generate-notes --title "honcho v${{ steps.version.outputs.version }}" ${{ inputs.dist-tag == 'next' && '--prerelease' || '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
