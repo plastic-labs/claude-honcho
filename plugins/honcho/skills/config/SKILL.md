@@ -42,7 +42,7 @@ AskUserQuestion:
       description: "What Honcho injects at session start and per turn (currently: start [{resolved.injection.sessionStart}], turn [{resolved.injection.perTurn}])"
 ```
 
-For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `["directives", "summary", "peerCard"]`, and if `injection.perTurn` is unset it is `["context"]` (conclusions on).
+For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `["directives", "summary", "peerCard"]`, and if `injection.perTurn` is unset it is `["userContext"]` (user conclusions on). A stored perTurn value of `"context"` is the legacy name for `"userContext"` — treat them as the same.
 
 If the user selects "Other", present advanced options:
 
@@ -169,15 +169,19 @@ AskUserQuestion:
       header: "Per turn"
       multiSelect: true
       options:
-        - label: "Relevant conclusions"
-          description: "Fresh, prompt-scoped memory pulled every turn"
+        - label: "User conclusions"
+          description: "Fresh, prompt-scoped memory about you pulled every turn"
+        - label: "Assistant conclusions"
+          description: "Same fetch, but for the AI peer — what Honcho knows about the assistant"
+        - label: "Session summary"
+          description: "The mapped Honcho session's rolling summary, refetched each turn"
         - label: "Dialectic recall"
           description: "A reasoned answer over your history each turn — richer but slower (off by default)"
 ```
 
 Map the selections to component names, then call `set_config` once per surface:
 - Session start → `injection.sessionStart`, mapping "Memory directives"→`directives`, "Session summary"→`summary`, "Peer card"→`peerCard`, "Representation"→`peerRepresentation`.
-- Per turn → `injection.perTurn`, mapping "Relevant conclusions"→`context`, "Dialectic recall"→`dialectic`.
+- Per turn → `injection.perTurn`, mapping "User conclusions"→`userContext`, "Assistant conclusions"→`assistantContext`, "Session summary"→`sessionContext`, "Dialectic recall"→`dialectic`.
 
 Pass the value as a JSON array (e.g. `["directives","summary","peerCard"]`). An empty selection for a surface means "inject nothing" there — pass `[]`.
 
