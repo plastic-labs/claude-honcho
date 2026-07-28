@@ -146,11 +146,24 @@ export function highlight(text: string): string {
   return `${colors.peach}${text}${colors.reset}`;
 }
 
+/** Default dashboard (GUI) base URL — the hosted platform. */
+const DEFAULT_DASHBOARD_URL = "https://app.honcho.dev";
+
 /**
- * Build a Honcho app URL for a session
+ * Build a Honcho dashboard URL for a session.
+ * `dashboardBaseUrl` lets self-hosted deployments point links at their own GUI
+ * (resolve it via getDashboardUrl(config)); it defaults to the hosted platform.
+ * Pass null (what getDashboardUrl returns for local/custom endpoints with no
+ * dashboard configured) to get null back, so callers can suppress the link.
  */
-export function honchoSessionUrl(workspace: string, sessionName: string): string {
-  return `https://app.honcho.dev/explore?workspace=${encodeURIComponent(workspace)}&view=sessions&session=${encodeURIComponent(sessionName)}`;
+export function honchoSessionUrl(
+  workspace: string,
+  sessionName: string,
+  dashboardBaseUrl: string | null = DEFAULT_DASHBOARD_URL,
+): string | null {
+  if (dashboardBaseUrl === null) return null;
+  const base = dashboardBaseUrl.replace(/\/+$/, "");
+  return `${base}/explore?workspace=${encodeURIComponent(workspace)}&view=sessions&session=${encodeURIComponent(sessionName)}`;
 }
 
 /**
@@ -161,9 +174,15 @@ export function hyperlink(url: string, text: string): string {
 }
 
 /**
- * Styled session line with clickable hyperlink to Honcho app
+ * Styled session line with clickable hyperlink to Honcho app (when available)
  */
-export function sessionLine(workspace: string, sessionName: string): string {
-  const url = honchoSessionUrl(workspace, sessionName);
-  return `${colors.dim}Honcho session:${colors.reset} ${hyperlink(url, `${colors.skyBlue}${sessionName}${colors.reset}`)}`;
+export function sessionLine(
+  workspace: string,
+  sessionName: string,
+  dashboardBaseUrl?: string | null,
+): string {
+  const url = honchoSessionUrl(workspace, sessionName, dashboardBaseUrl);
+  const label = `${colors.dim}Honcho session:${colors.reset}`;
+  const name = `${colors.skyBlue}${sessionName}${colors.reset}`;
+  return url ? `${label} ${hyperlink(url, name)}` : `${label} ${name}`;
 }

@@ -4,6 +4,14 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `endpoint.dashboardUrl` config field (or `HONCHO_DASHBOARD_URL` env var) to point session links at a self-hosted GUI. (#67, thanks @djuntgen)
+
+### Fixed
+
+- Session links are suppressed on local/custom endpoints when no dashboard URL is configured, instead of pointing at the hosted GUI. (#31, thanks @smkrv)
+
 ## [0.2.8] - 2026-07-27
 
 ### Added
