@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/honcho
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Type check
+        run: bunx tsc --noEmit
+
+      - name: Build release stage
+        run: bun run scripts/build.ts
+
+      - name: Validate plugins
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate .stage --strict
+          claude plugin validate . --strict
+          claude plugin validate ../honcho-dev --strict
+
+      # Every bundled hook must run from a bare directory: no node_modules on
+      # the resolution path, config disabled so hooks exit without network.
+      - name: Smoke test bundled hooks
+        run: |
+          SMOKE="$(mktemp -d)"
+          cp -R .stage/. "$SMOKE"
+          export HOME="$(mktemp -d)"
+          mkdir -p "$HOME/.honcho"
+          echo '{"apiKey":"smoke","enabled":false}' > "$HOME/.honcho/config.json"
+          cd "$SMOKE"
+          for hook in dist/hooks/*.js; do
+            echo "smoke: $hook"
+            echo '{"session_id":"ci","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup"}' | bun run "$hook"
+          done
