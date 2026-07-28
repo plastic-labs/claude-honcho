@@ -279,7 +279,7 @@ function emitPerTurn(
 
   if (sessionCtx) {
     parts.push(`Recent Honcho session messages:\n${sessionCtx.lines.join("\n")}`);
-    visLines.push(visSessionContextMessage("user-prompt", sessionCtx.lines.length, sessionCtx.tokenCount));
+    visLines.push(visSessionContextMessage("user-prompt", sessionCtx.lines, sessionCtx.tokenCount));
   }
 
   if (dialectic) {
