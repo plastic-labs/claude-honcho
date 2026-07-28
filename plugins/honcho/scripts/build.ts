@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 // Stage a self-contained release tree in .stage/: bundle every hook entry
 // point and the MCP server, rewrite manifest paths to the bundled output,
-// and stamp the version from package.json. Nothing in .stage/ is committed.
+// and stamp the version. The version comes from RELEASE_VERSION (set by the
+// release workflow; source carries no release version), falling back to
+// package.json for local builds. Nothing in .stage/ is committed.
 import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -9,7 +11,9 @@ import { join } from "node:path";
 const ROOT = join(import.meta.dir, "..");
 const STAGE = join(ROOT, ".stage");
 
-const version = (await Bun.file(join(ROOT, "package.json")).json()).version as string;
+const version =
+  process.env.RELEASE_VERSION ||
+  ((await Bun.file(join(ROOT, "package.json")).json()).version as string);
 
 await rm(STAGE, { recursive: true, force: true });
 await mkdir(join(STAGE, ".claude-plugin"), { recursive: true });

@@ -1,11 +1,12 @@
 name: Release
 
-# Releases the honcho plugin: bumps the single version field in
-# plugins/honcho/package.json, builds the self-contained stage, publishes it
-# to npm (with provenance) and to the release/honcho branch, then commits the
-# bump and cuts a GitHub Release (which creates the tag). The publish and
-# release steps are idempotent, so a rerun with bump=none retries whatever a
-# failed run left undone without burning a version number.
+# Releases the honcho plugin. Source carries no release version: the version
+# is a dispatch input, stamped into the staged plugin.json and package.json
+# at build time, so a release never commits anything to main. The registry
+# and the GitHub Releases page are the record of what is published.
+#
+# Publish and release creation are idempotent, so re-dispatching the same
+# version completes whatever a failed run left undone.
 #
 # The npm dist-tag is derived from the version: prerelease versions publish
 # under next, stable versions under latest.
@@ -16,19 +17,17 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      bump:
-        description: Version bump (none reuses the committed version, e.g. to retry a failed publish)
-        type: choice
+      version:
+        description: "Version to release (e.g. 0.3.0 or 0.3.0-rc.1)"
+        type: string
         required: true
-        default: patch
-        options: [patch, minor, major, prepatch, preminor, premajor, prerelease, none]
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: write # release/honcho branch, tag + GitHub Release
   id-token: write # npm provenance
 
 jobs:
@@ -43,9 +42,6 @@ jobs:
         working-directory: plugins/honcho
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
 
@@ -54,28 +50,42 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Bump version
+      # npm's latest tag points at the most recently published version, not
+      # the semver max, so a non-monotonic stable release would repoint
+      # latest backwards. Prereleases are exempt (they publish under next).
+      - name: Validate version
         id: version
         run: |
-          if [ "${{ inputs.bump }}" != "none" ]; then
-            npm version "${{ inputs.bump }}" --preid=rc --no-git-tag-version
+          VERSION="${{ inputs.version }}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$VERSION' is not a valid semver version"
+            exit 1
           fi
-          VERSION="$(node -p "require('./package.json').version")"
           case "$VERSION" in
             *-*) DIST_TAG=next; PRERELEASE=true ;;
             *)   DIST_TAG=latest; PRERELEASE=false ;;
           esac
+          CURRENT="$(npm view @honcho-ai/claude-plugin dist-tags.latest 2>/dev/null || true)"
+          if [ "$DIST_TAG" = "latest" ] && [ -n "$CURRENT" ]; then
+            HIGHEST="$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -n1)"
+            if [ "$HIGHEST" != "$VERSION" ] || [ "$CURRENT" = "$VERSION" ]; then
+              echo "::error::$VERSION is not greater than the published latest ($CURRENT)"
+              exit 1
+            fi
+          fi
           {
             echo "version=$VERSION"
             echo "dist-tag=$DIST_TAG"
             echo "prerelease=$PRERELEASE"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       - name: Build release stage
         run: bun run scripts/build.ts
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
 
       - name: Validate staged plugin
         run: |
@@ -97,17 +107,6 @@ jobs:
           echo "smoke: dist/mcp-server.js"
           printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}\n' \
             | timeout 15 node dist/mcp-server.js | grep -q '"serverInfo"'
-
-      - name: Commit bump
-        id: commit
-        if: inputs.bump != 'none'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
-          git commit -m "chore(release): honcho v${{ steps.version.outputs.version }}"
-          git push origin main
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Publish to npm
         run: |
@@ -139,12 +138,11 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           TAG="honcho-v$VERSION"
-          TARGET="${{ steps.commit.outputs.sha || github.sha }}"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "$TAG release already exists; skipping"
           else
             gh release create "$TAG" \
-              --target "$TARGET" \
+              --target "${{ github.sha }}" \
               --title "honcho v$VERSION" \
               --generate-notes \
               $([ "${{ steps.version.outputs.prerelease }}" = "true" ] && echo --prerelease)
