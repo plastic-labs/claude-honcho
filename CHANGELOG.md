@@ -4,6 +4,10 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `/honcho:insights` skill — runs a max-reasoning dialectic pass over accumulated memory and turns it into proposed CLAUDE.md edits, output-style rules, and skill ideas. Falls back to a parallel `honcho_remember` fan-out at `high` if the max query times out. Read-only until the user picks what to apply.
+
 ## [0.2.10] - 2026-07-29
 
 ### Changed

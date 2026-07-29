@@ -146,6 +146,8 @@ The honcho plugin provides these tools via MCP:
 | `/honcho:config`    | Interactive configuration menu                              |
 | `/honcho:setup`     | First-time setup — validate API key and create config       |
 | `/honcho:interview` | Interview to capture stable, cross-project user preferences |
+| `/honcho:import`    | Backfill past Claude Code sessions into Honcho memory        |
+| `/honcho:insights`  | Distill memory into CLAUDE.md edits, style rules, skill ideas |
 
 ---
 
