@@ -88,6 +88,10 @@ export interface InjectionConfig {
   sessionStart?: SessionStartComponent[];
   /** Components emitted per non-trivial prompt (default: ["userContext"]). */
   perTurn?: PerTurnComponent[];
+  /** Per-turn components whose full injected payload is printed to the terminal.
+   *  Components not listed still inject; they just report a one-line summary
+   *  instead of their contents (default: [] — summaries only). */
+  showContents?: PerTurnComponent[];
   /** Top-K conclusions pulled by context()'s semantic search (default: 10). */
   searchTopK?: number;
   /** Max conclusions injected per context() call (default: 15). */
@@ -113,10 +117,11 @@ export interface InjectionConfig {
 /** Resolved injection defaults: memory-usage directives + session summary +
  *  peer card at session start, a fresh user-peer context() per turn. Retrieval knobs
  *  are tuned for a lean per-turn block — topK 10 for recall, a 0.6 cosine
- *  distance, searching on the raw prompt. */
+ *  distance, searching on the raw prompt. No component prints its contents. */
 export const DEFAULT_INJECTION: Required<InjectionConfig> = {
   sessionStart: ["directives", "summary", "peerCard"],
   perTurn: ["userContext"],
+  showContents: [],
   searchTopK: 10,
   maxConclusions: 15,
   searchMaxDistance: 0.6,
@@ -809,10 +814,13 @@ export function getLocalContextConfig(): LocalContextConfig {
 export function getInjectionConfig(config?: HonchoCLAUDEConfig | null): Required<InjectionConfig> {
   const injection = (config === undefined ? loadConfig() : config)?.injection;
   const resolved = { ...DEFAULT_INJECTION, ...(injection ?? {}) };
-  // Guard hand-edited configs: a non-array perTurn falls back to the default.
+  // Guard hand-edited configs: a non-array component list falls back to the default.
   resolved.perTurn = Array.isArray(resolved.perTurn)
     ? normalizePerTurn(resolved.perTurn)
     : DEFAULT_INJECTION.perTurn;
+  resolved.showContents = Array.isArray(resolved.showContents)
+    ? normalizePerTurn(resolved.showContents)
+    : DEFAULT_INJECTION.showContents;
   return resolved;
 }
 

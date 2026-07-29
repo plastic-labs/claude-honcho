@@ -42,7 +42,7 @@ AskUserQuestion:
       description: "What Honcho injects at session start and per turn (currently: start [{resolved.injection.sessionStart}], turn [{resolved.injection.perTurn}])"
 ```
 
-For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `["directives", "summary", "peerCard"]`, and if `injection.perTurn` is unset it is `["userContext"]` (user conclusions on). A stored perTurn value of `"context"` is the legacy name for `"userContext"` — treat them as the same.
+For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `["directives", "summary", "peerCard"]`, and if `injection.perTurn` is unset it is `["userContext"]` (user conclusions on). A stored perTurn value of `"context"` is the legacy name for `"userContext"` — treat them as the same. `injection.showContents` defaults to `[]`.
 
 If the user selects "Other", present advanced options:
 
@@ -148,7 +148,7 @@ If confirmed, call `set_config` again WITH `confirm: true`.
 
 ### Memory injection
 
-Ask BOTH questions in a SINGLE `AskUserQuestion` call — two multi-select questions — so the user configures both surfaces at once. This is the only injection prompt; do not add follow-ups.
+Ask ALL questions in a SINGLE `AskUserQuestion` call — multi-select each — so the user configures every surface at once. This is the only injection prompt; do not add follow-ups.
 
 ```yaml
 AskUserQuestion:
@@ -177,13 +177,28 @@ AskUserQuestion:
           description: "Recent raw messages from the mapped Honcho session — useful when other instances share the session"
         - label: "Dialectic recall"
           description: "A reasoned answer over your history each turn — richer but slower (off by default)"
+    - question: "Which of those should print what they injected to the terminal?"
+      header: "Show in UI"
+      multiSelect: true
+      options:                     # same four labels as "Per turn"
+        - label: "User conclusions"
+          description: "List each injected conclusion instead of just the count"
+        - label: "Assistant conclusions"
+          description: "List each injected conclusion instead of just the count"
+        - label: "Session messages"
+          description: "List each injected message, one truncated line each"
+        - label: "Dialectic recall"
+          description: "Print the full reasoned answer — prose, can be long"
 ```
 
-Map the selections to component names, then call `set_config` once per surface:
+Map the selections to component names, then call `set_config` once per field:
 - Session start → `injection.sessionStart`, mapping "Memory directives"→`directives`, "Session summary"→`summary`, "Peer card"→`peerCard`, "Representation"→`peerRepresentation`.
 - Per turn → `injection.perTurn`, mapping "User conclusions"→`userContext`, "Assistant conclusions"→`assistantContext`, "Session messages"→`sessionContext`, "Dialectic recall"→`dialectic`.
+- Show in UI → `injection.showContents`, same mapping as per turn.
 
 Pass the value as a JSON array (e.g. `["directives","summary","peerCard"]`). An empty selection for a surface means "inject nothing" there — pass `[]`.
+
+`showContents` only affects the terminal display; every enabled component injects into the model's context regardless. Default is `[]` — each component reports a one-line summary (count, tokens, timing) and nothing else. Only offer components the user selected for per turn; skip this question entirely when they selected none.
 
 Retrieval tuning is intentionally NOT asked here. `injection.searchTopK` (default 10), `injection.maxConclusions` (15), `injection.searchMaxDistance` (0.6, cosine — lower is stricter), and `injection.searchQuerySource` ("prompt" | "topics", default "prompt") are all configurable via `set_config`, but keep the defaults; only mention they're tunable if the user brings it up, and never prompt for them.
 

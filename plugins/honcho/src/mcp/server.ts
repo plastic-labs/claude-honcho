@@ -516,6 +516,16 @@ function handleSetConfig(args: Record<string, unknown>) {
       break;
     }
 
+    case "injection.showContents": {
+      const raw = coerceStringArray(value);
+      const arr = validateComponentArray(raw ? normalizePerTurn(raw) : value, PER_TURN_COMPONENTS, field);
+      if (!Array.isArray(arr)) return arr;
+      previousValue = cfg.injection?.showContents;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.showContents = arr as PerTurnComponent[];
+      break;
+    }
+
     case "injection.searchTopK":
       previousValue = cfg.injection?.searchTopK;
       if (!cfg.injection) cfg.injection = {};
@@ -922,6 +932,7 @@ export async function runMcpServer(): Promise<void> {
                   "localContext.maxEntries",
                   "injection.sessionStart",
                   "injection.perTurn",
+                  "injection.showContents",
                   "injection.searchTopK",
                   "injection.maxConclusions",
                   "injection.searchMaxDistance",
@@ -935,7 +946,7 @@ export async function runMcpServer(): Promise<void> {
                 ],
               },
               value: {
-                description: "New value. For sessions.set: {path, name}. For sessions.remove: {path}. For injection.sessionStart / injection.perTurn: a string array of component names (e.g. [\"summary\",\"peerCard\"]).",
+                description: "New value. For sessions.set: {path, name}. For sessions.remove: {path}. For injection.sessionStart / injection.perTurn / injection.showContents: a string array of component names (e.g. [\"summary\",\"peerCard\"]).",
               },
               confirm: {
                 type: "boolean",

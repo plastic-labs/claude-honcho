@@ -1,7 +1,7 @@
 import { Honcho } from "@honcho-ai/sdk";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, getInjectionConfig, type InjectionConfig } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, getInjectionConfig, type InjectionConfig, type PerTurnComponent } from "../config.js";
 import {
   getMessageCount,
   incrementMessageCount,
@@ -240,18 +240,21 @@ export async function handleUserPrompt(): Promise<void> {
       ? { context: userCtxResult.context, matched: userCtxResult.matched, queryLabel: userCtxResult.queryLabel }
       : null;
 
-  emitPerTurn(config, userCtx, assistantCtxResult?.context ?? null, sessionCtx, dialectic, sessionLink);
+  emitPerTurn(config, injection, userCtx, assistantCtxResult?.context ?? null, sessionCtx, dialectic, sessionLink);
   process.exit(0);
 }
 
 /**
  * Emit the per-turn injection: the selected components composed into one
- * additionalContext payload plus a per-component systemMessage summary.
- * Exits silently when nothing resolved to content — mirroring the old
- * no-cache fall-through.
+ * additionalContext payload plus a per-component systemMessage summary. Every
+ * component reports a one-line summary; only those listed in
+ * `injection.showContents` also print their payload to the terminal. Exits
+ * silently when nothing resolved to content — mirroring the old no-cache
+ * fall-through.
  */
 function emitPerTurn(
   config: any,
+  injection: InjectionConfig,
   userCtx: { context: any; matched?: string[]; queryLabel?: string } | null,
   assistantCtx: any | null,
   sessionCtx: SessionContextResult | null,
@@ -260,12 +263,13 @@ function emitPerTurn(
 ): void {
   const parts: string[] = [];
   const visLines: string[] = [];
+  const show = (c: PerTurnComponent) => injection.showContents?.includes(c) ?? false;
 
   if (userCtx) {
     const conclusions = extractConclusions(userCtx.context);
     if (conclusions.length > 0) {
       parts.push(`Relevant conclusions: ${conclusions.join("; ")}`);
-      visLines.push(visInjectionMessage("user-prompt", { conclusions, matched: userCtx.matched, queryLabel: userCtx.queryLabel }));
+      visLines.push(visInjectionMessage("user-prompt", { conclusions, matched: userCtx.matched, queryLabel: userCtx.queryLabel, showContents: show("userContext") }));
     }
   }
 
@@ -273,18 +277,18 @@ function emitPerTurn(
     const conclusions = extractConclusions(assistantCtx);
     if (conclusions.length > 0) {
       parts.push(`Conclusions about the assistant (${config.aiPeer}): ${conclusions.join("; ")}`);
-      visLines.push(visInjectionMessage("user-prompt", { conclusions, queryLabel: `assistant ${config.aiPeer}` }));
+      visLines.push(visInjectionMessage("user-prompt", { conclusions, queryLabel: `assistant ${config.aiPeer}`, showContents: show("assistantContext") }));
     }
   }
 
   if (sessionCtx) {
     parts.push(`Recent Honcho session messages:\n${sessionCtx.lines.join("\n")}`);
-    visLines.push(visSessionContextMessage("user-prompt", sessionCtx.lines, sessionCtx.tokenCount));
+    visLines.push(visSessionContextMessage("user-prompt", sessionCtx.lines, sessionCtx.tokenCount, show("sessionContext")));
   }
 
   if (dialectic) {
     parts.push(`Dialectic recall: ${dialectic.answer}`);
-    visLines.push(visDialecticMessage("user-prompt", dialectic.reasoning, dialectic.elapsedMs, dialectic.answer));
+    visLines.push(visDialecticMessage("user-prompt", dialectic.reasoning, dialectic.elapsedMs, dialectic.answer, show("dialectic")));
   }
 
   if (parts.length === 0) return;
