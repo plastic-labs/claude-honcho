@@ -4,6 +4,18 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-07-29
+
+### Changed
+
+- Per-turn injection components report a one-line summary instead of printing their contents. `injection.showContents` lists the components that should still print their full payload (default: none). Display only — what reaches the model is unchanged.
+
+## [0.2.9] - 2026-07-28
+
+### Changed
+
+- Per-turn injection's `context` component split into three independently selectable components: `userContext` (the former `context`), `assistantContext` (the same fetch for the AI peer), and `sessionContext` (recent raw messages from the mapped Honcho session via `session.context()`, budget via `injection.sessionContextTokens`). Stored configs using `context` keep working — it resolves to `userContext`.
+
 ## [0.2.8] - 2026-07-27
 
 ### Added

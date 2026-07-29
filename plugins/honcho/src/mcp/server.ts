@@ -6,7 +6,6 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { Honcho } from "@honcho-ai/sdk";
 import { existsSync, readFileSync } from "fs";
-import { fileURLToPath } from "url";
 import {
   loadConfig,
   saveConfig,
@@ -29,8 +28,10 @@ import {
   type PerTurnComponent,
   SESSION_START_COMPONENTS,
   PER_TURN_COMPONENTS,
+  normalizePerTurn,
   REASONING_LEVELS,
   getObservationMode,
+  getPluginVersion,
 } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
 import {
@@ -506,11 +507,23 @@ function handleSetConfig(args: Record<string, unknown>) {
     }
 
     case "injection.perTurn": {
-      const arr = validateComponentArray(value, PER_TURN_COMPONENTS, field);
+      // Accept the pre-split "context" name and store its replacement.
+      const raw = coerceStringArray(value);
+      const arr = validateComponentArray(raw ? normalizePerTurn(raw) : value, PER_TURN_COMPONENTS, field);
       if (!Array.isArray(arr)) return arr;
       previousValue = cfg.injection?.perTurn;
       if (!cfg.injection) cfg.injection = {};
       cfg.injection.perTurn = arr as PerTurnComponent[];
+      break;
+    }
+
+    case "injection.showContents": {
+      const raw = coerceStringArray(value);
+      const arr = validateComponentArray(raw ? normalizePerTurn(raw) : value, PER_TURN_COMPONENTS, field);
+      if (!Array.isArray(arr)) return arr;
+      previousValue = cfg.injection?.showContents;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.showContents = arr as PerTurnComponent[];
       break;
     }
 
@@ -531,6 +544,20 @@ function handleSetConfig(args: Record<string, unknown>) {
       if (!cfg.injection) cfg.injection = {};
       cfg.injection.searchMaxDistance = Number(value);
       break;
+
+    case "injection.sessionContextTokens": {
+      const tokens = Number(value);
+      if (!Number.isFinite(tokens) || tokens <= 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: "injection.sessionContextTokens must be a positive number" }, null, 2) }],
+          isError: true,
+        };
+      }
+      previousValue = cfg.injection?.sessionContextTokens;
+      if (!cfg.injection) cfg.injection = {};
+      cfg.injection.sessionContextTokens = tokens;
+      break;
+    }
 
     case "rememberTool":
       previousValue = cfg.rememberTool;
@@ -711,21 +738,6 @@ const REMEMBER_TOOL = {
   },
 };
 
-/** Plugin version from the manifest next to the running entry point. */
-function pluginVersion(): string {
-  // ".." resolves for the bundled layout (dist/mcp-server.js), "../.." for
-  // dev source (src/mcp/server.ts).
-  for (const dir of ["..", "../.."]) {
-    const manifest = fileURLToPath(new URL(`${dir}/.claude-plugin/plugin.json`, import.meta.url));
-    try {
-      return JSON.parse(readFileSync(manifest, "utf-8")).version ?? "unknown";
-    } catch {
-      // Try the next candidate
-    }
-  }
-  return "unknown";
-}
-
 export async function runMcpServer(): Promise<void> {
   setDetectedHost("claude_code");
   const config = loadConfig();
@@ -737,7 +749,7 @@ export async function runMcpServer(): Promise<void> {
   const server = new Server(
     {
       name: "honcho",
-      version: pluginVersion(),
+      version: getPluginVersion(),
     },
     {
       capabilities: {
@@ -921,10 +933,12 @@ export async function runMcpServer(): Promise<void> {
                   "localContext.maxEntries",
                   "injection.sessionStart",
                   "injection.perTurn",
+                  "injection.showContents",
                   "injection.searchTopK",
                   "injection.maxConclusions",
                   "injection.searchMaxDistance",
                   "injection.searchQuerySource",
+                  "injection.sessionContextTokens",
                   "injection.dialecticTemplate",
                   "injection.dialecticReasoning",
                   "rememberTool",
@@ -933,7 +947,7 @@ export async function runMcpServer(): Promise<void> {
                 ],
               },
               value: {
-                description: "New value. For sessions.set: {path, name}. For sessions.remove: {path}. For injection.sessionStart / injection.perTurn: a string array of component names (e.g. [\"summary\",\"peerCard\"]).",
+                description: "New value. For sessions.set: {path, name}. For sessions.remove: {path}. For injection.sessionStart / injection.perTurn / injection.showContents: a string array of component names (e.g. [\"summary\",\"peerCard\"]).",
               },
               confirm: {
                 type: "boolean",
