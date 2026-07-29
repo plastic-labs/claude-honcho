@@ -4,6 +4,12 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-07-29
+
+### Changed
+
+- Per-turn injection components report a one-line summary instead of printing their contents. `injection.showContents` lists the components that should still print their full payload (default: none). Display only — what reaches the model is unchanged.
+
 ## [0.2.9] - 2026-07-28
 
 ### Changed
