@@ -241,6 +241,15 @@ export function getDefaultAiPeer(host?: HonchoHost): string {
   return DEFAULT_AI_PEER[host ?? getDetectedHost()];
 }
 
+// MCP tool arguments may arrive as strings; Boolean("false") is true.
+export function coerceBoolean(value: unknown): boolean {
+  if (typeof value === "string") {
+    const v = value.trim().toLowerCase();
+    return v !== "false" && v !== "0" && v !== "";
+  }
+  return Boolean(value);
+}
+
 // Stdin cache: entry points read stdin once via initHook(),
 // handlers consume from cache via getCachedStdin().
 let _stdinText: string | null = null;
