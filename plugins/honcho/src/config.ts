@@ -398,6 +398,23 @@ export function configExists(): boolean {
 }
 
 /**
+ * The plugin's own version, read from plugin.json — the same source the
+ * version-check script uses. Returns "unknown" when the manifest can't be
+ * located, so callers never advertise a stale hardcoded number.
+ */
+export function getPluginVersion(): string {
+  const root = process.env.CLAUDE_PLUGIN_ROOT;
+  if (!root) return "unknown";
+  try {
+    const raw = readFileSync(join(root, ".claude-plugin", "plugin.json"), "utf-8");
+    const version = (JSON.parse(raw) as { version?: unknown }).version;
+    return typeof version === "string" && version ? version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
  * Load config from file, with environment variable fallbacks.
  * Host-specific fields are resolved from the hosts block in the config file.
  */

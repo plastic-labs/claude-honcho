@@ -31,6 +31,7 @@ import {
   normalizePerTurn,
   REASONING_LEVELS,
   getObservationMode,
+  getPluginVersion,
 } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
 import {
@@ -748,7 +749,7 @@ export async function runMcpServer(): Promise<void> {
   const server = new Server(
     {
       name: "honcho",
-      version: "0.2.6",
+      version: getPluginVersion(),
     },
     {
       capabilities: {
