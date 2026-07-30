@@ -1,0 +1,249 @@
+import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import {
+  dedupKey,
+  filterRepeats,
+  emitPerTurn,
+  DEDUP_WINDOW_TURNS,
+  DEDUP_FLOOR,
+} from "../src/hooks/user-prompt";
+import { pruneLedger, DEDUP_LEDGER_RETAIN_TURNS, type DedupLedger } from "../src/state";
+import type { InjectionConfig } from "../src/config";
+
+const ledger = (turn: number, seen: Record<string, number> = {}): DedupLedger => ({ turn, seen });
+
+describe("dedupKey", () => {
+  test("is stable for the same conclusion", () => {
+    expect(dedupKey("Prefers concise answers", "u")).toBe(dedupKey("Prefers concise answers", "u"));
+  });
+
+  test("normalizes whitespace and case, so cosmetic re-rendering still counts as a repeat", () => {
+    expect(dedupKey("  Prefers   CONCISE\nanswers ", "u")).toBe(dedupKey("prefers concise answers", "u"));
+  });
+
+  test("different conclusions get different keys", () => {
+    expect(dedupKey("Prefers concise answers", "u")).not.toBe(dedupKey("Prefers verbose answers", "u"));
+  });
+
+  test("namespaces separate the user peer from the assistant peer", () => {
+    expect(dedupKey("Prefers concise answers", "u")).not.toBe(dedupKey("Prefers concise answers", "a"));
+  });
+});
+
+describe("filterRepeats", () => {
+  test("first sight of a conclusion passes through untouched", () => {
+    const l = ledger(1);
+    const { kept, suppressed, floored } = filterRepeats(["a", "b", "c"], l, "u");
+    expect(kept).toEqual(["a", "b", "c"]);
+    expect(suppressed).toBe(0);
+    expect(floored).toBe(false);
+  });
+
+  test("records what it emitted against the current turn", () => {
+    const l = ledger(4);
+    filterRepeats(["a", "b"], l, "u");
+    expect(l.seen[dedupKey("a", "u")]).toBe(4);
+    expect(l.seen[dedupKey("b", "u")]).toBe(4);
+  });
+
+  test("suppresses only the repeats, keeping genuinely new conclusions", () => {
+    const l = ledger(1);
+    filterRepeats(["a", "b"], l, "u");
+    l.turn = 2;
+    const { kept, suppressed, floored } = filterRepeats(["a", "b", "c"], l, "u");
+    expect(kept).toEqual(["c"]);
+    expect(suppressed).toBe(2);
+    expect(floored).toBe(false);
+  });
+
+  test("a conclusion becomes eligible again once the window has passed", () => {
+    const l = ledger(1);
+    filterRepeats(["a"], l, "u");
+
+    // Still inside the window: suppressed (via the floor, since it is the only
+    // candidate — see the floor tests below).
+    l.turn = 1 + DEDUP_WINDOW_TURNS;
+    expect(filterRepeats(["a", "fresh"], l, "u").kept).toEqual(["fresh"]);
+
+    // One turn past the window, measured from its LAST REAL injection (turn 1).
+    l.turn = 1 + DEDUP_WINDOW_TURNS + 1;
+    expect(filterRepeats(["a", "fresh2"], l, "u").kept).toEqual(["a", "fresh2"]);
+  });
+
+  test("being suppressed does NOT refresh the stamp — it ages out on schedule", () => {
+    const l = ledger(1);
+    filterRepeats(["a"], l, "u"); // real injection on turn 1
+
+    // Suppressed on every turn in between; its stamp must stay at 1.
+    for (let t = 2; t <= 1 + DEDUP_WINDOW_TURNS; t++) {
+      l.turn = t;
+      filterRepeats(["a", `new-${t}`], l, "u");
+      expect(l.seen[dedupKey("a", "u")]).toBe(1);
+    }
+
+    // Therefore it recovers on schedule rather than being buried forever.
+    l.turn = 1 + DEDUP_WINDOW_TURNS + 1;
+    expect(filterRepeats(["a", "z"], l, "u").kept).toContain("a");
+  });
+
+  test("the user and assistant namespaces do not suppress each other", () => {
+    const l = ledger(1);
+    filterRepeats(["shared sentence"], l, "u");
+    l.turn = 2;
+    expect(filterRepeats(["shared sentence"], l, "a").kept).toEqual(["shared sentence"]);
+  });
+
+  describe("the never-empty floor", () => {
+    test("an all-repeat turn still injects DEDUP_FLOOR conclusions, never zero", () => {
+      const l = ledger(1);
+      const all = ["a", "b", "c", "d", "e"];
+      filterRepeats(all, l, "u");
+      l.turn = 2;
+      const { kept, suppressed, floored } = filterRepeats(all, l, "u");
+      expect(kept).toEqual(["a", "b", "c"]); // top-N in retrieval (relevance) order
+      expect(kept.length).toBe(DEDUP_FLOOR);
+      expect(suppressed).toBe(all.length - DEDUP_FLOOR);
+      expect(floored).toBe(true);
+    });
+
+    test("fewer candidates than the floor: all of them are re-emitted", () => {
+      const l = ledger(1);
+      filterRepeats(["only"], l, "u");
+      l.turn = 2;
+      expect(filterRepeats(["only"], l, "u").kept).toEqual(["only"]);
+    });
+
+    test("a non-empty retrieval NEVER yields an empty injection, across many turns", () => {
+      const l = ledger(0);
+      const all = ["a", "b", "c", "d", "e"];
+      for (let t = 1; t <= 40; t++) {
+        l.turn = t;
+        const { kept } = filterRepeats(all, l, "u");
+        expect(kept.length).toBeGreaterThan(0);
+        expect(kept.length).toBeLessThanOrEqual(all.length);
+      }
+    });
+
+    test("an empty retrieval stays empty — the floor invents nothing", () => {
+      const l = ledger(1);
+      const { kept, suppressed, floored } = filterRepeats([], l, "u");
+      expect(kept).toEqual([]);
+      expect(suppressed).toBe(0);
+      expect(floored).toBe(false);
+    });
+  });
+});
+
+describe("pruneLedger", () => {
+  test("drops stamps older than the retention horizon and keeps the rest", () => {
+    const l = ledger(100, { old: 100 - DEDUP_LEDGER_RETAIN_TURNS, recent: 99 });
+    const pruned = pruneLedger(l);
+    expect(pruned.turn).toBe(100);
+    expect(pruned.seen).toEqual({ recent: 99 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The payload-level guarantee: dedup shapes additionalContext, and does so
+// independently of any display setting.
+// ---------------------------------------------------------------------------
+
+const injection = (showContents: string[]): InjectionConfig =>
+  ({
+    sessionStart: [],
+    perTurn: ["userContext", "assistantContext"],
+    showContents,
+  }) as unknown as InjectionConfig;
+
+const repr = (lines: string[]) => ({ representation: lines.join("\n") });
+
+function captureAdditionalContext(fn: () => void): string {
+  const original = console.log;
+  let captured = "";
+  console.log = (line: string) => {
+    captured = JSON.parse(line).hookSpecificOutput?.additionalContext ?? "";
+  };
+  try {
+    fn();
+  } finally {
+    console.log = original;
+  }
+  return captured;
+}
+
+describe("emitPerTurn dedup applied to additionalContext", () => {
+  const config = { peerName: "tester", aiPeer: "assistant" };
+  const conclusions = ["Prefers concise answers", "Prefers a conversational tone", "Wants structure per-context", "Uses bun"];
+
+  let originalLevel: string | undefined;
+  beforeEach(() => {
+    originalLevel = process.env.HONCHO_LOG_LEVEL;
+  });
+  afterEach(() => {
+    if (originalLevel === undefined) delete process.env.HONCHO_LOG_LEVEL;
+    else process.env.HONCHO_LOG_LEVEL = originalLevel;
+  });
+
+  test("a repeat turn produces a SMALLER but non-empty payload", () => {
+    const l = ledger(0);
+
+    l.turn = 1;
+    const first = captureAdditionalContext(() =>
+      emitPerTurn(config, injection([]), { context: repr(conclusions) }, null, null, null, undefined, l),
+    );
+
+    l.turn = 2;
+    const second = captureAdditionalContext(() =>
+      emitPerTurn(config, injection([]), { context: repr(conclusions) }, null, null, null, undefined, l),
+    );
+
+    expect(first).toContain("Prefers concise answers");
+    expect(second.length).toBeGreaterThan(0);
+    expect(second.length).toBeLessThan(first.length);
+    expect(second).toContain("Relevant conclusions:");
+  });
+
+  test("a fresh session (fresh ledger) gets the full payload again", () => {
+    const shared = ledger(1);
+    const full = captureAdditionalContext(() =>
+      emitPerTurn(config, injection([]), { context: repr(conclusions) }, null, null, null, undefined, shared),
+    );
+
+    shared.turn = 2;
+    captureAdditionalContext(() =>
+      emitPerTurn(config, injection([]), { context: repr(conclusions) }, null, null, null, undefined, shared),
+    );
+
+    // A new session starts from a clean ledger — nothing carries over.
+    const freshSession = ledger(1);
+    const refetched = captureAdditionalContext(() =>
+      emitPerTurn(config, injection([]), { context: repr(conclusions) }, null, null, null, undefined, freshSession),
+    );
+    expect(refetched).toBe(full);
+  });
+
+  test("additionalContext is byte-identical regardless of showContents (ledger POPULATED)", () => {
+    // With an empty ledger this assertion passes trivially — populate it first
+    // so the dedup path itself is what gets compared across display settings.
+    const seed = ledger(1);
+    filterRepeats(conclusions.slice(0, 2), seed, "u");
+
+    const run = (showContents: string[]) => {
+      const l: DedupLedger = { turn: 2, seen: { ...seed.seen } };
+      return captureAdditionalContext(() =>
+        emitPerTurn(config, injection(showContents), { context: repr(conclusions) }, repr(conclusions), null, null, undefined, l),
+      );
+    };
+
+    const hidden = run([]);
+    const shown = run(["userContext", "assistantContext"]);
+    expect(hidden).toBe(shown);
+    expect(hidden.length).toBeGreaterThan(0);
+  });
+
+  test("without a ledger, behavior is unchanged — every conclusion is injected", () => {
+    const withoutLedger = captureAdditionalContext(() =>
+      emitPerTurn(config, injection([]), { context: repr(conclusions) }, null, null, null),
+    );
+    for (const c of conclusions) expect(withoutLedger).toContain(c);
+  });
+});
