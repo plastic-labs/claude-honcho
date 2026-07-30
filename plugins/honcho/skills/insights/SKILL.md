@@ -36,6 +36,9 @@ Prefer **one `chat` call at `reasoning_level: "max"`**. The dialectic plans its 
 so a single wide question beats several narrow ones, and max reasoning is the point of this
 command. Include the "already covered" list in the prompt so it spends its budget on gaps.
 
+With a focus argument, replace the numbered axes below with that focus and keep the rest of
+the framing — the evidence-and-confidence ask and the exclusion list — intact.
+
 ```
 chat({
   reasoning_level: "max",
@@ -52,7 +55,10 @@ Skip anything on this list, which is already written into their config: <the lis
 ```
 
 If that call errors or hits the 120s ceiling, fall back to `honcho_remember` with
-`reasoning_level: "high"` and one query per axis (max 5, they run in parallel):
+`reasoning_level: "high"`. That tool is opt-in and only registered when the `rememberTool`
+config flag is on, so it may not be available — if it is missing, treat this path as thin and
+go straight to `get_context`. With a focus argument, send one query for that focus; with no
+argument, send all five axes (they run in parallel):
 
 1. How does this user want an agent to behave — autonomy, gating, what needs approval first?
 2. What are their communication and prose preferences, with examples they accepted or rejected?
