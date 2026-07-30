@@ -3,6 +3,7 @@ import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, 
 import { appendClaudeWork, getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visCapture } from "../visual.js";
+import { redactSecrets } from "../redact.js";
 
 
 interface HookInput {
@@ -64,7 +65,10 @@ function inferContentPurpose(content: string, filePath: string): string {
   // For markdown/docs
   if (['md', 'mdx', 'txt'].includes(ext)) {
     const headingMatch = content.match(/^#\s+(.+)$/m);
-    if (headingMatch) return `doc: ${headingMatch[1].slice(0, 50)}`;
+    // Redact BEFORE slicing: a secret in the heading must not survive by
+    // sitting past the truncation boundary, and slicing a raw secret can leave
+    // a partially-visible fragment.
+    if (headingMatch) return `doc: ${redactSecrets(headingMatch[1]).slice(0, 50)}`;
   }
 
   // For config files
@@ -121,7 +125,23 @@ function summarizeEdit(oldStr: string, newStr: string, filePath: string): string
   return `modified ${oldLines} lines`;
 }
 
-function formatToolSummary(
+/**
+ * Build the summary, then redact it. This string is printed to the terminal AND
+ * (with saveToolUse) uploaded to the Honcho server as durable memory, so any
+ * secret in it leaks twice. Individual branches below redact their own inputs
+ * first -- redaction must precede every `.slice()` -- and this wrapper is the
+ * belt-and-braces second pass over the assembled line. redactSecrets is
+ * idempotent, so the double application is safe.
+ */
+export function formatToolSummary(
+  toolName: string,
+  toolInput: Record<string, any>,
+  toolResponse: Record<string, any>
+): string {
+  return redactSecrets(buildToolSummary(toolName, toolInput, toolResponse));
+}
+
+function buildToolSummary(
   toolName: string,
   toolInput: Record<string, any>,
   toolResponse: Record<string, any>
@@ -137,13 +157,18 @@ function formatToolSummary(
     case "Edit": {
       const filePath = toolInput.file_path || "unknown";
       const fileName = filePath.split('/').pop() || filePath;
-      const oldStr = toolInput.old_string || "";
-      const newStr = toolInput.new_string || "";
+      // Redact before the diff runs: summarizeEdit reports raw identifiers it
+      // found in the changed text, and a secret value would be reported verbatim.
+      const oldStr = redactSecrets(toolInput.old_string || "");
+      const newStr = redactSecrets(toolInput.new_string || "");
       const changeSummary = summarizeEdit(oldStr, newStr, filePath);
       return `Edited ${fileName}: ${changeSummary}`;
     }
     case "Bash": {
-      const command = (toolInput.command || "").slice(0, 100);
+      // Redact BEFORE the 100-char slice (and the 60-char ones below), so a
+      // secret past the boundary cannot survive and truncation cannot leave a
+      // half-visible fragment.
+      const command = redactSecrets(toolInput.command || "").slice(0, 100);
       const success = !toolResponse.error;
       // Extract meaningful command info
       const cmdParts = command.split(/[;&|]/)[0].trim();
