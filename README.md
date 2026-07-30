@@ -447,6 +447,21 @@ The plugin hooks into Claude Code's lifecycle events:
 
 Make sure `saveMessages` is not set to `false` in your config (or `HONCHO_SAVE_MESSAGES` in env).
 
+### `honcho: 'bun' not found` in the transcript
+
+Claude Code runs hooks non-interactively, so they do not inherit the PATH from
+your shell profile — bun can be visible in your terminal and invisible to the
+hooks. The plugin searches PATH plus the usual install locations
+(`~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`,
+`~/.local/bin`). If your bun lives elsewhere, point the hooks at it directly:
+
+```bash
+export HONCHO_BUN=/absolute/path/to/bun
+```
+
+Then restart Claude Code. (Before this message existed, a missing bun disabled
+memory capture silently.)
+
 ### Using a local Honcho instance
 
 Via config file:

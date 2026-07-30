@@ -40,8 +40,10 @@ function loadHooks(): HookEntry[] {
 function timeoutsByScript(): Record<string, number[]> {
   const map: Record<string, number[]> = {};
   for (const hook of loadHooks()) {
-    const m = hook.command.match(/([\w.-]+\.(?:ts|sh))/);
-    const key = m ? m[1]! : hook.command;
+    // The LAST script name in the command line is the hook itself — anything
+    // earlier is a launcher (e.g. scripts/run-hook.sh, which resolves bun).
+    const all = hook.command.match(/[\w.-]+\.(?:ts|sh)/g);
+    const key = all?.length ? all[all.length - 1]! : hook.command;
     (map[key] ??= []).push(hook.timeout as number);
   }
   return map;
