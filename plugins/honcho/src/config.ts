@@ -46,8 +46,12 @@ export interface LocalContextConfig {
  * - "summary": the SDK `session.summaries().long` narrative.
  * - "peerCard" / "peerRepresentation": the two fields of a single context() call,
  *   each injected at full length (no per-field caps — inclusion is the only lever).
+ * - "briefing": a static nudge to call the `get_briefing` MCP tool instead of
+ *   injecting summary/peerCard inline — the tool call renders as an expandable
+ *   row in the UI, making the briefing user-visible. Use in place of
+ *   "summary"/"peerCard", not alongside them (the content would land twice).
  */
-export const SESSION_START_COMPONENTS = ["directives", "summary", "peerCard", "peerRepresentation"] as const;
+export const SESSION_START_COMPONENTS = ["directives", "summary", "peerCard", "peerRepresentation", "briefing"] as const;
 export type SessionStartComponent = (typeof SESSION_START_COMPONENTS)[number];
 
 /**
