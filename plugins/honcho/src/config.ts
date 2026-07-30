@@ -1,11 +1,25 @@
 import { homedir } from "os";
-import { join, basename } from "path";
+import { join, basename, resolve, isAbsolute } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { captureGitState } from "./git.js";
 import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
 
 function sanitizeForSessionName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+}
+
+const GLOB_META_RE = /[*?[\]{]/;
+
+function normalizePath(p: string): string {
+  let result = p;
+  if (result.startsWith("~/") || result === "~") {
+    result = join(homedir(), result.slice(1));
+  }
+  return resolve(result);
+}
+
+function isGlobPattern(pattern: string): boolean {
+  return GLOB_META_RE.test(pattern);
 }
 
 export interface MessageUploadConfig {
@@ -699,10 +713,43 @@ export function getClaudeSettingsDir(): string {
   return join(homedir(), ".claude");
 }
 
+/** Match a cwd against a sessions map, checking exact paths first then globs by specificity. */
+export function matchSessionForPath(cwd: string, sessions: Record<string, string>): string | null {
+  const normalizedCwd = normalizePath(cwd);
+
+  // Skip empty entries and relative paths (config is global, relative keys are always a mistake)
+  const entries = Object.entries(sessions).filter(
+    ([key, name]) => key && name && (key === "~" || key.startsWith("~/") || isAbsolute(key)),
+  );
+
+  for (const [key, name] of entries) {
+    if (!isGlobPattern(key) && normalizePath(key) === normalizedCwd) {
+      return name;
+    }
+  }
+
+  const globEntries = entries
+    .filter(([key]) => isGlobPattern(key))
+    .map(([key, name]) => {
+      const normalized = normalizePath(key);
+      const firstMeta = normalized.search(GLOB_META_RE);
+      return { pattern: normalized, name, specificity: firstMeta === -1 ? normalized.length : firstMeta };
+    })
+    .sort((a, b) => b.specificity - a.specificity || b.pattern.length - a.pattern.length);
+
+  for (const { pattern, name } of globEntries) {
+    if (new Bun.Glob(pattern).match(normalizedCwd)) {
+      return name;
+    }
+  }
+
+  return null;
+}
+
 export function getSessionForPath(cwd: string): string | null {
   const config = loadConfig();
   if (!config?.sessions) return null;
-  return config.sessions[cwd] || null;
+  return matchSessionForPath(cwd, config.sessions);
 }
 
 export function deriveSessionName(

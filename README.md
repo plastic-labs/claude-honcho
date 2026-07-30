@@ -178,6 +178,10 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
   // Session mapping
   "sessionStrategy": "per-directory", // "per-directory" | "git-branch" | "chat-instance"
   "sessionPeerPrefix": true,          // Prefix session names with peerName (default: true)
+  "sessions": {                       // Per-path overrides (exact paths and glob patterns)
+    "/Users/alice/Code/my-project": "my-custom-session",
+    "~/Code/project.worktrees/*": "my-project"
+  },
 
   // Message handling
   "saveMessages": true,
@@ -222,6 +226,27 @@ Session strategy controls how Honcho maps your conversations to sessions. Change
 | `per-directory` (default) | One session per project directory. Stable across restarts. | Most users — each project accumulates its own memory |
 | `git-branch` | Session name includes the current git branch. Switching branches switches sessions. | Feature-branch workflows where context per branch matters |
 | `chat-instance` | Each Claude Code chat gets its own session. No continuity between restarts. | Ephemeral usage, experimentation, or when you want a clean slate each time |
+
+#### Per-path overrides
+
+You can override session names for specific directories or glob patterns in the `sessions` field. This is useful for git worktree setups or monorepos where multiple directories should share a session.
+
+```jsonc
+"sessions": {
+  "~/Code/project": "my-project",
+  "~/Code/project.worktrees/*": "my-project"
+}
+```
+
+| Pattern | Matches |
+| --- | --- |
+| `/Users/alice/Code/foo` | Exact path only |
+| `~/Code/foo` | Same (tilde expands to home dir) |
+| `~/Code/*` | Any direct child of `~/Code/` |
+| `~/Code/**` | Any descendant at any depth under `~/Code/` |
+| `~/Code/work-*` | Directories starting with `work-` in `~/Code/` |
+
+Exact matches always take priority over globs. Among globs, the most specific pattern (longest literal prefix before the first wildcard) wins. Per-path overrides only apply to the `per-directory` strategy.
 
 ### Observation Mode
 
