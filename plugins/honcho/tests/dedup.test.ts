@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   dedupKey,
   filterRepeats,
@@ -6,7 +9,13 @@ import {
   DEDUP_WINDOW_TURNS,
   DEDUP_FLOOR,
 } from "../src/hooks/user-prompt";
-import { pruneLedger, DEDUP_LEDGER_RETAIN_TURNS, type DedupLedger } from "../src/state";
+import {
+  pruneLedger,
+  loadDedupLedger,
+  clearSessionFiles,
+  DEDUP_LEDGER_RETAIN_TURNS,
+  type DedupLedger,
+} from "../src/state";
 import type { InjectionConfig } from "../src/config";
 
 const ledger = (turn: number, seen: Record<string, number> = {}): DedupLedger => ({ turn, seen });
@@ -154,6 +163,52 @@ describe("a non-numeric turn stamp would suppress a conclusion permanently", () 
     const ok = ledger(1, { [dedupKey("a", "u")]: 1 });
     ok.turn = 1 + DEDUP_WINDOW_TURNS + 1;
     expect(filterRepeats(["a", "fresh"], ok, "u").kept).toEqual(["a", "fresh"]);
+  });
+
+  /**
+   * The tests above hand a malformed ledger straight to filterRepeats, so they
+   * pin the CONSEQUENCE but would stay green if the loader's validation were
+   * deleted. These exercise loadDedupLedger against a PERSISTED bad value, so
+   * removing that guard fails here.
+   *
+   * These touch the real ~/.honcho: state.ts resolves paths through
+   * `homedir()`, and Bun reads that from the passwd entry while ignoring
+   * process.env.HOME, so the directory cannot be redirected from a test. The
+   * fixture id is namespaced so it can never collide with a live Claude Code
+   * session_id (a UUID), and every case removes its own file in a finally.
+   */
+  const FIXTURE = "pr104-loader-validation-fixture";
+
+  function withPersistedLedger(raw: unknown, assert: (loaded: DedupLedger) => void): void {
+    mkdirSync(join(homedir(), ".honcho"), { recursive: true });
+    const path = join(homedir(), ".honcho", `dedup-${FIXTURE}.json`);
+    try {
+      writeFileSync(path, JSON.stringify(raw));
+      assert(loadDedupLedger(FIXTURE));
+    } finally {
+      clearSessionFiles(FIXTURE);
+      expect(existsSync(path)).toBe(false);
+    }
+  }
+
+  test("loadDedupLedger discards a persisted non-numeric stamp", () => {
+    withPersistedLedger({ turn: 5, seen: { "u:x": "abc" } }, (loaded) => {
+      expect(loaded.seen).toEqual({});
+      expect(loaded.turn).toBe(5); // a valid turn survives; only `seen` is rejected
+    });
+  });
+
+  test("loadDedupLedger discards a persisted array seen map", () => {
+    withPersistedLedger({ turn: 3, seen: [1, 2, 3] }, (loaded) => {
+      expect(loaded.seen).toEqual({});
+    });
+  });
+
+  test("loadDedupLedger round-trips a valid numeric seen map", () => {
+    withPersistedLedger({ turn: 4, seen: { "u:x": 2 } }, (loaded) => {
+      expect(loaded.seen).toEqual({ "u:x": 2 });
+      expect(loaded.turn).toBe(4);
+    });
   });
 });
 
