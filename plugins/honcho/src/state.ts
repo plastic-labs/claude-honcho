@@ -27,6 +27,11 @@ function sessionFile(sessionId?: string): string {
 // phase change (several times per turn), so a ledger stored there would be
 // clobbered constantly. Same directory, same session_id keying, and
 // clearSessionFiles() cleans it up with the rest.
+/**
+ * Path to a session's dedup ledger.
+ *
+ * @param sessionId - Session key; omitted yields the shared `dedup.json`.
+ */
 function dedupFile(sessionId?: string): string {
   return join(DIR, sessionId ? `dedup-${sessionId}.json` : "dedup.json");
 }
@@ -98,6 +103,16 @@ function isValidSeenMap(seen: unknown): seen is Record<string, number> {
   );
 }
 
+/**
+ * Read this session's dedup ledger from disk.
+ *
+ * Never throws: a missing, unreadable, or corrupt ledger yields a clean
+ * `{ turn: 0, seen: {} }`. Losing a ledger costs at most one turn of repeated
+ * conclusions, so failing open is strictly better than failing the hook.
+ *
+ * @param sessionId - Session key; omitted falls back to the shared file.
+ * @returns A validated ledger, with any corrupt `seen` map discarded.
+ */
 export function loadDedupLedger(sessionId?: string): DedupLedger {
   try {
     const raw = JSON.parse(readFileSync(dedupFile(sessionId), "utf-8"));
@@ -116,6 +131,15 @@ export function loadDedupLedger(sessionId?: string): DedupLedger {
   }
 }
 
+/**
+ * Persist the ledger, pruned to {@link DEDUP_LEDGER_RETAIN_TURNS}.
+ *
+ * Best-effort: a failed write is swallowed, because the only consequence is
+ * that the next turn may re-inject conclusions it already showed.
+ *
+ * @param ledger - Ledger to write; pruned before serialization.
+ * @param sessionId - Session key; omitted falls back to the shared file.
+ */
 export function saveDedupLedger(ledger: DedupLedger, sessionId?: string): void {
   try {
     writeFileSync(dedupFile(sessionId), JSON.stringify(pruneLedger(ledger)));
@@ -124,7 +148,15 @@ export function saveDedupLedger(ledger: DedupLedger, sessionId?: string): void {
   }
 }
 
-// Clean up this window's files when its session ends, so they don't accumulate.
+/**
+ * Delete this window's per-session files when its session ends, so they don't
+ * accumulate: the state, session, and dedup-ledger files.
+ *
+ * A missing file is not an error. Without a `sessionId` there is nothing
+ * session-scoped to remove, so this is a no-op.
+ *
+ * @param sessionId - Session whose files should be removed.
+ */
 export function clearSessionFiles(sessionId?: string): void {
   if (!sessionId) return;
   for (const f of [stateFile(sessionId), sessionFile(sessionId), dedupFile(sessionId)]) {
