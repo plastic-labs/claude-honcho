@@ -107,7 +107,11 @@ function redactPemBlocks(input: string): string {
       `-----BEGIN PRIVATE KEY----- ${REDACTED} -----END PRIVATE KEY-----`,
     )
     .replace(
-      /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?![\s\S]*?-----END)[\s\S]*/g,
+      // The lookahead must name the private-key terminator, not a bare
+      // `-----END`: in a PEM bundle the key is routinely followed by
+      // `-----END CERTIFICATE-----`, which would otherwise satisfy the
+      // lookahead and leave the key material untouched by both passes.
+      /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?![\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----)[\s\S]*/g,
       `-----BEGIN PRIVATE KEY----- ${REDACTED}`,
     );
 }

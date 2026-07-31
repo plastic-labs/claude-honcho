@@ -173,6 +173,17 @@ describe("redactSecrets -- secret shapes", () => {
       keeps: ["PRIVATE KEY"],
     },
     {
+      // Regression, upstream PR #99 review: in a PEM bundle the key is routinely
+      // followed by `-----END CERTIFICATE-----`. The first pass needs an
+      // `END ... PRIVATE KEY` terminator and skips it; if the fallback's
+      // lookahead only checks for a bare `-----END`, that certificate
+      // terminator satisfies it and the key material survives verbatim.
+      name: "private key followed by an unrelated certificate terminator",
+      input: `-----BEGIN RSA PRIVATE KEY-----\nfakekeymaterialnotreal0000\n-----END CERTIFICATE-----`,
+      gone: ["fakekeymaterialnotreal0000"],
+      keeps: ["PRIVATE KEY"],
+    },
+    {
       name: "--password flag, space form",
       input: `mycli login --password ${FAKE.pw} --host db.example.com`,
       gone: [FAKE.pw],
@@ -320,6 +331,25 @@ describe("every Bash sub-branch redacts a secret sitting past the truncation poi
   for (const b of branches) {
     test(b.name, () => {
       assertGone(formatToolSummary("Bash", { command: b.command }, {}), b.secret);
+      // The assertion above passes on truncation alone — every secret here sits
+      // past the 100-char cut, so it would still hold if the branch stopped
+      // redacting. These two pin the actual contract: the pattern is covered,
+      // and redaction runs BEFORE truncation rather than being masked by it.
+      const redacted = redactSecrets(b.command);
+      assertGone(redacted, b.secret);
+      expect(redacted).toContain(REDACTED);
+    });
+  }
+
+  // Same six branches with the secret moved in front of the truncation point,
+  // where truncation cannot hide it. If redaction is removed from any branch,
+  // exactly these fail.
+  for (const b of branches) {
+    test(`${b.name} — secret before the truncation point`, () => {
+      const early = b.command.replace(` ${pad}`, "").replace(`${pad} `, "").replace(pad, "");
+      expect(early).toContain(b.secret);
+      expect(early.indexOf(b.secret)).toBeLessThan(100);
+      assertGone(formatToolSummary("Bash", { command: early }, {}), b.secret);
     });
   }
 });
