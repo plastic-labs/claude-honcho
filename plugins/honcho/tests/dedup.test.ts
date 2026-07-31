@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
   dedupKey,
   filterRepeats,
@@ -180,11 +180,27 @@ const injection = (showContents: string[]): InjectionConfig =>
 
 const repr = (lines: string[]) => ({ representation: lines.join("\n") });
 
+/**
+ * Capture the additionalContext payload emitted on stdout.
+ *
+ * Only lines that actually carry `hookSpecificOutput.additionalContext` count.
+ * The hook can emit more than one line per turn (a systemMessage-only line, for
+ * one), and an unconditional assignment would let a later non-payload line
+ * clobber the real capture with "". Non-JSON lines are ignored rather than
+ * thrown on, so this stays correct if anything else ever writes to stdout.
+ */
 function captureAdditionalContext(fn: () => void): string {
   const original = console.log;
   let captured = "";
   console.log = (line: string) => {
-    captured = JSON.parse(line).hookSpecificOutput?.additionalContext ?? "";
+    let parsed: any;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return; // not our payload
+    }
+    const ctx = parsed?.hookSpecificOutput?.additionalContext;
+    if (typeof ctx === "string") captured = ctx;
   };
   try {
     fn();
@@ -198,14 +214,6 @@ describe("emitPerTurn dedup applied to additionalContext", () => {
   const config = { peerName: "tester", aiPeer: "assistant" };
   const conclusions = ["Prefers concise answers", "Prefers a conversational tone", "Wants structure per-context", "Uses bun"];
 
-  let originalLevel: string | undefined;
-  beforeEach(() => {
-    originalLevel = process.env.HONCHO_LOG_LEVEL;
-  });
-  afterEach(() => {
-    if (originalLevel === undefined) delete process.env.HONCHO_LOG_LEVEL;
-    else process.env.HONCHO_LOG_LEVEL = originalLevel;
-  });
 
   test("a repeat turn produces a SMALLER but non-empty payload", () => {
     const l = ledger(0);
