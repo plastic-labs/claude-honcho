@@ -325,12 +325,20 @@ export async function handleUserPrompt(): Promise<void> {
   // PERSIST what was actually emitted. The save has to sit between emit and
   // process.exit — process.exit is immediate, so anything deferred past it
   // never lands.
-  const ledger = loadDedupLedger(hookInput.session_id);
+  // Key the ledger off `instanceId`, not `hookInput.session_id`: session_id is
+  // optional here (line ~244 already falls back to getInstanceIdForCwd), and
+  // with no id the ledger collapses to one shared global dedup.json. Two
+  // concurrent sessions would then share a turn counter and a `seen` map and
+  // suppress each other's conclusions — losing session isolation exactly when
+  // it matters — and clearSessionFiles early-returns without a sessionId, so
+  // that file would never be cleaned up either.
+  const dedupId = instanceId || undefined;
+  const ledger = loadDedupLedger(dedupId);
   ledger.turn += 1;
 
   emitPerTurn(config, injection, userCtx, assistantCtxResult?.context ?? null, sessionCtx, dialectic, sessionLink, ledger);
 
-  saveDedupLedger(ledger, hookInput.session_id);
+  saveDedupLedger(ledger, dedupId);
   process.exit(0);
 }
 

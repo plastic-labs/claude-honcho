@@ -59,8 +59,9 @@ describe("filterRepeats", () => {
     const l = ledger(1);
     filterRepeats(["a"], l, "u");
 
-    // Still inside the window: suppressed (via the floor, since it is the only
-    // candidate — see the floor tests below).
+    // Still inside the window, so "a" is suppressed BY THE WINDOW. "fresh" is a
+    // new candidate and keeps the result non-empty, so the floor is not
+    // involved here — see the floor tests below for that path.
     l.turn = 1 + DEDUP_WINDOW_TURNS;
     expect(filterRepeats(["a", "fresh"], l, "u").kept).toEqual(["fresh"]);
 
@@ -130,6 +131,29 @@ describe("filterRepeats", () => {
       expect(suppressed).toBe(0);
       expect(floored).toBe(false);
     });
+  });
+});
+
+// Why loadDedupLedger validates `seen` values rather than only checking that
+// `seen` is an object. filterRepeats does arithmetic on the stamp, so a value
+// that will not coerce to a number poisons that entry permanently: the
+// comparison is NaN > WINDOW, which is false (a repeat), and only KEPT entries
+// are restamped — so a suppressed entry can never heal itself. No filesystem
+// here; this pins the consequence the loader's guard exists to prevent.
+describe("a non-numeric turn stamp would suppress a conclusion permanently", () => {
+  test("NaN-producing stamp reads as a repeat at any distance", () => {
+    const corrupt = { turn: 1, seen: { [dedupKey("a", "u")]: "abc" } } as unknown as DedupLedger;
+    for (const turn of [2, 50, 100_000]) {
+      corrupt.turn = turn;
+      // "fresh" keeps the result non-empty so the floor cannot mask the effect.
+      expect(filterRepeats(["a", "fresh"], corrupt, "u").kept).toEqual(["fresh"]);
+    }
+  });
+
+  test("a valid numeric stamp does age out, by contrast", () => {
+    const ok = ledger(1, { [dedupKey("a", "u")]: 1 });
+    ok.turn = 1 + DEDUP_WINDOW_TURNS + 1;
+    expect(filterRepeats(["a", "fresh"], ok, "u").kept).toEqual(["a", "fresh"]);
   });
 });
 
