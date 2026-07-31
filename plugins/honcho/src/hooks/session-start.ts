@@ -25,6 +25,19 @@ interface HookInput {
   workspace_roots?: string[];
 }
 
+// This hook runs synchronously, so these fetches block startup. Bound them
+// well under the 30s hook ceiling so a slow server degrades to an empty
+// injection instead of a hung session start.
+const CONTEXT_FETCH_TIMEOUT_MS = 10000;
+
+/** Resolve a promise with its value, or null if `ms` elapses or it rejects. */
+function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    p.catch(() => null),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
 export async function handleSessionStart(): Promise<void> {
   const config = loadConfig();
   if (!config) {
@@ -168,17 +181,20 @@ export async function handleSessionStart(): Promise<void> {
     const contextLabel = observationMode === "unified" ? "userPeer.context()" : "aiPeer.context(target=user)";
     const [userContextResult, summaryResult] = await Promise.allSettled([
       wantContext
-        ? (observationMode === "unified"
-            ? userPeer.context({ maxConclusions: 25, includeMostFrequent: true })
-            : aiPeer.context({ target: config.peerName, maxConclusions: 25, includeMostFrequent: true }))
+        ? raceTimeout(
+            observationMode === "unified"
+              ? userPeer.context({ maxConclusions: 25, includeMostFrequent: true })
+              : aiPeer.context({ target: config.peerName, maxConclusions: 25, includeMostFrequent: true }),
+            CONTEXT_FETCH_TIMEOUT_MS
+          )
         : Promise.resolve(null),
-      wantSummary ? session.summaries() : Promise.resolve(null),
+      wantSummary ? raceTimeout(session.summaries(), CONTEXT_FETCH_TIMEOUT_MS) : Promise.resolve(null),
     ]);
 
     const fetchDuration = Date.now() - fetchStart;
     const asyncResults = [
-      ...(wantContext ? [{ name: contextLabel, success: userContextResult.status === "fulfilled" }] : []),
-      ...(wantSummary ? [{ name: "session.summaries()", success: summaryResult.status === "fulfilled" }] : []),
+      ...(wantContext ? [{ name: contextLabel, success: userContextResult.status === "fulfilled" && userContextResult.value !== null }] : []),
+      ...(wantSummary ? [{ name: "session.summaries()", success: summaryResult.status === "fulfilled" && summaryResult.value !== null }] : []),
     ];
     const successCount = asyncResults.filter(r => r.success).length;
     logAsync("context-fetch", `Fetched ${successCount}/${asyncResults.length} in ${fetchDuration}ms`, asyncResults);
