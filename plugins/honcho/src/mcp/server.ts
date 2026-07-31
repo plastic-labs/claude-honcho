@@ -10,6 +10,7 @@ import {
   loadConfig,
   saveConfig,
   saveRootField,
+  coerceBoolean,
   getHonchoClientOptions,
   getSessionName,
   getConfigPath,
@@ -402,7 +403,7 @@ function handleSetConfig(args: Record<string, unknown>) {
 
     case "sessionPeerPrefix":
       previousValue = cfg.sessionPeerPrefix !== false;
-      cfg.sessionPeerPrefix = Boolean(value);
+      cfg.sessionPeerPrefix = coerceBoolean(value);
       // Clear persisted session names — they embed the old prefix
       cfg.sessions = {};
       break;
@@ -410,24 +411,24 @@ function handleSetConfig(args: Record<string, unknown>) {
 
     case "globalOverride":
       previousValue = cfg.globalOverride ?? false;
-      cfg.globalOverride = Boolean(value);
+      cfg.globalOverride = coerceBoolean(value);
       // globalOverride is a root-level flag — write to root (user-directed)
       saveRootField("globalOverride", cfg.globalOverride);
       break;
 
     case "enabled":
       previousValue = cfg.enabled;
-      cfg.enabled = Boolean(value);
+      cfg.enabled = coerceBoolean(value);
       break;
 
     case "logging":
       previousValue = cfg.logging;
-      cfg.logging = Boolean(value);
+      cfg.logging = coerceBoolean(value);
       break;
 
     case "saveMessages":
       previousValue = cfg.saveMessages;
-      cfg.saveMessages = Boolean(value);
+      cfg.saveMessages = coerceBoolean(value);
       break;
 
     case "messageUpload.maxUserTokens":
@@ -445,7 +446,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     case "messageUpload.summarizeAssistant":
       previousValue = cfg.messageUpload?.summarizeAssistant;
       if (!cfg.messageUpload) cfg.messageUpload = {};
-      cfg.messageUpload.summarizeAssistant = Boolean(value);
+      cfg.messageUpload.summarizeAssistant = coerceBoolean(value);
       break;
 
     case "contextRefresh.messageThreshold":
@@ -463,7 +464,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     case "contextRefresh.skipDialectic":
       previousValue = cfg.contextRefresh?.skipDialectic;
       if (!cfg.contextRefresh) cfg.contextRefresh = {};
-      cfg.contextRefresh.skipDialectic = Boolean(value);
+      cfg.contextRefresh.skipDialectic = coerceBoolean(value);
       break;
 
     case "reasoningLevel":
@@ -561,7 +562,7 @@ function handleSetConfig(args: Record<string, unknown>) {
 
     case "rememberTool":
       previousValue = cfg.rememberTool;
-      cfg.rememberTool = Boolean(value);
+      cfg.rememberTool = coerceBoolean(value);
       break;
 
     case "injection.searchQuerySource":
