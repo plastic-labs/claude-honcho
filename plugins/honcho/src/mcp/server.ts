@@ -873,6 +873,16 @@ export async function runMcpServer(): Promise<void> {
           },
         },
         {
+          name: "get_briefing",
+          description:
+            "Load the session briefing: the stored long summary of this session plus the user's peer card (identity/attribute profile). " +
+            "Call this once at the start of a session when the session-start directives ask for it, or any time you need to catch up on where the session left off.",
+          inputSchema: {
+            type: "object",
+            properties: {},
+          },
+        },
+        {
           name: "get_context",
           description: "Retrieve the full context object (representation + peer card) from Honcho for the current user. Scoped by observation mode.",
           inputSchema: {
@@ -1201,6 +1211,34 @@ export async function runMcpServer(): Promise<void> {
                 text: `Saved conclusion: ${conclusions[0]?.content || content}`,
               },
             ],
+          };
+        }
+
+        case "get_briefing": {
+          // Fetches at sessionStart "summary"/"peerCard" components
+          const [summariesResult, ctxResult] = await Promise.allSettled([
+            session.summaries(),
+            activePeer.context({
+              ...(contextTarget ? { target: contextTarget } : {}),
+              maxConclusions: 25,
+              includeMostFrequent: true,
+            }),
+          ]);
+
+          const summary = summariesResult.status === "fulfilled"
+            ? (summariesResult.value as any)?.longSummary?.content?.trim()
+            : null;
+          const card: string[] = ctxResult.status === "fulfilled"
+            ? ((ctxResult.value as any)?.peerCard ?? []).filter((item: string) => item?.trim())
+            : [];
+
+          const parts: string[] = [];
+          if (summary) parts.push(`## Session summary\n${summary}`);
+          if (card.length) parts.push(`## Peer card (${card.length} items)\n${card.map((item) => `- ${item}`).join("\n")}`);
+          if (parts.length === 0) parts.push("No briefing available yet — no stored session summary or peer card.");
+
+          return {
+            content: [{ type: "text", text: parts.join("\n\n") }],
           };
         }
 

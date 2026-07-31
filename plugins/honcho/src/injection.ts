@@ -94,6 +94,13 @@ export function renderSessionStart(
         }
         break;
       }
+      case "briefing": {
+        parts.push(
+          `Session briefing: the session summary and user profile were NOT injected — load them by calling the honcho \`get_briefing\` tool as the first action of your first response, before answering. Skip the call only if the user's first prompt explicitly says not to.`
+        );
+        labels.push("briefing nudge");
+        break;
+      }
       case "peerCard": {
         const card = (data.peerCard ?? []).filter((item) => item?.trim());
         if (card.length) {
