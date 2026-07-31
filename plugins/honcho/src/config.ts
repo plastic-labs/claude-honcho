@@ -157,7 +157,10 @@ const HONCHO_BASE_URLS = {
 // Host Detection
 // ============================================
 
-export type HonchoHost = "cursor" | "claude_code" | "obsidian";
+// Known hosts get autocompletion; the `string & {}` intersection allows
+// arbitrary custom host names (e.g. "claude_code_reviewer") via HONCHO_HOST
+// without breaking the union's autocomplete for the three known values.
+export type HonchoHost = "cursor" | "claude_code" | "obsidian" | (string & {});
 
 export type ObservationMode = "unified" | "directional";
 
@@ -211,9 +214,11 @@ export function getDetectedHost(): HonchoHost {
 }
 
 export function detectHost(stdinInput?: Record<string, unknown>): HonchoHost {
-  // Explicit env var override (used by install scripts and external tooling)
+  // Explicit env var override (used by install scripts and external tooling).
+  // Accept any non-empty string so users can define custom host blocks
+  // (e.g. "claude_code_reviewer") in ~/.honcho/config.json.
   const envHost = process.env.HONCHO_HOST;
-  if (envHost === "cursor" || envHost === "claude_code" || envHost === "obsidian") return envHost;
+  if (envHost && envHost.trim()) return envHost.trim();
 
   if (stdinInput?.cursor_version) return "cursor";
   // Cursor sets CURSOR_PROJECT_DIR for child processes (incl. Claude Code inside Cursor)
@@ -221,24 +226,32 @@ export function detectHost(stdinInput?: Record<string, unknown>): HonchoHost {
   return "claude_code";
 }
 
-const DEFAULT_WORKSPACE: Record<HonchoHost, string> = {
+const DEFAULT_WORKSPACE: Record<string, string> = {
   "cursor": "cursor",
   "claude_code": "claude_code",
   "obsidian": "obsidian",
 };
 
-const DEFAULT_AI_PEER: Record<HonchoHost, string> = {
+const DEFAULT_AI_PEER: Record<string, string> = {
   "cursor": "cursor",
   "claude_code": "claude",
   "obsidian": "honcho",
 };
 
+function defaultWorkspace(host: string): string {
+  return DEFAULT_WORKSPACE[host] ?? host;
+}
+
+function defaultAiPeer(host: string): string {
+  return DEFAULT_AI_PEER[host] ?? host;
+}
+
 export function getDefaultWorkspace(host?: HonchoHost): string {
-  return DEFAULT_WORKSPACE[host ?? getDetectedHost()];
+  return defaultWorkspace(host ?? getDetectedHost());
 }
 
 export function getDefaultAiPeer(host?: HonchoHost): string {
-  return DEFAULT_AI_PEER[host ?? getDetectedHost()];
+  return defaultAiPeer(host ?? getDetectedHost());
 }
 
 // MCP tool arguments may arrive as strings; Boolean("false") is true.
@@ -459,22 +472,25 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
 
   if (raw.globalOverride === true) {
     // Global override: flat fields apply to ALL hosts
-    workspace = raw.workspace ?? DEFAULT_WORKSPACE[host];
-    aiPeer = raw.aiPeer ?? hostBlock?.aiPeer ?? DEFAULT_AI_PEER[host];
+    workspace = raw.workspace ?? defaultWorkspace(host);
+    aiPeer = raw.aiPeer ?? hostBlock?.aiPeer ?? defaultAiPeer(host);
   } else if (hostBlock) {
     // Host-specific block takes precedence
-    workspace = hostBlock.workspace ?? DEFAULT_WORKSPACE[host];
-    aiPeer = hostBlock.aiPeer ?? DEFAULT_AI_PEER[host];
+    workspace = hostBlock.workspace ?? defaultWorkspace(host);
+    aiPeer = hostBlock.aiPeer ?? defaultAiPeer(host);
   } else {
     // Legacy flat-field fallback for configs written before hosts block.
     // Env var is respected here (matching main-branch behavior) so it gets
     // captured into the hosts block on first saveConfig(), after which the
     // env var becomes redundant and is safely ignored.
-    workspace = process.env.HONCHO_WORKSPACE ?? raw.workspace ?? DEFAULT_WORKSPACE[host];
+    workspace = process.env.HONCHO_WORKSPACE ?? raw.workspace ?? defaultWorkspace(host);
     if (host === "cursor") {
-      aiPeer = raw.cursorPeer ?? DEFAULT_AI_PEER["cursor"];
+      aiPeer = raw.cursorPeer ?? defaultAiPeer("cursor");
+    } else if (host === "obsidian") {
+      aiPeer = raw.claudePeer ?? defaultAiPeer("obsidian");
     } else {
-      aiPeer = raw.claudePeer ?? DEFAULT_AI_PEER["claude_code"];
+      // For claude_code and custom hosts, use the host's default aiPeer.
+      aiPeer = raw.claudePeer ?? defaultAiPeer(host);
     }
   }
 
@@ -521,7 +537,7 @@ export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null 
 
   const resolvedHost = host ?? getDetectedHost();
   const peerName = process.env.HONCHO_PEER_NAME || process.env.USER || process.env.USERNAME || "user";
-  const workspace = process.env.HONCHO_WORKSPACE || DEFAULT_WORKSPACE[resolvedHost];
+  const workspace = process.env.HONCHO_WORKSPACE || defaultWorkspace(resolvedHost);
   const hostPeerEnv = resolvedHost === "cursor"
     ? process.env.HONCHO_CURSOR_PEER
     : process.env.HONCHO_CLAUDE_PEER;
