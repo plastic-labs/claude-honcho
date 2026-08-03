@@ -1,7 +1,7 @@
 import { Honcho } from "@honcho-ai/sdk";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, getInjectionConfig, type InjectionConfig, type PerTurnComponent } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig, type InjectionConfig, type PerTurnComponent } from "../config.js";
 import {
   getMessageCount,
   incrementMessageCount,
@@ -151,7 +151,7 @@ export async function handleUserPrompt(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = getCachedStdin() ?? await Bun.stdin.text();
+    const input = getCachedStdin() ?? await readStdinText();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }

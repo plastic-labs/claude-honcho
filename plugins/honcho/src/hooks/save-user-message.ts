@@ -1,5 +1,5 @@
 import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
 import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { isHarnessInjected, isTerseReply } from "./user-prompt.js";
@@ -35,7 +35,7 @@ export async function handleSaveUserMessage(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = getCachedStdin() ?? await Bun.stdin.text();
+    const input = getCachedStdin() ?? await readStdinText();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }

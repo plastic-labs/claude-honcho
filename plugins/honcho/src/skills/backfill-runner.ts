@@ -28,6 +28,7 @@ import { parseTranscriptForBackfill, type ParsedMessage } from "./transcript-par
 import * as s from "../styles.js";
 import { homedir } from "os";
 import { join, basename } from "path";
+import { pathToFileURL } from "url";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "fs";
 
 interface Args {
@@ -296,8 +297,9 @@ async function run(): Promise<void> {
 }
 
 // Only auto-run when invoked directly; the guard lets other modules import
-// findTranscripts/groupIntoSessions without triggering an upload.
-if (import.meta.main) {
+// findTranscripts/groupIntoSessions without triggering an upload. URL
+// comparison instead of import.meta.main, which node lacks.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   run().catch((err) => {
     console.log(s.error(`Backfill failed: ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);

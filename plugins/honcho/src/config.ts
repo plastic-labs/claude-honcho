@@ -1,5 +1,6 @@
 import { homedir } from "os";
 import { join, basename } from "path";
+import { fileURLToPath } from "url";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { captureGitState } from "./git.js";
 import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
@@ -266,13 +267,20 @@ export function getCachedStdin(): string | null {
   return _stdinText;
 }
 
+/** Runtime-agnostic stdin read (hooks run under bun in dev, node when bundled). */
+export async function readStdinText(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf-8");
+}
+
 /**
  * Shared hook entry point initialization.
  * Reads stdin once, caches it, detects host, and exits early for unsupported hosts.
  * Must be called at the top of every hook entry point before the handler.
  */
 export async function initHook(): Promise<void> {
-  const stdinText = await Bun.stdin.text();
+  const stdinText = await readStdinText();
   cacheStdin(stdinText);
   let input: Record<string, unknown> = {};
   try { input = JSON.parse(stdinText || "{}"); } catch { process.exit(0); }
@@ -416,15 +424,22 @@ export function configExists(): boolean {
  * located, so callers never advertise a stale hardcoded number.
  */
 export function getPluginVersion(): string {
+  // CLAUDE_PLUGIN_ROOT when the host sets it; otherwise one hop up from this
+  // module, which holds in both layouts (src/ in dev, the dist/ chunk bundled).
   const root = process.env.CLAUDE_PLUGIN_ROOT;
-  if (!root) return "unknown";
-  try {
-    const raw = readFileSync(join(root, ".claude-plugin", "plugin.json"), "utf-8");
-    const version = (JSON.parse(raw) as { version?: unknown }).version;
-    return typeof version === "string" && version ? version : "unknown";
-  } catch {
-    return "unknown";
+  const candidates = [
+    ...(root ? [join(root, ".claude-plugin", "plugin.json")] : []),
+    fileURLToPath(new URL("../.claude-plugin/plugin.json", import.meta.url)),
+  ];
+  for (const manifest of candidates) {
+    try {
+      const version = (JSON.parse(readFileSync(manifest, "utf-8")) as { version?: unknown }).version;
+      if (typeof version === "string" && version) return version;
+    } catch {
+      // Try the next candidate
+    }
   }
+  return "unknown";
 }
 
 /**
