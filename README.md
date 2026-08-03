@@ -384,7 +384,7 @@ Environment variables work for initial bootstrap (before a config file exists). 
 | `HONCHO_PEER_NAME`     | No       | `$USER`       | Your identity in the memory system                                |
 | `HONCHO_WORKSPACE`     | No       | `claude_code` | Workspace name (used only when no config file exists)             |
 | `HONCHO_AI_PEER`       | No       | `claude`      | AI peer name                                                      |
-| `HONCHO_HOST`          | No       | auto-detected | Force host detection: `claude_code`, `cursor`, or `obsidian`      |
+| `HONCHO_HOST`          | No       | auto-detected | Force host detection: `claude_code`, `cursor`, `obsidian`, or any custom host block name |
 | `HONCHO_ENDPOINT`      | No       | `production`  | `production`, `local`, or a full URL                              |
 | `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
 | `HONCHO_SAVE_MESSAGES` | No       | `true`        | Set to `false` to stop saving messages                            |
