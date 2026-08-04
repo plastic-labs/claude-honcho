@@ -34,6 +34,7 @@ import {
   getObservationMode,
   getPluginVersion,
 } from "../config.js";
+import { validateRedactPattern } from "../redact.js";
 import { honchoSessionUrl } from "../styles.js";
 import {
   getLastActiveCwd,
@@ -118,7 +119,7 @@ function handleGetConfig(cwd: string) {
     reasoningLevel: cfg.reasoningLevel ?? "medium",
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
-    localContext: cfg.localContext ?? {},
+    redactPatterns: cfg.redactPatterns ?? [],
     injection: cfg.injection ?? {},
     rememberTool: cfg.rememberTool === true,
     enabled: cfg.enabled !== false,
@@ -499,11 +500,27 @@ function handleSetConfig(args: Record<string, unknown>) {
       break;
     }
 
-    case "localContext.maxEntries":
-      previousValue = cfg.localContext?.maxEntries;
-      if (!cfg.localContext) cfg.localContext = {};
-      cfg.localContext.maxEntries = Number(value);
+    case "redactPatterns": {
+      const arr = coerceStringArray(value);
+      if (!arr) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: "redactPatterns must be an array of regex strings" }, null, 2) }],
+          isError: true,
+        };
+      }
+      for (const source of arr) {
+        const err = validateRedactPattern(source);
+        if (err) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ success: false, error: err }, null, 2) }],
+            isError: true,
+          };
+        }
+      }
+      previousValue = cfg.redactPatterns;
+      cfg.redactPatterns = arr;
       break;
+    }
 
     case "injection.sessionStart": {
       const arr = validateComponentArray(value, SESSION_START_COMPONENTS, field);
@@ -663,7 +680,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     reasoningLevel: cfg.reasoningLevel ?? "medium",
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
-    localContext: cfg.localContext ?? {},
+    redactPatterns: cfg.redactPatterns ?? [],
     injection: cfg.injection ?? {},
     rememberTool: cfg.rememberTool === true,
     enabled: cfg.enabled !== false,
@@ -948,7 +965,7 @@ export async function runMcpServer(): Promise<void> {
                   "contextRefresh.skipDialectic",
                   "reasoningLevel",
                   "observationMode",
-                  "localContext.maxEntries",
+                  "redactPatterns",
                   "injection.sessionStart",
                   "injection.perTurn",
                   "injection.showContents",
@@ -965,7 +982,7 @@ export async function runMcpServer(): Promise<void> {
                 ],
               },
               value: {
-                description: "New value. For sessions.set: {path, name}. For sessions.remove: {path}. For injection.sessionStart / injection.perTurn / injection.showContents: a string array of component names (e.g. [\"summary\",\"peerCard\"]).",
+                description: "New value. For sessions.set: {path, name}. For sessions.remove: {path}. For injection.sessionStart / injection.perTurn / injection.showContents: a string array of component names (e.g. [\"summary\",\"peerCard\"]). For redactPatterns: a string array of regexes redacted from tool summaries in addition to the built-in secret patterns.",
               },
               confirm: {
                 type: "boolean",

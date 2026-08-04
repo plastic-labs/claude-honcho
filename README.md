@@ -206,7 +206,7 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
   },
 
   // Miscellaneous
-  "localContext": { "maxEntries": 50 }, // Max entries in claude-context.md
+  "redactPatterns": [],               // Extra regexes redacted from tool summaries (additive to built-in secret patterns)
   "enabled": true,
   "logging": true,
 
