@@ -219,7 +219,6 @@ export async function handlePostToolUse(): Promise<void> {
     process.exit(0);
   }
 
-  // Redact before fan-out so every sink (UI, log, upload) gets the safe copy.
   const summary = redactSecrets(
     formatToolSummary(toolName, toolInput, toolResponse),
     config.redactPatterns

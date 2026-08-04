@@ -1,9 +1,7 @@
 /**
  * Best-effort secret redaction for tool-capture summaries.
- * Applied once where the summary string is created (post-tool-use), so every
- * sink — UI systemMessage, activity log, Honcho upload — gets the safe copy.
- * Regex redaction is harm reduction, not a guarantee: novel secret formats
- * pass through. Users extend the defaults via the `redactPatterns` config.
+ * Regex-based, so novel secret formats pass through; users extend the
+ * defaults via the `redactPatterns` config.
  */
 
 interface RedactRule {
@@ -32,9 +30,9 @@ const DEFAULT_RULES: RedactRule[] = [
     pattern: /([a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:)[^@\s]+@/gi,
     replacement: "$1***@",
   },
-  // Well-known token shapes: AWS, OpenAI/Anthropic-style sk-, GitHub, Slack, GitLab, npm
+  // Well-known token shapes: Honcho, AWS, OpenAI/Anthropic-style sk-, GitHub, Slack, GitLab, npm
   {
-    pattern: /\b(?:AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{16,}|(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36})\b/g,
+    pattern: /\b(?:hch[_-]?[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{16,}|(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36})\b/g,
     replacement: "***",
   },
 ];

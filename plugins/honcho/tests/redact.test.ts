@@ -33,6 +33,7 @@ describe("redactSecrets defaults", () => {
   });
 
   test("well-known token shapes", () => {
+    expect(redactSecrets('hch_abcdefghijklmnop1234 in output')).toBe('*** in output');
     expect(redactSecrets('AKIAIOSFODNN7EXAMPLE in output')).toBe('*** in output');
     expect(redactSecrets('gh auth ghp_abcdefghijklmnopqrstuvwx')).toBe('gh auth ***');
     expect(redactSecrets('key sk-ant-api03-abcdefghijklmnop')).toBe('key ***');
