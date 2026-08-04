@@ -399,8 +399,7 @@ function handleSetConfig(args: Record<string, unknown>) {
       const prevStrategy = cfg.sessionStrategy ?? "per-directory";
       previousValue = prevStrategy;
       cfg.sessionStrategy = String(value) as SessionStrategy;
-      // Session overrides are kept: they only apply under per-directory,
-      // so they go dormant on other strategies rather than becoming stale.
+      // Session overrides are kept: they only apply under per-directory (useless for chat-instance, and git-branch needs a different solution)
       if (String(value) !== prevStrategy && String(value) !== "per-directory" && Object.keys(cfg.sessions ?? {}).length > 0) {
         warnings.push(`${Object.keys(cfg.sessions ?? {}).length} session override(s) kept but inactive: overrides only apply under the per-directory strategy.`);
       }
