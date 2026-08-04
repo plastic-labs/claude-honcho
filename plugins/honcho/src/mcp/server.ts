@@ -790,7 +790,7 @@ export async function runMcpServer(): Promise<void> {
         ...(rememberEnabled ? [REMEMBER_TOOL] : []),
         {
           name: "search",
-          description: "Search across messages using semantic search. Defaults to the current session; use scope='workspace' to search across all sessions.",
+          description: "Semantic search across messages and saved conclusions. Messages default to the current session; use scope='workspace' to search across all sessions. Conclusions are always searched workspace-wide.",
           inputSchema: {
             type: "object",
             properties: {
@@ -866,8 +866,27 @@ export async function runMcpServer(): Promise<void> {
           },
         },
         {
+          name: "query_conclusions",
+          description: "Semantically search conclusions Honcho has saved about the user. Returns IDs usable with delete_conclusion — much faster than paging list_conclusions when looking for something specific.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                description: "Search query",
+              },
+              top_k: {
+                type: "number",
+                description: "Max results (default 10)",
+                default: 10,
+              },
+            },
+            required: ["query"],
+          },
+        },
+        {
           name: "delete_conclusion",
-          description: "Delete a conclusion from Honcho's memory by ID. Use list_conclusions to find the ID first.",
+          description: "Delete a conclusion from Honcho's memory by ID. Use query_conclusions or list_conclusions to find the ID first.",
           inputSchema: {
             type: "object",
             properties: {
@@ -996,7 +1015,7 @@ export async function runMcpServer(): Promise<void> {
 
     // ── Peer-only tools (no session needed) ──
 
-    if (name === "list_conclusions" || name === "delete_conclusion") {
+    if (name === "list_conclusions" || name === "delete_conclusion" || name === "query_conclusions") {
       try {
         const observationMode = getObservationMode(config);
         // unified: (observer=user, observed=user); directional: (observer=aiPeer, observed=user)
@@ -1019,6 +1038,20 @@ export async function runMcpServer(): Promise<void> {
               type: "text",
               text: JSON.stringify({ items, total: result.total, page: result.page, pages: result.pages }, null, 2),
             }],
+          };
+        }
+
+        if (name === "query_conclusions") {
+          const query = args?.query as string;
+          const topK = Math.min((args?.top_k as number) ?? 10, 50);
+          const conclusions = await conclusionScope.query(query, topK);
+          const items = conclusions.map((c) => ({
+            id: c.id,
+            content: c.content,
+            createdAt: c.createdAt,
+          }));
+          return {
+            content: [{ type: "text", text: JSON.stringify(items, null, 2) }],
           };
         }
 
@@ -1057,16 +1090,25 @@ export async function runMcpServer(): Promise<void> {
           const query = args?.query as string;
           const limit = (args?.limit as number) ?? 10;
           const scope = (args?.scope as string) ?? "session";
+          const [messages, conclusions] = await Promise.all([
+            scope === "workspace"
+              ? honcho.search(query, { limit })
+              : session.search(query, { limit }),
+            activePeer.conclusionsOf(config.peerName).query(query, limit).catch(() => []),
+          ]);
 
-          const messages = scope === "workspace"
-            ? await honcho.search(query, { limit })
-            : await session.search(query, { limit });
-
-          const results = messages.map((msg: any) => ({
-            content: msg.content,
-            peerId: msg.peer,
-            createdAt: msg.createdAt || msg.created_at,
-          }));
+          const results = {
+            messages: messages.map((msg: any) => ({
+              content: msg.content,
+              peerId: msg.peer,
+              createdAt: msg.createdAt || msg.created_at,
+            })),
+            conclusions: conclusions.map((c) => ({
+              id: c.id,
+              content: c.content,
+              createdAt: c.createdAt,
+            })),
+          };
 
           return {
             content: [
