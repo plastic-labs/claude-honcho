@@ -1090,10 +1090,6 @@ export async function runMcpServer(): Promise<void> {
           const query = args?.query as string;
           const limit = (args?.limit as number) ?? 10;
           const scope = (args?.scope as string) ?? "session";
-
-          // Conclusions are queried alongside messages (issue #95: conclusions
-          // saved via create_conclusion were unreachable through search).
-          // Degrades to messages-only if the conclusion query fails.
           const [messages, conclusions] = await Promise.all([
             scope === "workspace"
               ? honcho.search(query, { limit })
