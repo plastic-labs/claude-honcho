@@ -1055,10 +1055,10 @@ export async function runMcpServer(): Promise<void> {
             ? await honcho.search(query, { limit })
             : await session.search(query, { limit });
 
-          const results = messages.map((msg: any) => ({
+          const results = messages.map((msg) => ({
             content: msg.content,
-            peerId: msg.peer,
-            createdAt: msg.createdAt || msg.created_at,
+            peerId: msg.peerId,
+            createdAt: msg.createdAt,
           }));
 
           return {

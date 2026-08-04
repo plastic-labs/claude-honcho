@@ -15,7 +15,7 @@
   "author": "Plastic Labs",
   "license": "MIT",
   "dependencies": {
-    "@honcho-ai/sdk": "^2.1.0",
+    "@honcho-ai/sdk": "^2.1.1",
     "@modelcontextprotocol/sdk": "^1.26.0"
   },
   "devDependencies": {
