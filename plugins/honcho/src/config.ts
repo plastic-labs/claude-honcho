@@ -727,9 +727,10 @@ export function getClaudeSettingsDir(): string {
   return join(homedir(), ".claude");
 }
 
-/** If dir is the root of a linked git worktree (`.git` is a pointer file, not a
- *  directory), return the main repository's root by parsing the `gitdir:` line
- *  (…/main-repo/.git/worktrees/<name>). Returns null for regular repositories. */
+/** Main repository root for a linked worktree, parsed from dir's `.git`
+ *  pointer file. Handles standard (`<repo>/.git/worktrees/<n>`) and bare-hub
+ *  (`<hub>.git/worktrees/<n>`) layouts; null for regular repositories and
+ *  anything else (submodules, separate-git-dir). */
 export function resolveWorktreeMainRoot(dir: string): string | null {
   try {
     const gitPath = join(dir, ".git");
@@ -737,21 +738,25 @@ export function resolveWorktreeMainRoot(dir: string): string | null {
     const match = readFileSync(gitPath, "utf-8").match(/^gitdir:\s*(.+?)\s*$/m);
     if (!match) return null;
     const gitdir = resolve(dir, match[1]);
-    const marker = join("/", ".git", "worktrees") + "/";
-    const idx = gitdir.lastIndexOf(marker);
+    const idx = gitdir.lastIndexOf(`${sep}worktrees${sep}`);
     if (idx === -1) return null;
-    return gitdir.slice(0, idx);
+    const gitContainer = gitdir.slice(0, idx);
+    if (basename(gitContainer) === ".git") return dirname(gitContainer);
+    if (gitContainer.endsWith(".git")) return gitContainer;
+    return null;
   } catch {
     return null;
   }
 }
 
-/** Main repository root when cwd is inside a linked git worktree, else null.
- *  Walks up from cwd to the nearest `.git` entry before resolving. */
+// Bound on the .git lookup walk; cwds nested deeper keep per-directory naming.
+const MAX_GIT_WALK_UP = 12;
+
+/** Main repository root when cwd is inside a linked git worktree, else null. */
 export function worktreeMainRootFor(cwd: string): string | null {
   try {
     let dir = resolve(cwd);
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < MAX_GIT_WALK_UP; i++) {
       if (existsSync(join(dir, ".git"))) return resolveWorktreeMainRoot(dir);
       const parent = dirname(dir);
       if (parent === dir) break;
@@ -763,14 +768,13 @@ export function worktreeMainRootFor(cwd: string): string | null {
   return null;
 }
 
-export function getSessionForPath(cwd: string): string | null {
+export function getSessionForPath(cwd: string, mainRoot?: string | null): string | null {
   const config = loadConfig();
   if (!config?.sessions) return null;
   if (config.sessions[cwd]) return config.sessions[cwd];
-  // Linked worktree with no mapping of its own: fall through to the main
-  // repository's mapping so all worktrees of a project share one session.
-  const mainRoot = worktreeMainRootFor(cwd);
-  if (mainRoot && config.sessions[mainRoot]) return config.sessions[mainRoot];
+  // Worktrees without a mapping of their own share the main repo's session.
+  const mr = mainRoot === undefined ? worktreeMainRootFor(cwd) : mainRoot;
+  if (mr && config.sessions[mr]) return config.sessions[mr];
   return null;
 }
 
@@ -812,11 +816,12 @@ export function deriveSessionName(
 export function getSessionName(cwd: string, instanceId?: string): string {
   const config = loadConfig();
   const strategy = config?.sessionStrategy ?? "per-directory";
+  const mainRoot = worktreeMainRootFor(cwd);
 
   // Manual overrides only apply to per-directory strategy.
   // For chat-instance and git-branch, the session name is always derived dynamically.
   if (strategy === "per-directory") {
-    const configuredSession = getSessionForPath(cwd);
+    const configuredSession = getSessionForPath(cwd, mainRoot);
     if (configuredSession) {
       return configuredSession;
     }
@@ -833,10 +838,9 @@ export function getSessionName(cwd: string, instanceId?: string): string {
     resolvedInstanceId = instanceId || getInstanceIdForCwd(cwd) || getClaudeInstanceId() || undefined;
   }
 
-  // Linked worktrees derive from the main repository's path so every worktree
-  // of a project shares one session; the branch (git-branch strategy) is still
-  // captured from the worktree's own checkout above.
-  return deriveSessionName(strategy, worktreeMainRootFor(cwd) ?? cwd, {
+  // Worktrees derive from the main repo's path; branch still comes from the
+  // worktree's own checkout above.
+  return deriveSessionName(strategy, mainRoot ?? cwd, {
     peerName: config?.peerName,
     sessionPeerPrefix: config?.sessionPeerPrefix,
     branch,

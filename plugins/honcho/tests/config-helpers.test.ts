@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { coerceBoolean } from "../src/config";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { coerceBoolean, resolveWorktreeMainRoot, worktreeMainRootFor } from "../src/config";
 
 describe("coerceBoolean", () => {
   test("passes real booleans through", () => {
@@ -29,11 +32,6 @@ describe("coerceBoolean", () => {
 });
 
 describe("worktree main-root resolution", () => {
-  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require("fs");
-  const { join } = require("path");
-  const { tmpdir } = require("os");
-  const { resolveWorktreeMainRoot, worktreeMainRootFor } = require("../src/config");
-
   const makeTmp = () => mkdtempSync(join(tmpdir(), "honcho-wt-"));
 
   test("linked worktree resolves to the main repository root", () => {
@@ -102,6 +100,31 @@ describe("worktree main-root resolution", () => {
       mkdirSync(wt, { recursive: true });
       writeFileSync(join(wt, ".git"), "gitdir: ../main-repo/.git/worktrees/wt\n");
       expect(resolveWorktreeMainRoot(wt)).toBe(main);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("bare-hub worktree (<hub>.git/worktrees/<n>) resolves to the hub", () => {
+    const tmp = makeTmp();
+    try {
+      const hub = join(tmp, "project.git");
+      const wt = join(tmp, "wt");
+      mkdirSync(wt, { recursive: true });
+      writeFileSync(join(wt, ".git"), `gitdir: ${join(hub, "worktrees", "wt")}\n`);
+      expect(resolveWorktreeMainRoot(wt)).toBe(hub);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("separate-git-dir worktree (no .git in gitdir path) returns null", () => {
+    const tmp = makeTmp();
+    try {
+      const wt = join(tmp, "wt");
+      mkdirSync(wt, { recursive: true });
+      writeFileSync(join(wt, ".git"), `gitdir: ${join(tmp, "detached-gitdir", "worktrees", "wt")}\n`);
+      expect(resolveWorktreeMainRoot(wt)).toBeNull();
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
