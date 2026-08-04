@@ -1,4 +1,4 @@
-import { loadConfig, getSessionName, isPluginEnabled, getCachedStdin } from "../config.js";
+import { loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
 import { getInstanceIdForCwd } from "../cache.js";
 import { clearSessionFiles } from "../state.js";
 import { logHook, setLogContext } from "../log.js";
@@ -31,7 +31,7 @@ export async function handleSessionEnd(): Promise<void> {
 
   let hookInput: HookInput = {};
   try {
-    const input = getCachedStdin() ?? await Bun.stdin.text();
+    const input = getCachedStdin() ?? await readStdinText();
     if (input.trim()) {
       hookInput = JSON.parse(input);
     }
