@@ -341,9 +341,10 @@ function handleSetConfig(args: Record<string, unknown>) {
       saveRootField("peerName", cfg.peerName);
       clearPeerCache();
       clearUserContextOnly();
-      // Clear persisted session names — they embed the peer name
-      cfg.sessions = {};
-      cacheInvalidation = { cleared: ["peer IDs", "user context", "session overrides"], reason: "Peer name changed" };
+      if (Object.keys(cfg.sessions ?? {}).length > 0) {
+        warnings.push(`${Object.keys(cfg.sessions ?? {}).length} session override(s) kept under their existing names; only newly created sessions use the new naming. Use sessions.set/sessions.remove to adjust individual mappings.`);
+      }
+      cacheInvalidation = { cleared: ["peer IDs", "user context"], reason: "Peer name changed" };
       break;
 
     case "aiPeer":
@@ -397,15 +398,19 @@ function handleSetConfig(args: Record<string, unknown>) {
     case "sessionStrategy":
       previousValue = cfg.sessionStrategy ?? "per-directory";
       cfg.sessionStrategy = String(value) as SessionStrategy;
-      // Clear persisted session names — they were derived under the old strategy
-      cfg.sessions = {};
+      // Session overrides are kept: they only apply under per-directory,
+      // so they go dormant on other strategies rather than becoming stale.
+      if (String(value) !== "per-directory" && Object.keys(cfg.sessions ?? {}).length > 0) {
+        warnings.push(`${Object.keys(cfg.sessions ?? {}).length} session override(s) kept but inactive: overrides only apply under the per-directory strategy.`);
+      }
       break;
 
     case "sessionPeerPrefix":
       previousValue = cfg.sessionPeerPrefix !== false;
       cfg.sessionPeerPrefix = coerceBoolean(value);
-      // Clear persisted session names — they embed the old prefix
-      cfg.sessions = {};
+      if (Object.keys(cfg.sessions ?? {}).length > 0) {
+        warnings.push(`${Object.keys(cfg.sessions ?? {}).length} session override(s) kept under their existing names; only newly created sessions use the new naming. Use sessions.set/sessions.remove to adjust individual mappings.`);
+      }
       break;
 
 
