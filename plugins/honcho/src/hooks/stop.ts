@@ -18,11 +18,19 @@ interface TranscriptEntry {
   role?: string;
   timestamp?: string;
   isMeta?: boolean;
+  promptSource?: string;
+  origin?: { kind?: string };
   message?: {
     role?: string;
     content: string | Array<{ type: string; text?: string; name?: string; input?: any }>;
   };
   content?: string | Array<{ type: string; text?: string }>;
+}
+
+/** System-injected wakeup (task notification etc.). Not a real prompt, but the Stop
+ *  hook already fired for everything before it, so it ends the previous segment. */
+function isWakeupBoundary(entry: TranscriptEntry): boolean {
+  return entry.promptSource === "system" || entry.origin?.kind === "task-notification";
 }
 
 /** True for a real user-typed prompt. Excludes tool_results, isMeta entries, and `<...>` command caveats. */
@@ -48,8 +56,10 @@ function assistantText(entry: TranscriptEntry): string {
   return "";
 }
 
-/** Assistant text blocks since the last real user prompt (the just-completed turn). */
-function getCurrentTurnAssistantMessages(transcriptPath: string): Array<{ text: string; timestamp?: string }> {
+/** Assistant text blocks of the just-completed segment: everything since the last
+ *  real user prompt OR wakeup boundary. Wakeup firings would otherwise re-collect
+ *  the whole accumulated turn, duplicating blocks already uploaded. */
+export function getCurrentTurnAssistantMessages(transcriptPath: string): Array<{ text: string; timestamp?: string }> {
   if (!transcriptPath || !existsSync(transcriptPath)) return [];
 
   let lines: string[];
@@ -59,12 +69,12 @@ function getCurrentTurnAssistantMessages(transcriptPath: string): Array<{ text: 
     return [];
   }
 
-  // Walk back to the last real user prompt — the start of the current turn.
+  // Walk back to the last real user prompt or wakeup — the start of the current segment.
   let lastPromptIdx = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
       const entry: TranscriptEntry = JSON.parse(lines[i]);
-      if ((entry.type || entry.role) === "user" && isRealUserPrompt(entry)) {
+      if ((entry.type || entry.role) === "user" && (isRealUserPrompt(entry) || isWakeupBoundary(entry))) {
         lastPromptIdx = i;
         break;
       }
