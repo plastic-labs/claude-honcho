@@ -257,14 +257,25 @@ export function coerceBoolean(value: unknown): boolean {
 
 // Stdin cache: entry points read stdin once via initHook(),
 // handlers consume from cache via getCachedStdin().
-let _stdinText: string | null = null;
+//
+// The cache is keyed on globalThis rather than held in a module binding
+// because the release bundle can instantiate this module more than once:
+// Bun's code splitting inlines a private copy of config.js into
+// dist/hooks/session-start.js while the other entry points share a chunk.
+// With module state, initHook() writes the payload into one copy and the
+// handler reads null from the other, falls back to re-reading an
+// already-drained stdin, and proceeds with an empty hook input — losing cwd,
+// session_id and source. Process-wide state also matches what this cache
+// actually means: the stdin of this process, read once.
+const STDIN_CACHE = Symbol.for("honcho.hookStdinText");
 
 export function cacheStdin(text: string): void {
-  _stdinText = text;
+  (globalThis as Record<symbol, unknown>)[STDIN_CACHE] = text;
 }
 
 export function getCachedStdin(): string | null {
-  return _stdinText;
+  const cached = (globalThis as Record<symbol, unknown>)[STDIN_CACHE];
+  return typeof cached === "string" ? cached : null;
 }
 
 /** Runtime-agnostic stdin read (hooks run under bun in dev, node when bundled). */
