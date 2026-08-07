@@ -11,9 +11,8 @@
   "plugins": [
     {
       "name": "honcho",
-      "source": "./plugins/honcho",
+      "source": { "source": "npm", "package": "@honcho-ai/claude-honcho" },
       "description": "Persistent memory for Claude Code sessions using Honcho",
-      "version": "0.2.11",
       "keywords": ["memory", "context", "persistence"],
       "strict": false
     },

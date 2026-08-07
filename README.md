@@ -3,7 +3,7 @@
 [![Honcho Banner](./assets/honcho_clawd.png)](https://honcho.dev)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.2.4-blue)](https://github.com/plastic-labs/claude-honcho)
+[![npm](https://img.shields.io/npm/v/@honcho-ai/claude-honcho)](https://www.npmjs.com/package/@honcho-ai/claude-honcho)
 [![Honcho](https://img.shields.io/badge/Honcho-Memory%20API-blue)](https://honcho.dev)
 
 A plugin marketplace for Claude Code, powered by [Honcho](https://honcho.dev) from Plastic Labs.
@@ -44,11 +44,9 @@ Give Claude Code long-term memory that survives context wipes, session restarts,
 
 ## Prerequisites
 
-**Bun** is required to run this plugin. Install it with:
-
-```bash
-curl -fsSL https://bun.sh/install | bash
-```
+A Honcho API key from [app.honcho.dev](https://app.honcho.dev). Nothing else --
+the plugin ships as a self-contained bundle and runs on the Node runtime Claude
+Code already provides.
 
 ## Quick Start
 

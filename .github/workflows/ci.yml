@@ -35,6 +35,7 @@ jobs:
           claude plugin validate .stage --strict
           claude plugin validate . --strict
           claude plugin validate ../honcho-dev --strict
+          claude plugin validate ../.. --strict
 
       - name: Smoke test bundled entry points
         run: bash scripts/smoke.sh .stage
