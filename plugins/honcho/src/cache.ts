@@ -2,6 +2,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { getContextRefreshConfig, getLocalContextConfig } from "./config.js";
+import { loadPolicy, shouldDrop, capTurn } from "./policy.js";
 
 const CACHE_DIR = join(homedir(), ".honcho");
 const ID_CACHE_FILE = join(CACHE_DIR, "cache.json");
@@ -393,6 +394,23 @@ export function chunkContent(content: string, maxSize: number = MAX_MESSAGE_SIZE
   }
 
   return chunks;
+}
+
+/**
+ * Policy-aware chunking: the single gate every outgoing message passes through.
+ *
+ * Applies the optional ingestion policy (see src/policy.ts) before chunking, so
+ * forbidden turns are never uploaded and over-long turns are capped before they
+ * are split into several billable messages. Returns an empty array for a
+ * dropped turn — callers `.map()` over the result, and addMessagesBatched([])
+ * is a no-op, so no call site needs its own branch.
+ *
+ * With no policy configured this is exactly chunkContent().
+ */
+export function chunkForIngestion(content: string, maxSize: number = MAX_MESSAGE_SIZE): string[] {
+  const policy = loadPolicy();
+  if (shouldDrop(content, policy)) return [];
+  return chunkContent(capTurn(content, policy), maxSize);
 }
 
 export const HONCHO_MAX_BATCH = 100;

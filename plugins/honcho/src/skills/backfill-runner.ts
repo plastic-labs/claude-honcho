@@ -23,7 +23,7 @@ import {
   setDetectedHost,
   type SessionStrategy,
 } from "../config.js";
-import { addMessagesBatched, chunkContent } from "../cache.js";
+import { addMessagesBatched, chunkForIngestion } from "../cache.js";
 import { parseTranscriptForBackfill, type ParsedMessage } from "./transcript-parse.js";
 import * as s from "../styles.js";
 import { homedir } from "os";
@@ -250,7 +250,7 @@ async function run(): Promise<void> {
       const fallbackTs = new Date().toISOString();
       const messages = g.messages.flatMap((m) => {
         const peer = m.role === "user" ? userPeer : aiPeer;
-        return chunkContent(m.content).map((chunk) =>
+        return chunkForIngestion(m.content).map((chunk) =>
           peer.message(chunk, {
             createdAt: m.timestamp || fallbackTs,
             metadata: {
