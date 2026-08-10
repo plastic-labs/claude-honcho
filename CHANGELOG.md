@@ -2,6 +2,17 @@
 
 All notable changes to claude-honcho will be documented in this file.
 
+## [0.3.0] - unreleased
+
+### Changed
+
+- The plugin is distributed as the npm package `@honcho-ai/claude-honcho` and the marketplace installs from it. Releases ship a self-contained bundle that runs under Node, so Bun is no longer a prerequisite for using the plugin — it remains the development toolchain.
+
+### Removed
+
+- `install-local.sh` / `install-local.ps1`. Develop against a working tree with `claude --plugin-dir plugins/honcho` instead.
+- Vendored `node_modules` are no longer committed.
+
 ## [0.2.11] - 2026-07-31
 
 ### Added

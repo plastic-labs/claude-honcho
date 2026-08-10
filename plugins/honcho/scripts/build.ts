@@ -63,6 +63,12 @@ await mkdir(join(STAGE, "scripts"), { recursive: true });
 await cp(join(ROOT, "scripts/check-version.sh"), join(STAGE, "scripts/check-version.sh"));
 await cp(join(ROOT, "scripts/honcho-statusline.sh"), join(STAGE, "scripts/honcho-statusline.sh"));
 
+// README and LICENSE live at the repo root; npm renders the former as the
+// package page and both are expected in a published tarball.
+const REPO_ROOT = join(ROOT, "..", "..");
+await cp(join(REPO_ROOT, "README.md"), join(STAGE, "README.md"));
+await cp(join(REPO_ROOT, "LICENSE"), join(STAGE, "LICENSE"));
+
 // Every ${CLAUDE_PLUGIN_ROOT} reference in a staged file must resolve within
 // the stage, and none may point at source TypeScript (a rewrite miss).
 function assertStagedPaths(relPath: string, text: string): void {

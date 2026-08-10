@@ -25,13 +25,12 @@ LOCAL_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p
 [ -z "$LOCAL_VERSION" ] && exit 0
 
 REMOTE_JSON=$(curl --max-time 2 -fsSL \
-  "https://raw.githubusercontent.com/plastic-labs/claude-honcho/main/.claude-plugin/marketplace.json" \
+  "https://registry.npmjs.org/@honcho-ai/claude-honcho/latest" \
   2>/dev/null) || exit 0
 
-# Pull the version of the "honcho" plugin entry. Naive but adequate for our schema.
 REMOTE_VERSION=$(printf '%s' "$REMOTE_JSON" \
   | tr -d '\n' \
-  | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"honcho"[^}]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+  | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
   | head -n1)
 [ -z "$REMOTE_VERSION" ] && exit 0
 
