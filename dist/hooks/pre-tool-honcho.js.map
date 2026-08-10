@@ -1,0 +1,11 @@
+{
+  "version": 3,
+  "sources": ["../../src/hooks/pre-tool-honcho.ts", "../../hooks/pre-tool-honcho.ts"],
+  "sourcesContent": [
+    "import { getCachedStdin } from \"../config.js\";\nimport { setMemoryState } from \"../state.js\";\n\n// Maps each honcho MCP tool to the short verb the statusline flashes while the\n// call is in flight. Anything unmapped falls back to the raw tool suffix.\nconst LABELS: Record<string, string> = {\n  search: \"searching\",\n  chat: \"asking\",\n  get_context: \"context\",\n  get_representation: \"recall\",\n  create_conclusion: \"writing\",\n  list_conclusions: \"listing\",\n  delete_conclusion: \"writing\",\n  get_config: \"config\",\n  set_config: \"config\",\n};\n\n// PreToolUse for honcho MCP tools only — flashes which memory tool Claude is\n// calling onto the statusline. Best-effort and dependency-light so it adds\n// negligible latency to the tool call.\nexport async function handlePreToolHoncho(): Promise<void> {\n  try {\n    const raw = getCachedStdin();\n    const input = raw && raw.trim() ? JSON.parse(raw) : {};\n    const toolName: string = input.tool_name ?? \"\";\n    const verb = toolName.replace(/^mcp__plugin_honcho_honcho__/, \"\");\n    setMemoryState(\"querying\", LABELS[verb] ?? verb ?? \"tool\", input.session_id);\n  } catch {\n    // never block the tool call\n  }\n  process.exit(0);\n}\n",
+    "#!/usr/bin/env bun\nimport { initHook } from \"../src/config.js\";\nimport { handlePreToolHoncho } from \"../src/hooks/pre-tool-honcho.js\";\n\nawait initHook();\nawait handlePreToolHoncho();\n"
+  ],
+  "mappings": ";;;;;;;;;;AAKA,IAAM,SAAiC;AAAA,EACrC,QAAQ;AAAA,EACR,MAAM;AAAA,EACN,aAAa;AAAA,EACb,oBAAoB;AAAA,EACpB,mBAAmB;AAAA,EACnB,kBAAkB;AAAA,EAClB,mBAAmB;AAAA,EACnB,YAAY;AAAA,EACZ,YAAY;AACd;AAKA,eAAsB,mBAAmB,GAAkB;AAAA,EACzD,IAAI;AAAA,IACF,MAAM,MAAM,eAAe;AAAA,IAC3B,MAAM,QAAQ,OAAO,IAAI,KAAK,IAAI,KAAK,MAAM,GAAG,IAAI,CAAC;AAAA,IACrD,MAAM,WAAmB,MAAM,aAAa;AAAA,IAC5C,MAAM,OAAO,SAAS,QAAQ,gCAAgC,EAAE;AAAA,IAChE,eAAe,YAAY,OAAO,SAAS,QAAQ,QAAQ,MAAM,UAAU;AAAA,IAC3E,MAAM;AAAA,EAGR,QAAQ,KAAK,CAAC;AAAA;;;AC1BhB,MAAM,SAAS;AACf,MAAM,oBAAoB;",
+  "debugId": "EA24B718CF1FC96964756E2164756E21",
+  "names": []
+}

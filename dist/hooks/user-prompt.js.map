@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": ["../../hooks/user-prompt.ts"],
+  "sourcesContent": [
+    "#!/usr/bin/env bun\nimport { initHook } from \"../src/config.js\";\nimport { handleUserPrompt } from \"../src/hooks/user-prompt.js\";\n\nawait initHook();\nawait handleUserPrompt();\n"
+  ],
+  "mappings": ";;;;;;;;;;;;;;AAIA,MAAM,SAAS;AACf,MAAM,iBAAiB;",
+  "debugId": "2943BF7BFD2DCE0F64756E2164756E21",
+  "names": []
+}

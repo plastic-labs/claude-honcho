@@ -1,0 +1,19 @@
+{
+  "name": "@honcho-ai/claude-honcho",
+  "version": "0.3.1",
+  "type": "module",
+  "description": "Persistent memory for Claude Code sessions using Honcho by Plastic Labs",
+  "author": "Plastic Labs <hello@plasticlabs.ai>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/plastic-labs/claude-honcho.git"
+  },
+  "keywords": [
+    "memory",
+    "context",
+    "ai",
+    "honcho",
+    "persistence"
+  ]
+}
