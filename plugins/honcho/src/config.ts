@@ -27,11 +27,6 @@ export interface ContextRefreshConfig {
   skipDialectic?: boolean;
 }
 
-export interface LocalContextConfig {
-  /** Max entries in claude-context.md (default: 50) */
-  maxEntries?: number;
-}
-
 // ============================================
 // Composable injection (DEV-2088 + DEV-2024)
 // ============================================
@@ -197,7 +192,8 @@ export interface HostConfig {
   observationMode?: ObservationMode;
   messageUpload?: MessageUploadConfig;
   contextRefresh?: ContextRefreshConfig;
-  localContext?: LocalContextConfig;
+  /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
+  redactPatterns?: string[];
   endpoint?: HonchoEndpointConfig;
   /** Composable injection config (session-start + per-turn component menus). */
   injection?: InjectionConfig;
@@ -307,7 +303,8 @@ interface HonchoFileConfig {
   messageUpload?: MessageUploadConfig;
   contextRefresh?: ContextRefreshConfig;
   endpoint?: HonchoEndpointConfig;
-  localContext?: LocalContextConfig;
+  /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
+  redactPatterns?: string[];
   enabled?: boolean;
   logging?: boolean;
   sessionStrategy?: SessionStrategy;
@@ -374,8 +371,8 @@ export interface HonchoCLAUDEConfig {
   contextRefresh?: ContextRefreshConfig;
   /** SaaS vs local instance config */
   endpoint?: HonchoEndpointConfig;
-  /** Local claude-context.md settings */
-  localContext?: LocalContextConfig;
+  /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
+  redactPatterns?: string[];
   /** Composable injection config (session-start + per-turn component menus) */
   injection?: InjectionConfig;
   /** Register the on-demand `honcho_remember` MCP tool (default: false).
@@ -516,7 +513,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     messageUpload: hostBlock?.messageUpload ?? raw.messageUpload,
     contextRefresh: hostBlock?.contextRefresh ?? raw.contextRefresh,
     endpoint: hostBlock?.endpoint ?? raw.endpoint,
-    localContext: hostBlock?.localContext ?? raw.localContext,
+    redactPatterns: hostBlock?.redactPatterns ?? raw.redactPatterns,
     injection: hostBlock?.injection ?? raw.injection,
     rememberTool: hostBlock?.rememberTool ?? raw.rememberTool,
     enabled: hostBlock?.enabled ?? raw.enabled,
@@ -680,7 +677,7 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   setHostIfExplicit("observationMode", config.observationMode, existing.observationMode);
   setHostIfExplicit("messageUpload", config.messageUpload, existing.messageUpload);
   setHostIfExplicit("contextRefresh", config.contextRefresh, existing.contextRefresh);
-  setHostIfExplicit("localContext", config.localContext, existing.localContext);
+  setHostIfExplicit("redactPatterns", config.redactPatterns, existing.redactPatterns);
   setHostIfExplicit("endpoint", config.endpoint, existing.endpoint);
   setHostIfExplicit("injection", config.injection, existing.injection);
   setHostIfExplicit("rememberTool", config.rememberTool, existing.rememberTool);
@@ -885,13 +882,6 @@ export function getContextRefreshConfig(): ContextRefreshConfig {
     messageThreshold: config?.contextRefresh?.messageThreshold ?? 30,
     ttlSeconds: config?.contextRefresh?.ttlSeconds ?? 300,
     skipDialectic: config?.contextRefresh?.skipDialectic ?? false,
-  };
-}
-
-export function getLocalContextConfig(): LocalContextConfig {
-  const config = loadConfig();
-  return {
-    maxEntries: config?.localContext?.maxEntries ?? 50,
   };
 }
 

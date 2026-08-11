@@ -1,7 +1,8 @@
 import { Honcho } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
-import { appendClaudeWork, getClaudeInstanceId } from "../cache.js";
+import { getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { redactSecrets } from "../redact.js";
 import { visCapture } from "../visual.js";
 
 
@@ -218,12 +219,12 @@ export async function handlePostToolUse(): Promise<void> {
     process.exit(0);
   }
 
-  const summary = formatToolSummary(toolName, toolInput, toolResponse);
+  const summary = redactSecrets(
+    formatToolSummary(toolName, toolInput, toolResponse),
+    config.redactPatterns
+  );
   logHook("post-tool-use", summary, { tool: toolName });
   visCapture(summary);
-
-  // INSTANT: Update local claude context file (~2ms)
-  appendClaudeWork(summary);
 
   // Upload to Honcho and wait for completion
   await logToHonchoAsync(config, cwd, summary).catch((e) => logHook("post-tool-use", `Upload failed: ${e}`, { error: String(e) }));

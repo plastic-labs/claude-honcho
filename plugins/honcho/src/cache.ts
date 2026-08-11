@@ -1,12 +1,11 @@
 import { homedir } from "os";
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { getContextRefreshConfig, getLocalContextConfig } from "./config.js";
+import { getContextRefreshConfig } from "./config.js";
 
 const CACHE_DIR = join(homedir(), ".honcho");
 const ID_CACHE_FILE = join(CACHE_DIR, "cache.json");
 const CONTEXT_CACHE_FILE = join(CACHE_DIR, "context-cache.json");
-const CLAUDE_CONTEXT_FILE = join(CACHE_DIR, "claude-context.md");
 
 // Ensure cache directory exists
 function ensureCacheDir(): void {
@@ -197,58 +196,6 @@ export function resetMessageCount(): void {
 }
 
 // ============================================
-// CLAUDE Context File - self-summary
-// ============================================
-
-export function getClaudeContextPath(): string {
-  return CLAUDE_CONTEXT_FILE;
-}
-
-export function loadClaudeLocalContext(): string {
-  ensureCacheDir();
-  if (!existsSync(CLAUDE_CONTEXT_FILE)) {
-    return "";
-  }
-  try {
-    return readFileSync(CLAUDE_CONTEXT_FILE, "utf-8");
-  } catch {
-    return "";
-  }
-}
-
-export function saveClaudeLocalContext(content: string): void {
-  ensureCacheDir();
-  writeFileSync(CLAUDE_CONTEXT_FILE, content);
-}
-
-export function appendClaudeWork(workDescription: string): void {
-  ensureCacheDir();
-  const timestamp = new Date().toISOString();
-  const entry = `\n- [${timestamp}] ${workDescription}`;
-
-  let existing = loadClaudeLocalContext();
-  if (!existing) {
-    existing = `# CLAUDE Work Context\n\nAuto-generated log of CLAUDE's recent work.\n\n## Recent Activity\n`;
-  }
-
-  // Keep only last N entries to prevent file from growing too large
-  let maxEntries = getLocalContextConfig().maxEntries;
-  if (!maxEntries) {
-    maxEntries = 10;
-  }
-  const lines = existing.split("\n");
-  const activityStart = lines.findIndex((l) => l.includes("## Recent Activity"));
-  if (activityStart !== -1) {
-    const header = lines.slice(0, activityStart + 1);
-    const activities = lines.slice(activityStart + 1).filter((l) => l.trim());
-    const recentActivities = activities.slice(-(maxEntries - 1)); // Keep last N-1, add 1 new
-    existing = [...header, ...recentActivities].join("\n");
-  }
-
-  saveClaudeLocalContext(existing + entry);
-}
-
-// ============================================
 // Git State Cache - track git state per directory
 // ============================================
 
@@ -436,7 +383,6 @@ export function clearAllCaches(): void {
   if (existsSync(ID_CACHE_FILE)) writeFileSync(ID_CACHE_FILE, "{}");
   if (existsSync(CONTEXT_CACHE_FILE)) writeFileSync(CONTEXT_CACHE_FILE, "{}");
   if (existsSync(GIT_STATE_FILE)) writeFileSync(GIT_STATE_FILE, "{}");
-  // Don't clear claude-context.md - that's valuable history
 }
 
 /** Clear only the ID cache (workspace, peer, session IDs) */
