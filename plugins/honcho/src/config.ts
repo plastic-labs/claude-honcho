@@ -139,6 +139,16 @@ export type SessionStrategy = "per-directory" | "git-branch" | "chat-instance";
 
 export type StatuslineMode = "on" | "off";
 
+/**
+ * Visibility of the inline hook status lines — the `[honcho] <hook> ← …`
+ * systemMessages Claude Code renders above a turn. "off" silences every one of
+ * them (injection summaries, tool captures, skips) without touching what the
+ * hooks actually inject; the same information stays in the verbose log.
+ *
+ * Distinct from `statusline`, which controls the persistent memory indicator.
+ */
+export type StatusMessagesMode = "on" | "off";
+
 export type HonchoEnvironment = "production" | "local";
 
 export interface HonchoEndpointConfig {
@@ -190,6 +200,8 @@ export interface HostConfig {
    * "directional": this AI keeps its own view of the user (observer=aiPeer, observed=user).
    */
   observationMode?: ObservationMode;
+  /** Inline hook status line visibility: "on" (default) · "off" */
+  statusMessages?: StatusMessagesMode;
   messageUpload?: MessageUploadConfig;
   contextRefresh?: ContextRefreshConfig;
   /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
@@ -316,6 +328,8 @@ interface HonchoFileConfig {
   observationMode?: ObservationMode;
   /** Memory statusLine visibility: "on" (default) · "off" */
   statusline?: StatuslineMode;
+  /** Inline hook status line visibility: "on" (default) · "off" */
+  statusMessages?: StatusMessagesMode;
   /** Composable injection config (session-start + per-turn component menus). */
   injection?: InjectionConfig;
   /** Register the on-demand `honcho_remember` MCP tool (default: false). */
@@ -365,6 +379,8 @@ export interface HonchoCLAUDEConfig {
   observationMode?: ObservationMode;
   /** Memory statusLine visibility: "on" (default) · "off" */
   statusline?: StatuslineMode;
+  /** Inline hook status line visibility: "on" (default) · "off" */
+  statusMessages?: StatusMessagesMode;
   /** Token-based upload limits */
   messageUpload?: MessageUploadConfig;
   /** Context retrieval settings */
@@ -510,6 +526,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     saveGitEvents: hostBlock?.saveGitEvents ?? raw.saveGitEvents,
     reasoningLevel: hostBlock?.reasoningLevel ?? raw.reasoningLevel,
     observationMode: hostBlock?.observationMode ?? raw.observationMode,
+    statusMessages: hostBlock?.statusMessages ?? raw.statusMessages,
     messageUpload: hostBlock?.messageUpload ?? raw.messageUpload,
     contextRefresh: hostBlock?.contextRefresh ?? raw.contextRefresh,
     endpoint: hostBlock?.endpoint ?? raw.endpoint,
@@ -910,6 +927,20 @@ export function getInjectionConfig(config?: HonchoCLAUDEConfig | null): Required
 export function isLoggingEnabled(): boolean {
   const config = loadConfig();
   return config?.logging !== false;
+}
+
+/**
+ * Whether the hooks may print their inline `[honcho] …` status lines. Opt-out
+ * (default "on"), so an absent field keeps today's behavior; anything other
+ * than an explicit "off" leaves them on, which keeps a typo from silently
+ * muting the plugin.
+ *
+ * Pass the already-loaded config where a hook has one in scope; omit it for a
+ * standalone lookup.
+ */
+export function areStatusMessagesEnabled(config?: HonchoCLAUDEConfig | null): boolean {
+  const resolved = config === undefined ? loadConfig() : config;
+  return resolved?.statusMessages !== "off";
 }
 
 export function isPluginEnabled(): boolean {

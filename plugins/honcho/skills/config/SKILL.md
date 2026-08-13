@@ -57,8 +57,8 @@ AskUserQuestion:
       description: "TTL, message threshold, dialectic settings"
     - label: "Message upload"
       description: "Token limits, summarization settings"
-    - label: "Statusline"
-      description: "Memory statusLine visibility — on / off (currently: {resolved.statusline})"
+    - label: "Display"
+      description: "Memory statusLine and inline hook status lines (currently: statusLine {resolved.statusline}, hook lines {resolved.statusMessages})"
 ```
 
 Always include current values in the description so the user can see what's set.
@@ -200,6 +200,8 @@ Pass the value as a JSON array (e.g. `["directives","summary","peerCard"]`). An 
 
 `showContents` is display-only. It never changes what reaches the model.
 
+`showContents: []` still prints the one-line summary — it drops the payload, not the line. A user who wants the terminal fully quiet wants `statusMessages: "off"` (see Display), which silences the summaries too.
+
 Retrieval tuning is intentionally NOT asked here. `injection.searchTopK` (default 10), `injection.maxConclusions` (15), `injection.searchMaxDistance` (0.6, cosine — lower is stricter), and `injection.searchQuerySource` ("prompt" | "topics", default "prompt") are all configurable via `set_config`, but keep the defaults; only mention they're tunable if the user brings it up, and never prompt for them.
 
 If the user enables "Dialectic recall", note the two knobs that shape it — `injection.dialecticTemplate` (the query, with a `%{user_query}` placeholder) and `injection.dialecticReasoning` (tier, default "low") — both via `set_config`. Flag the trade-off: it fires a `chat()` call every non-trivial turn (~12s at medium), on its own budget under the 30s hook ceiling, so it adds real per-turn latency. Keep it off unless the user wants it.
@@ -227,20 +229,37 @@ AskUserQuestion:
 
 Then ask for the new value and call `set_config`.
 
-### Statusline
+### Display
+
+Two independent indicators. Ask which one first:
 
 ```
 AskUserQuestion:
-  question: "Memory statusLine visibility?"
-  header: "Statusline"
+  question: "Which indicator?"
+  header: "Display"
+  options:
+    - label: "Memory statusLine"
+      description: "Sync status, clickable session link, live activity (currently: {resolved.statusline})"
+    - label: "Hook status lines"
+      description: "The [honcho] … lines above a turn (currently: {resolved.statusMessages})"
+```
+
+Then ask on / off for the chosen one:
+
+```
+AskUserQuestion:
+  question: "Visibility?"
+  header: "Visibility"
   options:
     - label: "on (Recommended)"
-      description: "Sync status, clickable session link, and live activity"
+      description: "Shown"
     - label: "off"
       description: "Hidden"
 ```
 
-Call `set_config` with field `statusline` and the chosen value. Takes effect on the next statusLine repaint.
+Call `set_config` with field `statusline` or `statusMessages` and the chosen value. `statusline` takes effect on the next statusLine repaint; `statusMessages` on the next turn — neither needs a restart.
+
+`statusMessages: "off"` silences *every* hook status line — injection summaries, tool captures, skip notices, the session link — across SessionStart, UserPromptSubmit, PostToolUse and Stop. Display only: what the hooks inject is unchanged, and the same detail still goes to `~/.honcho/verbose.log`.
 
 ### Message upload
 

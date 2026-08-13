@@ -4,6 +4,10 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [0.3.0] - unreleased
 
+### Added
+
+- `statusMessages: "off"` silences the plugin's inline `[honcho] …` status lines — injection summaries, tool captures, skip notices, and the session link — across SessionStart, UserPromptSubmit, PostToolUse and Stop. Display only: what the hooks inject and save is unchanged, and the same detail still reaches the verbose log. Defaults to `"on"`. `injection.showContents` already dropped the payloads; this drops the summary lines too, for users who want the transcript quiet.
+
 ### Changed
 
 - The plugin is distributed as the npm package `@honcho-ai/claude-honcho` and the marketplace installs from it. Releases ship a self-contained bundle that runs under Node, so Bun is no longer a prerequisite for using the plugin — it remains the development toolchain.
