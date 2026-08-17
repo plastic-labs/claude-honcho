@@ -88,9 +88,9 @@ export interface InjectionConfig {
   sessionStart?: SessionStartComponent[];
   /** Components emitted per non-trivial prompt (default: ["userContext"]). */
   perTurn?: PerTurnComponent[];
-  /** Per-turn components whose full injected payload is printed to the terminal.
-   *  Components not listed still inject; they just report a one-line summary
-   *  instead of their contents (default: [] — summaries only). */
+  /** Per-turn components that print what they injected to the terminal.
+   *  Components not listed still inject to the model; they emit no systemMessage
+   *  (default: [] — nothing shown in the UI). */
   showContents?: PerTurnComponent[];
   /** Top-K conclusions pulled by context()'s semantic search (default: 10). */
   searchTopK?: number;
@@ -117,7 +117,7 @@ export interface InjectionConfig {
 /** Resolved injection defaults: memory-usage directives + session summary +
  *  peer card at session start, a fresh user-peer context() per turn. Retrieval knobs
  *  are tuned for a lean per-turn block — topK 10 for recall, a 0.6 cosine
- *  distance, searching on the raw prompt. No component prints its contents. */
+ *  distance, searching on the raw prompt. No component prints to the terminal. */
 export const DEFAULT_INJECTION: Required<InjectionConfig> = {
   sessionStart: ["directives", "summary", "peerCard"],
   perTurn: ["userContext"],

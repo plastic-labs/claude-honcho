@@ -7,6 +7,7 @@ All notable changes to claude-honcho will be documented in this file.
 ### Changed
 
 - The plugin is distributed as the npm package `@honcho-ai/claude-honcho` and the marketplace installs from it. Releases ship a self-contained bundle that runs under Node, so Bun is no longer a prerequisite for using the plugin — it remains the development toolchain.
+- `injection.showContents` (default `[]`) now fully hides per-turn injection from the terminal. Components not listed still reach the model via `additionalContext`; they no longer emit a one-line systemMessage summary. Listing a component prints what it injected.
 
 ### Removed
 

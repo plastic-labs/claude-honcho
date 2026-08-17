@@ -245,12 +245,10 @@ export async function handleUserPrompt(): Promise<void> {
 }
 
 /**
- * Emit the per-turn injection: the selected components composed into one
- * additionalContext payload plus a per-component systemMessage summary. Every
- * component reports a one-line summary; only those listed in
- * `injection.showContents` also print their payload to the terminal. Exits
- * silently when nothing resolved to content — mirroring the old no-cache
- * fall-through.
+ * Emit the per-turn injection: selected components composed into one
+ * additionalContext payload. Components listed in `injection.showContents`
+ * also get a systemMessage printing what was injected; others stay off the
+ * terminal. Exits with no output when nothing resolved to content.
  */
 function emitPerTurn(
   config: any,
@@ -269,7 +267,9 @@ function emitPerTurn(
     const conclusions = extractConclusions(userCtx.context);
     if (conclusions.length > 0) {
       parts.push(`Relevant conclusions: ${conclusions.join("; ")}`);
-      visLines.push(visInjectionMessage("user-prompt", { conclusions, matched: userCtx.matched, queryLabel: userCtx.queryLabel, showContents: show("userContext") }));
+      if (show("userContext")) {
+        visLines.push(visInjectionMessage("user-prompt", { conclusions, matched: userCtx.matched, queryLabel: userCtx.queryLabel }));
+      }
     }
   }
 
@@ -277,24 +277,30 @@ function emitPerTurn(
     const conclusions = extractConclusions(assistantCtx);
     if (conclusions.length > 0) {
       parts.push(`Conclusions about the assistant (${config.aiPeer}): ${conclusions.join("; ")}`);
-      visLines.push(visInjectionMessage("user-prompt", { conclusions, queryLabel: `assistant ${config.aiPeer}`, showContents: show("assistantContext") }));
+      if (show("assistantContext")) {
+        visLines.push(visInjectionMessage("user-prompt", { conclusions, queryLabel: `assistant ${config.aiPeer}` }));
+      }
     }
   }
 
   if (sessionCtx) {
     parts.push(`Recent Honcho session messages:\n${sessionCtx.lines.join("\n")}`);
-    visLines.push(visSessionContextMessage("user-prompt", sessionCtx.lines, sessionCtx.tokenCount, show("sessionContext")));
+    if (show("sessionContext")) {
+      visLines.push(visSessionContextMessage("user-prompt", sessionCtx.lines, sessionCtx.tokenCount));
+    }
   }
 
   if (dialectic) {
     parts.push(`Dialectic recall: ${dialectic.answer}`);
-    visLines.push(visDialecticMessage("user-prompt", dialectic.reasoning, dialectic.elapsedMs, dialectic.answer, show("dialectic")));
+    if (show("dialectic")) {
+      visLines.push(visDialecticMessage("user-prompt", dialectic.reasoning, dialectic.elapsedMs, dialectic.answer));
+    }
   }
 
   if (parts.length === 0) return;
 
-  const visMsg = visLines.join("\n");
-  outputContext(config.peerName, parts, sessionLink ? `${sessionLink}\n${visMsg}` : visMsg);
+  const systemMsg = [sessionLink, ...visLines].filter(Boolean).join("\n") || undefined;
+  outputContext(config.peerName, parts, systemMsg);
 }
 
 interface DialecticResult {

@@ -182,11 +182,11 @@ AskUserQuestion:
       multiSelect: true
       options:                     # same four labels as "Per turn"
         - label: "User conclusions"
-          description: "List each injected conclusion instead of just the count"
+          description: "Print each injected conclusion to the terminal"
         - label: "Assistant conclusions"
-          description: "List each injected conclusion instead of just the count"
+          description: "Print each injected conclusion to the terminal"
         - label: "Session messages"
-          description: "List each injected message, one truncated line each"
+          description: "Print each injected message (one truncated line each)"
         - label: "Dialectic recall"
           description: "Print the full reasoned answer — prose, can be long"
 ```
@@ -196,7 +196,7 @@ Map the selections to component names, then call `set_config` once per field:
 - Per turn → `injection.perTurn`, mapping "User conclusions"→`userContext`, "Assistant conclusions"→`assistantContext`, "Session messages"→`sessionContext`, "Dialectic recall"→`dialectic`.
 - Show in UI → `injection.showContents`, same mapping as per turn.
 
-Pass the value as a JSON array (e.g. `["directives","summary","peerCard"]`). An empty selection means `[]`: for `injection.sessionStart` and `injection.perTurn` that surface then injects nothing, and for `injection.showContents` (the default) every enabled per-turn component still injects — it just reports a one-line summary (count, tokens, timing) instead of printing its payload.
+Pass the value as a JSON array (e.g. `["directives","summary","peerCard"]`). An empty selection means `[]`: for `injection.sessionStart` and `injection.perTurn` that surface then injects nothing, and for `injection.showContents` (the default) every enabled per-turn component still injects to the model but prints nothing to the terminal.
 
 `showContents` is display-only. It never changes what reaches the model.
 
