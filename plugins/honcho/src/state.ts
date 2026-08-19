@@ -7,7 +7,7 @@
 
 import { homedir } from "os";
 import { join } from "path";
-import { writeFileSync, unlinkSync } from "fs";
+import { writeFileSync, readFileSync, unlinkSync } from "fs";
 
 const DIR = join(homedir(), ".honcho");
 
@@ -20,6 +20,9 @@ function stateFile(sessionId?: string): string {
 }
 function sessionFile(sessionId?: string): string {
   return join(DIR, sessionId ? `session-${sessionId}.json` : "session.json");
+}
+function savesFile(sessionId?: string): string {
+  return join(DIR, sessionId ? `saves-${sessionId}.json` : "saves.json");
 }
 
 export type MemoryPhase =
@@ -47,10 +50,32 @@ export function setSessionLink(url: string, name: string | undefined, sessionId?
   }
 }
 
+// Tally of messages this window actually landed on the server. The upload hooks
+// bump it after a successful POST; session-end reads it so it can tell "nothing
+// to save" apart from "the saving hooks never ran" instead of assuming success.
+export function recordMessageSave(count: number = 1, sessionId?: string): void {
+  try {
+    writeFileSync(
+      savesFile(sessionId),
+      JSON.stringify({ saved: getMessageSaveCount(sessionId) + count, at: Date.now() }),
+    );
+  } catch {
+    // best-effort — a missing tally only costs us a false "broken" warning
+  }
+}
+
+export function getMessageSaveCount(sessionId?: string): number {
+  try {
+    return JSON.parse(readFileSync(savesFile(sessionId), "utf-8")).saved ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 // Clean up this window's files when its session ends, so they don't accumulate.
 export function clearSessionFiles(sessionId?: string): void {
   if (!sessionId) return;
-  for (const f of [stateFile(sessionId), sessionFile(sessionId)]) {
+  for (const f of [stateFile(sessionId), sessionFile(sessionId), savesFile(sessionId)]) {
     try { unlinkSync(f); } catch { /* already gone */ }
   }
 }

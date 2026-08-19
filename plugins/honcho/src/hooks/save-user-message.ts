@@ -2,6 +2,7 @@ import { Honcho, Session, Peer } from "@honcho-ai/sdk";
 import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
 import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { recordMessageSave } from "../state.js";
 import { isHarnessInjected, isTerseReply } from "./user-prompt.js";
 
 interface HookInput {
@@ -61,6 +62,7 @@ export async function handleSaveUserMessage(): Promise<void> {
 
   try {
     await postUserMessage(config, prompt, instanceId || undefined, sessionName);
+    recordMessageSave(1, hookInput.session_id);
   } catch (e) {
     logHook("save-user-message", `Upload failed: ${e}`);
   }
