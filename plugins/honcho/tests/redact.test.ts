@@ -1,5 +1,99 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { join } from "path";
 import { redactSecrets, validateRedactPattern } from "../src/redact";
+
+interface UploadedMessage {
+  content: string;
+  metadata?: Record<string, unknown>;
+}
+
+let uploaded: UploadedMessage[] = [];
+let hookInput = "";
+let config: Record<string, any> = {};
+let transcriptDir = "";
+
+class FakeHoncho {
+  workspaceId = "test-workspace";
+  http = {};
+
+  session(name: string): FakeSession {
+    return new FakeSession(name);
+  }
+}
+
+class FakePeer {
+  constructor(public id: string) {}
+
+  message(content: string, options?: Omit<UploadedMessage, "content">): UploadedMessage {
+    return { content, ...options };
+  }
+}
+
+class FakeSession {
+  constructor(public id: string) {}
+
+  async addMessages(messages: UploadedMessage[]): Promise<void> {
+    uploaded.push(...messages);
+  }
+}
+
+mock.module("@honcho-ai/sdk", () => ({
+  Honcho: FakeHoncho,
+  Peer: FakePeer,
+  Session: FakeSession,
+}));
+
+mock.module("../src/config.js", () => ({
+  getCachedStdin: () => hookInput,
+  getContextRefreshConfig: () => ({}),
+  getHonchoClientOptions: () => ({}),
+  getSessionForPath: () => "test-session",
+  getSessionName: () => "test-session",
+  isPluginEnabled: () => true,
+  loadConfig: () => config,
+  readStdinText: async () => hookInput,
+}));
+
+mock.module("../src/hooks/user-prompt.js", () => ({
+  isHarnessInjected: () => false,
+  isTerseReply: () => false,
+}));
+
+mock.module("../src/log.js", () => ({
+  logApiCall: () => {},
+  logHook: () => {},
+  setLogContext: () => {},
+}));
+
+mock.module("../src/visual.js", () => ({ visStopMessage: () => {} }));
+
+const { handleSaveUserMessage } = await import("../src/hooks/save-user-message.js");
+const { handleStop } = await import("../src/hooks/stop.js");
+const exitSpy = spyOn(process, "exit").mockImplementation((() => undefined) as never);
+
+function uploadedContent(): string {
+  return uploaded.map((message) => message.content.replace(/^\[Part \d+\/\d+\] /, "")).join("");
+}
+
+beforeEach(() => {
+  uploaded = [];
+  hookInput = "";
+  config = {
+    aiPeer: "assistant",
+    apiKey: "synthetic-api-key",
+    peerName: "user",
+    redactPatterns: [],
+    workspace: "test-workspace",
+  };
+});
+
+afterEach(() => {
+  if (transcriptDir) rmSync(transcriptDir, { recursive: true, force: true });
+  transcriptDir = "";
+});
+
+afterAll(() => exitSpy.mockRestore());
 
 describe("redactSecrets defaults", () => {
   test("env-var assignments with secret-bearing keys", () => {
@@ -11,6 +105,8 @@ describe("redactSecrets defaults", () => {
       .toBe('MYSQL_PWD=***');
     expect(redactSecrets('api_key=xyz'))
       .toBe('api_key=***');
+    expect(redactSecrets('MODE=development PORT=5432'))
+      .toBe('MODE=development PORT=5432');
   });
 
   test("--password / --token style flags", () => {
@@ -20,16 +116,22 @@ describe("redactSecrets defaults", () => {
       .toBe('deploy --token ***');
     expect(redactSecrets('curl --api-key=xyz'))
       .toBe('curl --api-key=***');
+    expect(redactSecrets('parser --tokenize input.txt'))
+      .toBe('parser --tokenize input.txt');
   });
 
   test("Authorization headers", () => {
     expect(redactSecrets('curl -H "Authorization: Bearer eyJhbGciOi"'))
       .toBe('curl -H "Authorization: Bearer ***"');
+    expect(redactSecrets('Authorization: Digest synthetic-challenge'))
+      .toBe('Authorization: Digest synthetic-challenge');
   });
 
   test("credentials embedded in URLs", () => {
     expect(redactSecrets('psql postgres://app:s3cret@db.host:5432/prod'))
       .toBe('psql postgres://app:***@db.host:5432/prod');
+    expect(redactSecrets('psql postgres://app@db.host:5432/prod'))
+      .toBe('psql postgres://app@db.host:5432/prod');
   });
 
   test("well-known token shapes", () => {
@@ -38,6 +140,57 @@ describe("redactSecrets defaults", () => {
     expect(redactSecrets('gh auth ghp_abcdefghijklmnopqrstuvwx')).toBe('gh auth ***');
     expect(redactSecrets('key sk-ant-api03-abcdefghijklmnop')).toBe('key ***');
     expect(redactSecrets('xoxb-1234567890-abcdefghij')).toBe('***');
+    expect(redactSecrets(`key nvapi-${'n'.repeat(24)}`)).toBe('key ***');
+    expect(redactSecrets(`key AIza${'g'.repeat(35)}`)).toBe('key ***');
+    expect(redactSecrets('sk-short ghp_short xoxb-short nvapi-short AIzaShort'))
+      .toBe('sk-short ghp_short xoxb-short nvapi-short AIzaShort');
+  });
+
+  test("private key blocks", () => {
+    const privateKey = [
+      '-----BEGIN PRIVATE KEY-----',
+      'c3ludGhldGljLWtleS1tYXRlcmlhbA==',
+      '-----END PRIVATE KEY-----',
+    ].join('\n');
+    const publicKey = [
+      '-----BEGIN PUBLIC KEY-----',
+      'c3ludGhldGljLXB1YmxpYy1tYXRlcmlhbA==',
+      '-----END PUBLIC KEY-----',
+    ].join('\n');
+    expect(redactSecrets(`key:\n${privateKey}\ndone`)).toBe('key:\n***\ndone');
+    expect(redactSecrets(publicKey)).toBe(publicKey);
+  });
+
+  test("JSON and YAML secret assignments", () => {
+    expect(redactSecrets('{"api_key": "synthetic-value", "region": "local"}'))
+      .toBe('{"api_key": "***", "region": "local"}');
+    expect(redactSecrets('{"api_key": "synthetic-\\"value"}'))
+      .toBe('{"api_key": "***"}');
+    expect(redactSecrets('token: synthetic-value\nmode: local'))
+      .toBe('token: ***\nmode: local');
+    expect(redactSecrets('{"token_count": 42, "password_policy": "strict"}'))
+      .toBe('{"token_count": 42, "password_policy": "strict"}');
+  });
+
+  test("JWT shapes", () => {
+    const jwt = `eyJ${'h'.repeat(12)}.${'p'.repeat(16)}.${'s'.repeat(20)}`;
+    expect(redactSecrets(`jwt ${jwt} done`)).toBe('jwt *** done');
+    expect(redactSecrets('eyJ-prefixed prose and eyJabc.def only-two-segments'))
+      .toBe('eyJ-prefixed prose and eyJabc.def only-two-segments');
+  });
+
+  test("Telegram bot token shapes", () => {
+    const telegramToken = `123456789:AA${'t'.repeat(35)}`;
+    expect(redactSecrets(`bot ${telegramToken} done`)).toBe('bot *** done');
+    expect(redactSecrets(`bot 12345678:AA${'t'.repeat(34)} done`))
+      .toBe(`bot 12345678:AA${'t'.repeat(34)} done`);
+  });
+
+  test("URL query credentials", () => {
+    expect(redactSecrets('https://example.test/run?api_key=synthetic-value&auth=synthetic-auth&limit=1'))
+      .toBe('https://example.test/run?api_key=***&auth=***&limit=1');
+    expect(redactSecrets('https://example.test/run?token_count=3&password_reset=true'))
+      .toBe('https://example.test/run?token_count=3&password_reset=true');
   });
 
   test("does not mangle ordinary commands", () => {
@@ -67,5 +220,34 @@ describe("validateRedactPattern", () => {
 
   test("rejects invalid regex with message", () => {
     expect(validateRedactPattern('[unclosed')).toContain("Invalid regex");
+  });
+});
+
+describe("message upload redaction", () => {
+  test("user prompts are redacted before chunking", async () => {
+    const prefix = "u".repeat(23998) + "/";
+    const secret = `sk-${"x".repeat(20)}`;
+    hookInput = JSON.stringify({ cwd: process.cwd(), prompt: prefix + secret, session_id: "test-session-id" });
+
+    await handleSaveUserMessage();
+
+    expect(uploadedContent()).toBe(prefix + "***");
+  });
+
+  test("assistant text uses configured redaction before chunking", async () => {
+    const prefix = "a".repeat(23998);
+    const secret = `CUSTOM_${"Z".repeat(20)}`;
+    config.redactPatterns = ["CUSTOM_[A-Z]{20}"];
+    transcriptDir = mkdtempSync(join(process.cwd(), ".upload-redaction-"));
+    const transcriptPath = join(transcriptDir, "transcript.jsonl");
+    writeFileSync(transcriptPath, [
+      JSON.stringify({ type: "user", message: { content: "respond" } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: prefix + secret }] } }),
+    ].join("\n"));
+    hookInput = JSON.stringify({ cwd: process.cwd(), session_id: "test-session-id", transcript_path: transcriptPath });
+
+    await handleStop();
+
+    expect(uploadedContent()).toBe(prefix + "***");
   });
 });

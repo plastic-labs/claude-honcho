@@ -1,5 +1,5 @@
 /**
- * Best-effort secret redaction for tool-capture summaries.
+ * Best-effort secret redaction for uploaded content.
  * Regex-based, so novel secret formats pass through; users extend the
  * defaults via the `redactPatterns` config.
  */
@@ -10,9 +10,14 @@ interface RedactRule {
 }
 
 const DEFAULT_RULES: RedactRule[] = [
+  // PEM private key blocks (PKCS#8, RSA, EC, OpenSSH, etc.)
+  {
+    pattern: /-----BEGIN ((?:[A-Z0-9]+ )?PRIVATE KEY)-----[\s\S]*?-----END \1-----/g,
+    replacement: "***",
+  },
   // KEY=value assignments with a secret-bearing key (PGPASSWORD=..., AWS_SECRET_ACCESS_KEY=...)
   {
-    pattern: /\b(\w*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_KEY|CREDENTIALS?)\w*)\s*=\s*("[^"]*"|'[^']*'|[^\s;|&"']+)/gi,
+    pattern: /\b(\w*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_KEY|CREDENTIALS?))\s*=\s*("[^"]*"|'[^']*'|[^\s;|&"']+)/gi,
     replacement: "$1=***",
   },
   // --password / --token style CLI flags
@@ -30,9 +35,30 @@ const DEFAULT_RULES: RedactRule[] = [
     pattern: /([a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:)[^@\s]+@/gi,
     replacement: "$1***@",
   },
-  // Well-known token shapes: Honcho, AWS, OpenAI/Anthropic-style sk-, GitHub, Slack, GitLab, npm
+  // JSON/YAML secret assignments. Require a secret-bearing key suffix so
+  // ordinary fields such as token_count and password_policy stay intact.
   {
-    pattern: /\b(?:hch[_-]?[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{16,}|(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36})\b/g,
+    pattern: /(^|[\s{,])((?:["'])?[a-z0-9_-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|credentials?|client[_-]?secret|private[_-]?key)(?:["'])?\s*:\s*)(?:(["'])(?:\\.|(?!\3)[^\\\r\n])*\3|[^\s#,\]}]+)/gim,
+    replacement: "$1$2$3***$3",
+  },
+  // Credentials in URL query strings
+  {
+    pattern: /([?&](?:password|passwd|pwd|secret|token|api_?key|access_?key|auth|credentials?)=)[^&#\s"']+/gi,
+    replacement: "$1***",
+  },
+  // JSON Web Tokens
+  {
+    pattern: /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/g,
+    replacement: "***",
+  },
+  // Telegram bot tokens
+  {
+    pattern: /\b\d{9,10}:AA[A-Za-z0-9_-]{35,}\b/g,
+    replacement: "***",
+  },
+  // Well-known token shapes: Honcho, AWS, OpenAI/Anthropic-style sk-, NVIDIA, Google, GitHub, Slack, GitLab, npm
+  {
+    pattern: /\b(?:hch[_-]?[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{16,}|nvapi-[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{35}|(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36})\b/g,
     replacement: "***",
   },
 ];
