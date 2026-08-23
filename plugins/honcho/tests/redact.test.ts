@@ -109,6 +109,19 @@ describe("redactSecrets defaults", () => {
       .toBe('MODE=development PORT=5432');
   });
 
+  test("assignment values spanning adjacent shell-word fragments", () => {
+    expect(redactSecrets('PGPASSWORD=pre"secret suffix"'))
+      .toBe('PGPASSWORD=***');
+    expect(redactSecrets("PGPASSWORD=pre'secret suffix'"))
+      .toBe('PGPASSWORD=***');
+    expect(redactSecrets('PGPASSWORD=pre\\ secret psql'))
+      .toBe('PGPASSWORD=*** psql');
+    expect(redactSecrets('PGPASSWORD=pre"secret suffix"; psql -h 127.0.0.1'))
+      .toBe('PGPASSWORD=***; psql -h 127.0.0.1');
+    expect(redactSecrets('MODE=dev"elopment" PORT=5432'))
+      .toBe('MODE=dev"elopment" PORT=5432');
+  });
+
   test("--password / --token style flags", () => {
     expect(redactSecrets('mysql --password=hunter2 -u root'))
       .toBe('mysql --password=*** -u root');
@@ -118,6 +131,8 @@ describe("redactSecrets defaults", () => {
       .toBe('curl --api-key=***');
     expect(redactSecrets('parser --tokenize input.txt'))
       .toBe('parser --tokenize input.txt');
+    expect(redactSecrets('mysql --password pre"secret suffix" -u root'))
+      .toBe('mysql --password *** -u root');
   });
 
   test("Authorization headers", () => {
@@ -144,6 +159,14 @@ describe("redactSecrets defaults", () => {
     expect(redactSecrets(`key AIza${'g'.repeat(35)}`)).toBe('key ***');
     expect(redactSecrets('sk-short ghp_short xoxb-short nvapi-short AIzaShort'))
       .toBe('sk-short ghp_short xoxb-short nvapi-short AIzaShort');
+  });
+
+  test("token shapes ending in a hyphen are redacted whole", () => {
+    // A terminal \b cannot follow a '-', so these used to match short or,
+    // for the fixed-length AIza shape, not at all.
+    expect(redactSecrets(`key AIza${'g'.repeat(34)}- done`)).toBe('key *** done');
+    expect(redactSecrets(`key sk-${'a'.repeat(16)}- done`)).toBe('key *** done');
+    expect(redactSecrets(`key glpat-${'a'.repeat(20)}- done`)).toBe('key *** done');
   });
 
   test("private key blocks", () => {
@@ -177,6 +200,8 @@ describe("redactSecrets defaults", () => {
     expect(redactSecrets(`jwt ${jwt} done`)).toBe('jwt *** done');
     expect(redactSecrets('eyJ-prefixed prose and eyJabc.def only-two-segments'))
       .toBe('eyJ-prefixed prose and eyJabc.def only-two-segments');
+    const hyphenTail = `eyJ${'h'.repeat(5)}.${'p'.repeat(5)}.${'s'.repeat(4)}-`;
+    expect(redactSecrets(`jwt ${hyphenTail} done`)).toBe('jwt *** done');
   });
 
   test("Telegram bot token shapes", () => {
@@ -184,11 +209,14 @@ describe("redactSecrets defaults", () => {
     expect(redactSecrets(`bot ${telegramToken} done`)).toBe('bot *** done');
     expect(redactSecrets(`bot 12345678:AA${'t'.repeat(34)} done`))
       .toBe(`bot 12345678:AA${'t'.repeat(34)} done`);
+    expect(redactSecrets(`bot 123456789:AA${'t'.repeat(34)}- done`)).toBe('bot *** done');
   });
 
   test("URL query credentials", () => {
     expect(redactSecrets('https://example.test/run?api_key=synthetic-value&auth=synthetic-auth&limit=1'))
       .toBe('https://example.test/run?api_key=***&auth=***&limit=1');
+    expect(redactSecrets('https://example.test/run?api-key=synthetic-value&access-key=synthetic-access'))
+      .toBe('https://example.test/run?api-key=***&access-key=***');
     expect(redactSecrets('https://example.test/run?token_count=3&password_reset=true'))
       .toBe('https://example.test/run?token_count=3&password_reset=true');
   });

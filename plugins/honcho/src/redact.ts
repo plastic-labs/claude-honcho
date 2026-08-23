@@ -9,6 +9,21 @@ interface RedactRule {
   replacement: string;
 }
 
+/**
+ * One complete shell word. Adjacent quoted, escaped and bare fragments are a
+ * single value to the shell, so `PGPASSWORD=pre"secret suffix"` must redact
+ * whole rather than stopping at `pre`. Shared by the assignment and CLI-flag
+ * rules: two copies would be free to drift apart.
+ */
+const SHELL_WORD = String.raw`(?:"(?:\\.|[^"\\])*"|'[^']*'|\\.|[^\s;|&"'\\])+`;
+
+/**
+ * Ends a token shape. A terminal `\b` cannot follow a `-`, which left tokens
+ * ending in a hyphen matched short — or, at their minimum length, not matched
+ * at all, since there is nothing to backtrack into.
+ */
+const TOKEN_END = String.raw`(?![A-Za-z0-9_-])`;
+
 const DEFAULT_RULES: RedactRule[] = [
   // PEM private key blocks (PKCS#8, RSA, EC, OpenSSH, etc.)
   {
@@ -17,12 +32,19 @@ const DEFAULT_RULES: RedactRule[] = [
   },
   // KEY=value assignments with a secret-bearing key (PGPASSWORD=..., AWS_SECRET_ACCESS_KEY=...)
   {
-    pattern: /\b(\w*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_KEY|CREDENTIALS?))\s*=\s*("[^"]*"|'[^']*'|[^\s;|&"']+)/gi,
+    pattern: new RegExp(
+      String.raw`\b(\w*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_KEY|CREDENTIALS?))\s*=\s*` +
+        SHELL_WORD,
+      "gi",
+    ),
     replacement: "$1=***",
   },
   // --password / --token style CLI flags
   {
-    pattern: /(--(?:password|passwd|pwd|token|api-?key|secret|auth)[= ])(?:"[^"]*"|'[^']*'|[^\s;|&"']+)/gi,
+    pattern: new RegExp(
+      String.raw`(--(?:password|passwd|pwd|token|api-?key|secret|auth)[= ])` + SHELL_WORD,
+      "gi",
+    ),
     replacement: "$1***",
   },
   // Authorization headers
@@ -43,22 +65,29 @@ const DEFAULT_RULES: RedactRule[] = [
   },
   // Credentials in URL query strings
   {
-    pattern: /([?&](?:password|passwd|pwd|secret|token|api_?key|access_?key|auth|credentials?)=)[^&#\s"']+/gi,
+    pattern: /([?&](?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|auth|credentials?)=)[^&#\s"']+/gi,
     replacement: "$1***",
   },
   // JSON Web Tokens
   {
-    pattern: /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/g,
+    pattern: new RegExp(
+      String.raw`\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}` + TOKEN_END,
+      "g",
+    ),
     replacement: "***",
   },
   // Telegram bot tokens
   {
-    pattern: /\b\d{9,10}:AA[A-Za-z0-9_-]{35,}\b/g,
+    pattern: new RegExp(String.raw`\b\d{9,10}:AA[A-Za-z0-9_-]{35,}` + TOKEN_END, "g"),
     replacement: "***",
   },
   // Well-known token shapes: Honcho, AWS, OpenAI/Anthropic-style sk-, NVIDIA, Google, GitHub, Slack, GitLab, npm
   {
-    pattern: /\b(?:hch[_-]?[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{16,}|nvapi-[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{35}|(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36})\b/g,
+    pattern: new RegExp(
+      String.raw`\b(?:hch[_-]?[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{16,}|nvapi-[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{35}|(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36})` +
+        TOKEN_END,
+      "g",
+    ),
     replacement: "***",
   },
 ];
