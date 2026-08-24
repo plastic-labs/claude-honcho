@@ -1,6 +1,6 @@
 import { loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
 import { getInstanceIdForCwd } from "../cache.js";
-import { clearSessionFiles, getMessageSaveCount } from "../state.js";
+import { clearSessionFiles, getMessageSaveTally } from "../state.js";
 import { logActivity, logHook, setLogContext } from "../log.js";
 import { existsSync, readFileSync } from "fs";
 
@@ -14,11 +14,12 @@ interface HookInput {
 }
 
 /**
- * Counts real user turns in the transcript. Deliberately a local copy of
- * stop.ts's isRealUserPrompt rather than an import: this hook must return
- * instantly, and importing stop.js would pull in the Honcho SDK at load time.
+ * Counts real user turns this window contributed to the transcript.
+ * Deliberately a local copy of stop.ts's isRealUserPrompt rather than an
+ * import: this hook must return instantly, and importing stop.js would pull
+ * in the Honcho SDK at load time.
  */
-function countUserTurns(transcriptPath: string): number {
+function countUserTurns(transcriptPath: string, sessionId?: string): number {
   if (!transcriptPath || !existsSync(transcriptPath)) return 0;
   let turns = 0;
   try {
@@ -27,6 +28,9 @@ function countUserTurns(transcriptPath: string): number {
       try {
         const entry = JSON.parse(line);
         if ((entry.type || entry.role) !== "user" || entry.isMeta) continue;
+        // A resumed session carries the earlier window's turns in the same
+        // transcript; those were saved (or lost) by that window, not this one.
+        if (sessionId && entry.sessionId && entry.sessionId !== sessionId) continue;
         const mc = entry.message?.content ?? entry.content;
         const text =
           typeof mc === "string"
@@ -88,23 +92,46 @@ export async function handleSessionEnd(): Promise<void> {
   logHook("session-end", `Session ending`, { reason });
 
   // Read the tally before clearSessionFiles deletes it.
-  const saved = getMessageSaveCount(hookInput.session_id);
-  const userTurns = countUserTurns(hookInput.transcript_path || "");
+  const saved = getMessageSaveTally(hookInput.session_id);
+  const userTurns = countUserTurns(hookInput.transcript_path || "", hookInput.session_id);
   clearSessionFiles(hookInput.session_id);
 
-  if (saved > 0) {
-    logHook("session-end", `Session ended — no upload (${saved} message(s) saved live)`);
-  } else if (userTurns > 0) {
+  if (config.saveMessages === false) {
+    // Nothing was meant to land, so silence here is the configured outcome.
+    logHook("session-end", "Session ended — no upload (message saving is disabled)");
+  } else if (!hookInput.session_id) {
+    // Without a session_id the upload hooks keep no tally, so there is nothing
+    // to check against. Say so instead of reading a shared count.
+    logHook("session-end", "Session ended — save validation unavailable (no session_id)");
+  } else if (userTurns === 0) {
+    logHook("session-end", "Session ended — nothing to save (no user turns)");
+  } else if (saved.user === 0) {
+    // Checked against the user tally alone: a successful Stop upload must not
+    // vouch for the UserPromptSubmit hook, which fails independently.
     logActivity(
       "error",
       "session-end",
-      `Session ended — NOTHING SAVED: 0 messages uploaded despite ${userTurns} user turn(s). ` +
+      `Session ended — NOTHING SAVED: 0 user message(s) uploaded despite ${userTurns} user turn(s) ` +
+        `(${saved.assistant} assistant message(s) did land). ` +
         `Live saving is broken — check that the UserPromptSubmit and Stop hooks still run ` +
         `(see hooks.json timeouts) and back-fill with /honcho:import if needed.`,
       { saved, userTurns },
     );
+  } else if (saved.user < userTurns) {
+    // Not an error on its own: harness-injected turns are counted here but
+    // deliberately skipped by the upload hook. Logged so a real gap is visible.
+    logActivity(
+      "flow",
+      "session-end",
+      `Session ended — ${saved.user} of ${userTurns} user turn(s) uploaded ` +
+        `(${saved.assistant} assistant message(s) saved live)`,
+      { saved, userTurns },
+    );
   } else {
-    logHook("session-end", "Session ended — nothing to save (no user turns)");
+    logHook(
+      "session-end",
+      `Session ended — no upload (${saved.user} user + ${saved.assistant} assistant message(s) saved live)`,
+    );
   }
   process.exit(0);
 }

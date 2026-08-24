@@ -180,7 +180,7 @@ export async function handleStop(): Promise<void> {
     });
 
     logHook("stop", `Saved ${turnMessages.length} assistant message(s)`);
-    recordMessageSave(turnMessages.length, hookInput.session_id);
+    recordMessageSave("assistant", turnMessages.length, hookInput.session_id);
     visStopMessage("out", `saved ${turnMessages.length} assistant msg(s)`);
   } catch (error) {
     logHook("stop", `Upload failed: ${error}`, { error: String(error) });

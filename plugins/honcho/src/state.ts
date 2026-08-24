@@ -7,7 +7,7 @@
 
 import { homedir } from "os";
 import { join } from "path";
-import { writeFileSync, readFileSync, unlinkSync } from "fs";
+import { writeFileSync, readFileSync, unlinkSync, mkdirSync } from "fs";
 
 const DIR = join(homedir(), ".honcho");
 
@@ -21,8 +21,13 @@ function stateFile(sessionId?: string): string {
 function sessionFile(sessionId?: string): string {
   return join(DIR, sessionId ? `session-${sessionId}.json` : "session.json");
 }
-function savesFile(sessionId?: string): string {
-  return join(DIR, sessionId ? `saves-${sessionId}.json` : "saves.json");
+// Unlike the state/session files above there is no global fallback: a tally is
+// only meaningful for one window, and a shared file would let a session with no
+// session_id read a stale positive count left by an earlier one (nothing clears
+// it, since clearSessionFiles needs a session_id). No key means no tally, and
+// session-end reports the validation as unavailable rather than guessing.
+function savesFile(sessionId: string): string {
+  return join(DIR, `saves-${sessionId}.json`);
 }
 
 export type MemoryPhase =
@@ -53,22 +58,40 @@ export function setSessionLink(url: string, name: string | undefined, sessionId?
 // Tally of messages this window actually landed on the server. The upload hooks
 // bump it after a successful POST; session-end reads it so it can tell "nothing
 // to save" apart from "the saving hooks never ran" instead of assuming success.
-export function recordMessageSave(count: number = 1, sessionId?: string): void {
+// User and assistant saves are counted separately on purpose: Stop and
+// UserPromptSubmit fail independently, so a single total would let a successful
+// assistant upload hide the fact that the user's own message never landed.
+export type MessageRole = "user" | "assistant";
+
+export interface MessageSaveTally {
+  user: number;
+  assistant: number;
+}
+
+export function recordMessageSave(role: MessageRole, count: number = 1, sessionId?: string): void {
+  if (!sessionId) return;
   try {
+    // The write has to survive a missing ~/.honcho: a silently dropped tally
+    // would make session-end report a working save path as broken.
+    mkdirSync(DIR, { recursive: true });
+    const tally = getMessageSaveTally(sessionId);
+    tally[role] += count;
     writeFileSync(
       savesFile(sessionId),
-      JSON.stringify({ saved: getMessageSaveCount(sessionId) + count, at: Date.now() }),
+      JSON.stringify({ ...tally, at: Date.now() }),
     );
   } catch {
     // best-effort — a missing tally only costs us a false "broken" warning
   }
 }
 
-export function getMessageSaveCount(sessionId?: string): number {
+export function getMessageSaveTally(sessionId?: string): MessageSaveTally {
+  if (!sessionId) return { user: 0, assistant: 0 };
   try {
-    return JSON.parse(readFileSync(savesFile(sessionId), "utf-8")).saved ?? 0;
+    const raw = JSON.parse(readFileSync(savesFile(sessionId), "utf-8"));
+    return { user: raw.user ?? 0, assistant: raw.assistant ?? 0 };
   } catch {
-    return 0;
+    return { user: 0, assistant: 0 };
   }
 }
 

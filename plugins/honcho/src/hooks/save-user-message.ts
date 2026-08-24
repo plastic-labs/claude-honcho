@@ -62,7 +62,7 @@ export async function handleSaveUserMessage(): Promise<void> {
 
   try {
     await postUserMessage(config, prompt, instanceId || undefined, sessionName);
-    recordMessageSave(1, hookInput.session_id);
+    recordMessageSave("user", 1, hookInput.session_id);
   } catch (e) {
     logHook("save-user-message", `Upload failed: ${e}`);
   }
