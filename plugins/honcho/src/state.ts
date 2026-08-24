@@ -7,7 +7,7 @@
 
 import { homedir } from "os";
 import { join } from "path";
-import { writeFileSync, readFileSync, unlinkSync, mkdirSync } from "fs";
+import { writeFileSync, readFileSync, appendFileSync, unlinkSync, mkdirSync } from "fs";
 
 const DIR = join(homedir(), ".honcho");
 
@@ -27,7 +27,7 @@ function sessionFile(sessionId?: string): string {
 // it, since clearSessionFiles needs a session_id). No key means no tally, and
 // session-end reports the validation as unavailable rather than guessing.
 function savesFile(sessionId: string): string {
-  return join(DIR, `saves-${sessionId}.json`);
+  return join(DIR, `saves-${sessionId}.jsonl`);
 }
 
 export type MemoryPhase =
@@ -68,17 +68,22 @@ export interface MessageSaveTally {
   assistant: number;
 }
 
+// Append-only, one event per line, because the two writers are separate
+// processes with no lock between them: Stop can still be posting a batch while
+// the next UserPromptSubmit fires. A read-modify-write of a single JSON object
+// would let one hook overwrite the other's increment, and a dropped user
+// increment is exactly what session-end reads as "nothing was saved". An
+// O_APPEND write of one short line does not interleave, so the events survive
+// and the reader sums them.
 export function recordMessageSave(role: MessageRole, count: number = 1, sessionId?: string): void {
   if (!sessionId) return;
   try {
     // The write has to survive a missing ~/.honcho: a silently dropped tally
     // would make session-end report a working save path as broken.
     mkdirSync(DIR, { recursive: true });
-    const tally = getMessageSaveTally(sessionId);
-    tally[role] += count;
-    writeFileSync(
+    appendFileSync(
       savesFile(sessionId),
-      JSON.stringify({ ...tally, at: Date.now() }),
+      `${JSON.stringify({ role, count, at: Date.now() })}\n`,
     );
   } catch {
     // best-effort — a missing tally only costs us a false "broken" warning
@@ -86,19 +91,34 @@ export function recordMessageSave(role: MessageRole, count: number = 1, sessionI
 }
 
 export function getMessageSaveTally(sessionId?: string): MessageSaveTally {
-  if (!sessionId) return { user: 0, assistant: 0 };
+  const tally: MessageSaveTally = { user: 0, assistant: 0 };
+  if (!sessionId) return tally;
   try {
-    const raw = JSON.parse(readFileSync(savesFile(sessionId), "utf-8"));
-    return { user: raw.user ?? 0, assistant: raw.assistant ?? 0 };
+    for (const line of readFileSync(savesFile(sessionId), "utf-8").split("\n")) {
+      if (!line) continue;
+      try {
+        const entry = JSON.parse(line) as { role?: string; count?: number };
+        // A torn or unknown line is skipped rather than failing the whole
+        // tally: undercounting costs a warning, discarding everything hides
+        // the saves that did land.
+        if (entry.role === "user" || entry.role === "assistant") {
+          tally[entry.role] += entry.count ?? 0;
+        }
+      } catch {
+        continue;
+      }
+    }
   } catch {
-    return { user: 0, assistant: 0 };
+    // no tally file — the hooks never got as far as a successful upload
   }
+  return tally;
 }
 
 // Clean up this window's files when its session ends, so they don't accumulate.
 export function clearSessionFiles(sessionId?: string): void {
   if (!sessionId) return;
-  for (const f of [stateFile(sessionId), sessionFile(sessionId), savesFile(sessionId)]) {
+  const legacyTally = join(DIR, `saves-${sessionId}.json`); // pre-JSONL tally
+  for (const f of [stateFile(sessionId), sessionFile(sessionId), savesFile(sessionId), legacyTally]) {
     try { unlinkSync(f); } catch { /* already gone */ }
   }
 }

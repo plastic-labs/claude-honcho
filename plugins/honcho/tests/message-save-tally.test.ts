@@ -17,6 +17,25 @@ function runInSandbox(home: string, script: string): string {
   return proc.stdout.toString().trim();
 }
 
+// Same sandbox, but the writers run at once: the tally has no lock, so a
+// read-modify-write implementation loses increments here.
+async function runParallel(home: string, scripts: string[]): Promise<void> {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.startsWith("HONCHO_"))
+  ) as Record<string, string>;
+  const procs = scripts.map((script) =>
+    Bun.spawn(["bun", "-e", script], {
+      env: { ...env, HOME: home },
+      cwd: join(import.meta.dir, ".."),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+  );
+  const codes = await Promise.all(procs.map((p) => p.exited));
+  const bad = codes.findIndex((c) => c !== 0);
+  if (bad !== -1) throw new Error(await new Response(procs[bad].stderr).text());
+}
+
 describe("message save tally", () => {
   test("counts user and assistant saves separately and clears them", () => {
     const home = mkdtempSync(join(tmpdir(), "honcho-tally-"));
@@ -57,6 +76,29 @@ describe("message save tally", () => {
       const dir = join(home, ".honcho");
       const files = existsSync(dir) ? readdirSync(dir) : [];
       expect(files.filter((f) => f.startsWith("saves"))).toEqual([]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+  test("survives concurrent writers from separate hook processes", async () => {
+    const home = mkdtempSync(join(tmpdir(), "honcho-tally-"));
+    try {
+      // Three writers per role, 20 saves each: Stop can still be posting a
+      // batch when the next UserPromptSubmit fires, and neither may clobber
+      // the other's count.
+      const writer = (role: string) =>
+        `const s = await import("./src/state.ts");
+         for (let i = 0; i < 20; i++) s.recordMessageSave("${role}", 1, "sess-race");`;
+      await runParallel(home, [
+        ...Array(3).fill(writer("user")),
+        ...Array(3).fill(writer("assistant")),
+      ]);
+      const out = runInSandbox(
+        home,
+        `const s = await import("./src/state.ts");
+         console.log(JSON.stringify(s.getMessageSaveTally("sess-race")));`
+      );
+      expect(JSON.parse(out)).toEqual({ user: 60, assistant: 60 });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
