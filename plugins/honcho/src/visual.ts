@@ -157,11 +157,12 @@ export function addSystemMessage(existingJson: any, message: string): any {
 // Verbose output — written to ~/.honcho/verbose.log
 // Tail with: tail -f ~/.honcho/verbose.log
 //
-// NOTE: This file-based verbose output is used by SessionStart and
-// UserPromptSubmit hooks, where stdout is always visible to Claude
-// (not just in Ctrl+O). For hooks where stdout is only shown in
-// Ctrl+O (PreCompact, PostToolUse, Stop, SessionEnd), prefer
-// printing verbose data to stdout instead — use formatVerboseBlock().
+// NOTE: Whether a hook's stdout reaches the model is per hook event, so
+// verbose data is only safe on stdout for events that are confirmed
+// Ctrl+O-only. SessionStart, UserPromptSubmit and PreCompact all feed
+// stdout to the model — PreCompact by way of the compaction input — so
+// those hooks must use this file-based path. Reach for the stdout
+// formatters below only for an event confirmed not to be in that group.
 // ============================================
 
 import { homedir } from "os";
@@ -186,8 +187,8 @@ function writeVerbose(text: string): void {
 
 /**
  * Log detailed API response data to verbose log file (~/.honcho/verbose.log).
- * Used by SessionStart and UserPromptSubmit hooks where stdout is always
- * visible to Claude (so we can't use stdout for debug data).
+ * Used by SessionStart, UserPromptSubmit and PreCompact, whose stdout reaches
+ * the model (so we can't use stdout for debug data).
  * View with: tail -f ~/.honcho/verbose.log
  */
 export function verboseApiResult(label: string, data: string | null | undefined): void {
@@ -199,7 +200,7 @@ export function verboseApiResult(label: string, data: string | null | undefined)
 
 /**
  * Log a list of items (like peerCard) to verbose log file (~/.honcho/verbose.log).
- * Used by SessionStart and UserPromptSubmit hooks (stdout always visible).
+ * Used by SessionStart, UserPromptSubmit and PreCompact (stdout reaches the model).
  */
 export function verboseList(label: string, items: string[] | null | undefined): void {
   if (!items || items.length === 0) return;
@@ -226,15 +227,16 @@ export function getVerboseLogPath(): string {
 // ============================================
 // Stdout-based verbose output — for Ctrl+O visibility
 //
-// In Claude Code, Ctrl+O toggles visibility of hook stdout.
-// For hooks where stdout is only shown in Ctrl+O (PreCompact,
-// PostToolUse, Stop, SessionEnd), we can print verbose data
-// directly to stdout so it appears when the user presses Ctrl+O.
+// In Claude Code, Ctrl+O toggles visibility of hook stdout. Where an
+// event's stdout is genuinely Ctrl+O-only, verbose data can be printed
+// there so it surfaces on Ctrl+O without reaching the model. Confirm
+// that per event before using these: on an event whose stdout is model
+// context, they charge the payload to every request that follows.
 // ============================================
 
 /**
  * Format verbose API response data as a plain-text block for stdout.
- * Use in hooks where stdout is only visible in Ctrl+O (PreCompact, Stop, etc.).
+ * Use only in hooks whose stdout is confirmed not to reach the model.
  * Returns empty string if data is null/undefined.
  */
 export function formatVerboseBlock(label: string, data: string | null | undefined): string {
@@ -246,7 +248,7 @@ export function formatVerboseBlock(label: string, data: string | null | undefine
 
 /**
  * Format a list of items as a plain-text block for stdout.
- * Use in hooks where stdout is only visible in Ctrl+O (PreCompact, Stop, etc.).
+ * Use only in hooks whose stdout is confirmed not to reach the model.
  * Returns empty string if items is null/undefined/empty.
  */
 export function formatVerboseList(label: string, items: string[] | null | undefined): string {

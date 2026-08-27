@@ -3,7 +3,7 @@ import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, 
 import { Spinner } from "../spinner.js";
 import { setMemoryState } from "../state.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
-import { formatVerboseBlock, formatVerboseList } from "../visual.js";
+import { verboseApiResult, verboseList } from "../visual.js";
 
 
 interface HookInput {
@@ -177,12 +177,12 @@ export async function handlePreCompact(): Promise<void> {
     const userContext = userContextResult.status === "fulfilled" ? userContextResult.value : null;
     const summaries = summariesResult.status === "fulfilled" ? summariesResult.value : null;
 
-    // Build verbose output blocks — these will be appended to stdout after the
-    // memory card. PreCompact stdout is only shown in Ctrl+O, so verbose data
-    // is hidden by default and visible when the user presses Ctrl+O.
-    const verboseBlocks: string[] = [];
-    verboseBlocks.push(formatVerboseBlock(`pre-compact ${contextLabel}`, (userContext as any)?.representation));
-    verboseBlocks.push(formatVerboseList("pre-compact peerCard", (userContext as any)?.peerCard));
+    // Verbose API data goes to ~/.honcho/verbose.log, never to stdout. This
+    // hook's stdout is fed to the model as compaction input — that is how the
+    // memory card below reaches the summary — so anything printed here is
+    // charged to context on every request until the next compaction.
+    verboseApiResult(`pre-compact ${contextLabel}`, (userContext as any)?.representation);
+    verboseList("pre-compact peerCard", (userContext as any)?.peerCard);
 
     const userDialectic =
       userChatResult.status === "fulfilled"
@@ -209,21 +209,16 @@ export async function handlePreCompact(): Promise<void> {
     }
     setMemoryState("idle", undefined, hookInput.session_id);
 
-    // Add dialectic responses to verbose output
     if (userDialectic) {
-      verboseBlocks.push(formatVerboseBlock(`pre-compact peer.chat(user) → "${config.peerName}"`, userDialectic));
+      verboseApiResult(`pre-compact peer.chat(user) → "${config.peerName}"`, userDialectic);
     }
     if (claudeDialectic) {
-      verboseBlocks.push(formatVerboseBlock(`pre-compact peer.chat(claude) → "${config.aiPeer}"`, claudeDialectic));
+      verboseApiResult(`pre-compact peer.chat(claude) → "${config.aiPeer}"`, claudeDialectic);
     }
 
     logHook("pre-compact", `Memory anchored (${memoryCard.length} chars)`);
 
-    // Output memory card to stdout, followed by verbose API data.
-    // PreCompact stdout is only shown in Ctrl+O, so the verbose blocks
-    // are hidden by default and visible when the user presses Ctrl+O.
-    const verboseOutput = verboseBlocks.filter(Boolean).join("\n");
-    console.log(`[${config.aiPeer}/Honcho Memory Anchor]\n\n${memoryCard}${verboseOutput}`);
+    console.log(`[${config.aiPeer}/Honcho Memory Anchor]\n\n${memoryCard}`);
     process.exit(0);
   } catch (error) {
     logHook("pre-compact", `Error: ${error}`, { error: String(error) });
