@@ -157,12 +157,10 @@ export function addSystemMessage(existingJson: any, message: string): any {
 // Verbose output — written to ~/.honcho/verbose.log
 // Tail with: tail -f ~/.honcho/verbose.log
 //
-// NOTE: Whether a hook's stdout reaches the model is per hook event, so
-// verbose data is only safe on stdout for events that are confirmed
-// Ctrl+O-only. SessionStart, UserPromptSubmit and PreCompact all feed
-// stdout to the model — PreCompact by way of the compaction input — so
-// those hooks must use this file-based path. Reach for the stdout
-// formatters below only for an event confirmed not to be in that group.
+// Whether a hook's stdout reaches the model varies by hook event.
+// SessionStart, UserPromptSubmit and PreCompact all feed stdout to the
+// model — PreCompact by way of the compaction input — so those hooks
+// use this file-based path.
 // ============================================
 
 import { homedir } from "os";
@@ -228,15 +226,15 @@ export function getVerboseLogPath(): string {
 // Stdout-based verbose output — for Ctrl+O visibility
 //
 // In Claude Code, Ctrl+O toggles visibility of hook stdout. Where an
-// event's stdout is genuinely Ctrl+O-only, verbose data can be printed
-// there so it surfaces on Ctrl+O without reaching the model. Confirm
-// that per event before using these: on an event whose stdout is model
-// context, they charge the payload to every request that follows.
+// event's stdout is Ctrl+O-only, verbose data can be printed there
+// rather than logged to file. Confirm that per event: on an event whose
+// stdout is model context, these charge the payload to every request
+// that follows.
 // ============================================
 
 /**
  * Format verbose API response data as a plain-text block for stdout.
- * Use only in hooks whose stdout is confirmed not to reach the model.
+ * Use in hooks whose stdout does not reach the model.
  * Returns empty string if data is null/undefined.
  */
 export function formatVerboseBlock(label: string, data: string | null | undefined): string {
@@ -248,7 +246,7 @@ export function formatVerboseBlock(label: string, data: string | null | undefine
 
 /**
  * Format a list of items as a plain-text block for stdout.
- * Use only in hooks whose stdout is confirmed not to reach the model.
+ * Use in hooks whose stdout does not reach the model.
  * Returns empty string if items is null/undefined/empty.
  */
 export function formatVerboseList(label: string, items: string[] | null | undefined): string {

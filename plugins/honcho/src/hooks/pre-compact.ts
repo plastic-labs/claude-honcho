@@ -177,10 +177,10 @@ export async function handlePreCompact(): Promise<void> {
     const userContext = userContextResult.status === "fulfilled" ? userContextResult.value : null;
     const summaries = summariesResult.status === "fulfilled" ? summariesResult.value : null;
 
-    // Verbose API data goes to ~/.honcho/verbose.log, never to stdout. This
-    // hook's stdout is fed to the model as compaction input — that is how the
-    // memory card below reaches the summary — so anything printed here is
-    // charged to context on every request until the next compaction.
+    // Verbose API data goes to ~/.honcho/verbose.log. This hook's stdout is fed
+    // to the model as compaction input — that is how the memory card below
+    // reaches the summary — so anything printed here is charged to context on
+    // every request until the next compaction.
     verboseApiResult(`pre-compact ${contextLabel}`, (userContext as any)?.representation);
     verboseList("pre-compact peerCard", (userContext as any)?.peerCard);
 

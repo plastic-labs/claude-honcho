@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 
-// PreCompact's stdout is the compaction input, so everything printed there is
-// charged to context on every request until the next compaction. The memory
-// card has to be there; verbose API dumps must not, and they duplicate the card
-// almost exactly when they are. The stdout formatters have no logging gate, so
-// the guard is that this hook never reaches for them in the first place.
+// PreCompact's stdout is compaction input, and the stdout formatters carry no
+// logging gate, so the invariant is that this hook never reaches for them. The
+// runtime path needs a live Honcho client, so these assert against source text
+// instead — a rename or a reformat of the console.log will fail them with
+// nothing actually wrong. Read a failure as "check what moved" first.
 const preCompactSource = readFileSync(join(import.meta.dir, "..", "src", "hooks", "pre-compact.ts"), "utf-8");
 
 describe("pre-compact stdout stays free of verbose dumps", () => {
