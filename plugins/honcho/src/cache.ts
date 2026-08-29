@@ -21,7 +21,7 @@ function ensureCacheDir(): void {
 interface IdCache {
   workspace?: { name: string; id: string };
   peers?: Record<string, string>; // peerName -> peerId
-  sessions?: Record<string, { name: string; id: string; updatedAt: string; instanceId?: string }>; // cwd -> session info
+  sessions?: Record<string, { name: string; id: string; updatedAt: string; instanceId?: string; lastModel?: string }>; // cwd -> session info
   claudeInstanceId?: string; // DEPRECATED: use per-cwd instanceId in sessions map instead
 }
 
@@ -77,6 +77,23 @@ export function setCachedSessionId(cwd: string, name: string, id: string, instan
   const cache = loadIdCache();
   if (!cache.sessions) cache.sessions = {};
   cache.sessions[cwd] = { name, id, updatedAt: new Date().toISOString(), instanceId };
+  saveIdCache(cache);
+}
+
+export function getCachedSessionModel(cwd: string, sessionName: string): string | null {
+  const cache = loadIdCache();
+  const entry = cache.sessions?.[cwd];
+  // A cached model only counts for the session it was recorded against;
+  // a rotated/renamed session must re-sync its metadata.
+  if (!entry || entry.name !== sessionName) return null;
+  return entry.lastModel || null;
+}
+
+export function setCachedSessionModel(cwd: string, sessionName: string, model: string): void {
+  const cache = loadIdCache();
+  const entry = cache.sessions?.[cwd];
+  if (!entry || entry.name !== sessionName) return; // only annotate sessions we already track
+  entry.lastModel = model;
   saveIdCache(cache);
 }
 

@@ -1,7 +1,7 @@
 import { Honcho, Session, Peer } from "@honcho-ai/sdk";
 import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
 import { existsSync, readFileSync } from "fs";
-import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
+import { getInstanceIdForCwd, chunkContent, addMessagesBatched, getCachedSessionModel, setCachedSessionModel } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visStopMessage } from "../visual.js";
 
@@ -22,6 +22,7 @@ interface TranscriptEntry {
   origin?: { kind?: string };
   message?: {
     role?: string;
+    model?: string;
     content: string | Array<{ type: string; text?: string; name?: string; input?: any }>;
   };
   content?: string | Array<{ type: string; text?: string }>;
@@ -59,7 +60,7 @@ function assistantText(entry: TranscriptEntry): string {
 /** Assistant text blocks of the just-completed segment: everything since the last
  *  real user prompt OR wakeup boundary. Wakeup firings would otherwise re-collect
  *  the whole accumulated turn, duplicating blocks already uploaded. */
-export function getCurrentTurnAssistantMessages(transcriptPath: string): Array<{ text: string; timestamp?: string }> {
+export function getCurrentTurnAssistantMessages(transcriptPath: string): Array<{ text: string; timestamp?: string; model?: string }> {
   if (!transcriptPath || !existsSync(transcriptPath)) return [];
 
   let lines: string[];
@@ -85,13 +86,13 @@ export function getCurrentTurnAssistantMessages(transcriptPath: string): Array<{
   // return nothing if there's no last prompt
   if (lastPromptIdx === -1) return [];
 
-  const blocks: Array<{ text: string; timestamp?: string }> = [];
+  const blocks: Array<{ text: string; timestamp?: string; model?: string }> = [];
   for (let i = lastPromptIdx + 1; i < lines.length; i++) {
     try {
       const entry: TranscriptEntry = JSON.parse(lines[i]);
       if ((entry.type || entry.role) !== "assistant") continue;
       const text = assistantText(entry);
-      if (text && text.trim()) blocks.push({ text, timestamp: entry.timestamp });
+      if (text && text.trim()) blocks.push({ text, timestamp: entry.timestamp, model: entry.message?.model });
     } catch {
       continue;
     }
@@ -166,6 +167,7 @@ export async function handleStop(): Promise<void> {
             instance_id: instanceId || undefined,
             type: i === lastIdx ? "assistant_response" : "assistant_intermediate",
             session_affinity: sessionName,
+            model: block.model || undefined,
           },
         })
       )
@@ -180,6 +182,25 @@ export async function handleStop(): Promise<void> {
 
     logHook("stop", `Saved ${turnMessages.length} assistant message(s)`);
     visStopMessage("out", `saved ${turnMessages.length} assistant msg(s)`);
+
+    // Best-effort model attribution on session metadata (ADR-0001). The local
+    // cache gates the extra roundtrip to actual model changes; setMetadata
+    // overwrites the whole object, so merge onto a fresh read and only touch
+    // our own keys. Last-writer-wins across parallel sessions is acceptable.
+    let turnModel: string | undefined;
+    for (let i = turnMessages.length - 1; i >= 0 && !turnModel; i--) turnModel = turnMessages[i].model;
+    if (turnModel && getCachedSessionModel(cwd, sessionName) !== turnModel) {
+      try {
+        const current = await session.getMetadata();
+        const models = Array.isArray(current.models) ? (current.models as string[]) : [];
+        if (!models.includes(turnModel)) models.push(turnModel);
+        await session.setMetadata({ ...current, models, last_model: turnModel });
+        setCachedSessionModel(cwd, sessionName, turnModel);
+        logApiCall("session.setMetadata", "PUT", `last_model=${turnModel}`);
+      } catch (e) {
+        logHook("stop", `Session model metadata update failed: ${e}`);
+      }
+    }
   } catch (error) {
     logHook("stop", `Upload failed: ${error}`, { error: String(error) });
   }
