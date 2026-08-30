@@ -146,6 +146,16 @@ export interface HonchoEndpointConfig {
   environment?: HonchoEnvironment;
   /** Custom URL override (takes precedence over environment) */
   baseUrl?: string;
+  /**
+   * Extra HTTP headers sent on every request to Honcho.
+   *
+   * For self-hosted deployments sitting behind an authenticating proxy, which
+   * gates the request before Honcho ever sees it -- Cloudflare Access
+   * (`CF-Access-Client-Id` / `CF-Access-Client-Secret`), oauth2-proxy,
+   * Authelia. `apiKey` authenticates to Honcho; this authenticates to whatever
+   * stands in front of it. Ignored when unset.
+   */
+  headers?: Record<string, string>;
 }
 
 const HONCHO_BASE_URLS = {
@@ -564,7 +574,32 @@ export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null 
     }
   }
 
+  if (process.env.HONCHO_HEADERS) {
+    const headers = parseHeaders(process.env.HONCHO_HEADERS);
+    if (headers) config.endpoint = { ...config.endpoint, headers };
+  }
+
   return config;
+}
+
+/**
+ * Parse a JSON object of header name -> value.
+ *
+ * Malformed input is ignored rather than fatal: a broken env var should not
+ * stop a hook whose output the user never sees.
+ */
+export function parseHeaders(raw: string): Record<string, string> | undefined {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const headers: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "string") headers[key] = value;
+    }
+    return Object.keys(headers).length > 0 ? headers : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -593,6 +628,10 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   }
   if (process.env.HONCHO_SAVE_GIT_EVENTS !== undefined) {
     config.saveGitEvents = process.env.HONCHO_SAVE_GIT_EVENTS === "true";
+  }
+  if (process.env.HONCHO_HEADERS) {
+    const headers = parseHeaders(process.env.HONCHO_HEADERS);
+    if (headers) config.endpoint = { ...config.endpoint, headers };
   }
   return config;
 }
@@ -959,6 +998,8 @@ export interface HonchoClientOptions {
   workspaceId: string;
   timeout?: number;
   maxRetries?: number;
+  /** Extra headers merged into every SDK request. See HonchoEndpointConfig.headers. */
+  defaultHeaders?: Record<string, string>;
 }
 
 /** Get the base URL for Honcho API. Priority: baseUrl > environment > production */
@@ -979,13 +1020,20 @@ export function getHonchoBaseUrl(config: HonchoCLAUDEConfig): string {
 }
 
 export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClientOptions {
-  return {
+  const options: HonchoClientOptions = {
     apiKey: config.apiKey,
     baseURL: getHonchoBaseUrl(config),
     workspaceId: config.workspace,
     timeout: 120000,
     maxRetries: 1,
   };
+  // Omitted entirely when unset, so the SDK request path is byte-identical for
+  // everyone not self-hosting behind a proxy.
+  const headers = config.endpoint?.headers;
+  if (headers && Object.keys(headers).length > 0) {
+    options.defaultHeaders = headers;
+  }
+  return options;
 }
 
 export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url: string } {

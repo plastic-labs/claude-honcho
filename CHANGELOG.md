@@ -4,6 +4,10 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [0.3.0] - unreleased
 
+### Added
+
+- `endpoint.headers` config key and `HONCHO_HEADERS` env var — extra HTTP headers sent on every request, so a self-hosted deployment behind an authenticating proxy (Cloudflare Access, oauth2-proxy, Authelia) can be reached. Omitted from the client entirely when unset.
+
 ### Changed
 
 - The plugin is distributed as the npm package `@honcho-ai/claude-honcho` and the marketplace installs from it. Releases ship a self-contained bundle that runs under Node, so Bun is no longer a prerequisite for using the plugin — it remains the development toolchain.

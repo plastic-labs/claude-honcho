@@ -384,6 +384,7 @@ Environment variables work for initial bootstrap (before a config file exists). 
 | `HONCHO_AI_PEER`       | No       | `claude`      | AI peer name                                                      |
 | `HONCHO_HOST`          | No       | auto-detected | Force host detection: `claude_code`, `cursor`, or `obsidian`      |
 | `HONCHO_ENDPOINT`      | No       | `production`  | `production`, `local`, or a full URL                              |
+| `HONCHO_HEADERS`       | No       | —             | JSON object of extra HTTP headers, for self-hosting behind an authenticating proxy |
 | `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
 | `HONCHO_SAVE_MESSAGES` | No       | `true`        | Set to `false` to stop saving messages                            |
 | `HONCHO_LOGGING`       | No       | `true`        | Set to `false` to disable file logging to `~/.honcho/`            |
@@ -460,6 +461,37 @@ export HONCHO_ENDPOINT="local"  # Uses localhost:8000
 # or
 export HONCHO_ENDPOINT="http://your-server:8000/v3"
 ```
+
+#### Behind an authenticating proxy
+
+If your deployment sits behind something that authenticates the request before
+Honcho ever sees it — Cloudflare Access, oauth2-proxy, Authelia — add the
+credential headers it expects. `apiKey` authenticates you to Honcho;
+`endpoint.headers` authenticates you to whatever stands in front of it.
+
+```json
+{
+  "endpoint": {
+    "baseUrl": "https://honcho.example.com",
+    "headers": {
+      "CF-Access-Client-Id": "<client-id>",
+      "CF-Access-Client-Secret": "<client-secret>"
+    }
+  }
+}
+```
+
+Or via env var, which keeps the secret out of the config file:
+
+```bash
+export HONCHO_HEADERS='{"CF-Access-Client-Id":"...","CF-Access-Client-Secret":"..."}'
+```
+
+Without this, the proxy answers every request with its own login page instead of
+passing it to Honcho, and the SDK fails parsing HTML as JSON:
+`SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON`. The
+hooks fail silently, so the first symptom is usually that nothing is being
+remembered.
 
 ### Temporarily disabling memory
 

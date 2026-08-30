@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { coerceBoolean, resolveWorktreeMainRoot, worktreeMainRootFor } from "../src/config";
+import {
+  coerceBoolean,
+  getHonchoClientOptions,
+  parseHeaders,
+  resolveWorktreeMainRoot,
+  worktreeMainRootFor,
+} from "../src/config";
 
 describe("coerceBoolean", () => {
   test("passes real booleans through", () => {
@@ -128,5 +134,48 @@ describe("worktree main-root resolution", () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe("parseHeaders", () => {
+  test("parses a JSON object of string values", () => {
+    expect(parseHeaders('{"CF-Access-Client-Id":"abc","CF-Access-Client-Secret":"def"}')).toEqual({
+      "CF-Access-Client-Id": "abc",
+      "CF-Access-Client-Secret": "def",
+    });
+  });
+
+  test("drops non-string values rather than sending them as headers", () => {
+    expect(parseHeaders('{"A":"1","B":2,"C":null}')).toEqual({ A: "1" });
+  });
+
+  test("malformed input is ignored, not fatal", () => {
+    // A broken env var must not take down a hook whose output nobody sees.
+    expect(parseHeaders("not json")).toBeUndefined();
+    expect(parseHeaders("[]")).toBeUndefined();
+    expect(parseHeaders("null")).toBeUndefined();
+    expect(parseHeaders("{}")).toBeUndefined();
+  });
+});
+
+describe("getHonchoClientOptions headers", () => {
+  const base = { apiKey: "k", workspace: "w", peerName: "p", aiPeer: "ai" };
+
+  test("omits defaultHeaders entirely when none are configured", () => {
+    const options = getHonchoClientOptions({ ...base });
+    expect("defaultHeaders" in options).toBe(false);
+  });
+
+  test("omits defaultHeaders when the map is empty", () => {
+    const options = getHonchoClientOptions({ ...base, endpoint: { headers: {} } });
+    expect("defaultHeaders" in options).toBe(false);
+  });
+
+  test("passes configured headers through to the client", () => {
+    const options = getHonchoClientOptions({
+      ...base,
+      endpoint: { baseUrl: "https://honcho.example.com", headers: { "CF-Access-Client-Id": "abc" } },
+    });
+    expect(options.defaultHeaders).toEqual({ "CF-Access-Client-Id": "abc" });
   });
 });
