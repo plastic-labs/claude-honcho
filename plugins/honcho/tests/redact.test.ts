@@ -184,13 +184,43 @@ describe("redactSecrets defaults", () => {
     expect(redactSecrets('ssh --ssh-key id_ed25519')).toBe('ssh --ssh-key id_ed25519');
   });
 
-  test("a following flag is not swallowed as the secret value", () => {
-    // Space-separated boolean flags are common; eating the next flag mangles the
-    // transcript and redacts nothing sensitive.
-    expect(redactSecrets('svc --no-auth --verbose')).toBe('svc --no-auth --verbose');
-    expect(redactSecrets('mysql --password -u root')).toBe('mysql --password -u root');
-    // The `=` form has no such ambiguity: a value may legitimately start with -.
+  test("a value starting with - is still a secret; only a long flag is not", () => {
+    // base64url values start with `-` about one time in 64, and `--token -AbC…`
+    // is a real invocation, so refusing every `-` would leak them. Only `--`
+    // is unambiguous: no token shape begins with two hyphens.
+    expect(redactSecrets('tool --token -AbC_opaqueBase64urlValue'))
+      .toBe('tool --token ***');
+    expect(redactSecrets('mysql --password -u root')).toBe('mysql --password *** root');
     expect(redactSecrets('mysql --password=-hunter2')).toBe('mysql --password=***');
+    expect(redactSecrets('svc --no-auth --verbose')).toBe('svc --no-auth --verbose');
+  });
+
+  test("flags whose value IS the secret but whose name ends elsewhere", () => {
+    // The tail rule cannot reach these: the name ends in string/value/user.
+    // They are named in full because each one is known to carry the secret.
+    expect(redactSecrets('aws secretsmanager create-secret --secret-string topsecretmaterial'))
+      .toBe('aws secretsmanager create-secret --secret-string ***');
+    expect(redactSecrets('aws --secret-value topsecretmaterial'))
+      .toBe('aws --secret-value ***');
+    expect(redactSecrets("az --connection-string 'AccountName=x;AccountKey=topsecret'"))
+      .toBe('az --connection-string ***');
+    expect(redactSecrets('curl --user alice:hunter2 https://example.test'))
+      .toBe('curl --user *** https://example.test');
+    expect(redactSecrets('curl --proxy-user alice:hunter2')).toBe('curl --proxy-user ***');
+    // --user-agent still ends in `agent`, so it is untouched.
+    expect(redactSecrets('curl --user-agent Mozilla/5.0')).toBe('curl --user-agent Mozilla/5.0');
+  });
+
+  test("a suffix after the secret word does not clear the assignment rule", () => {
+    // Upstream matched `\\w*` on BOTH sides of the secret word. The fork dropped
+    // the trailing one, which silently un-redacted every name that continues
+    // past it — SECRET_KEY_BASE is a Rails production secret.
+    expect(redactSecrets('SECRET_KEY_BASE=0123456789abcdef'))
+      .toBe('SECRET_KEY_BASE=***');
+    expect(redactSecrets('DB_PASSWORD_HASH=argon2opaque'))
+      .toBe('DB_PASSWORD_HASH=***');
+    expect(redactSecrets('ACCESS_TOKEN_VALUE=opaquevalue'))
+      .toBe('ACCESS_TOKEN_VALUE=***');
   });
 
   test("Authorization headers", () => {

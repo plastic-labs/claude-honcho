@@ -33,9 +33,23 @@ const TOKEN_END = String.raw`(?![A-Za-z0-9_-])`;
  * whole-name list this replaced matched `--auth` but not `--auth-token`, and had
  * no `--access-key` at all.
  */
+/**
+ * Words that, following a secret word in a KEY=value name, mark the value as
+ * metadata about the secret rather than the secret: `TOKEN_COUNT=3`. Written as
+ * a denylist on purpose — an allowlist of secret-bearing tails would leak every
+ * suffix nobody thought of, and `SECRET_KEY_BASE` is exactly that case.
+ */
+const BENIGN_KEY_TAIL =
+  String.raw`(?:COUNT|RESET|POLICY|EXPIRY|EXPIRES|TTL|LEN|LENGTH|SIZE|TYPE|NAME|ENABLED` +
+  String.raw`|DISABLED|REQUIRED|ROTATION|LIMIT|USAGE|PREFIX|SUFFIX|FORMAT|VERSION|SCOPES?)`;
+
 const SECRET_FLAG_TAIL =
   String.raw`(?:password|passwd|passphrase|pwd|secret|token|bearer|credentials?|auth` +
-  String.raw`|(?:api|access|private|secret|signing|encryption)[-_]?key)`;
+  String.raw`|(?:api|access|private|secret|signing|encryption)[-_]?key` +
+  // Names that end past the secret word, each one known to carry the value
+  // itself: `--secret-string` is how AWS Secrets Manager takes it, and curl's
+  // `--user` is `login:password`. A username redacted with them is cheap.
+  String.raw`|secret[-_]?(?:string|value)|connection[-_]?string|user)`;
 
 const DEFAULT_RULES: RedactRule[] = [
   // PEM private key blocks (PKCS#8, RSA, EC, OpenSSH, etc.)
@@ -46,19 +60,21 @@ const DEFAULT_RULES: RedactRule[] = [
   // KEY=value assignments with a secret-bearing key (PGPASSWORD=..., AWS_SECRET_ACCESS_KEY=...)
   {
     pattern: new RegExp(
-      String.raw`\b(\w*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_KEY|CREDENTIALS?))\s*=\s*` +
+      String.raw`\b(\w*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_KEY|CREDENTIALS?)` +
+        String.raw`(?!_?${BENIGN_KEY_TAIL}\b)\w*)\s*=\s*` +
         SHELL_WORD,
       "gi",
     ),
     replacement: "$1=***",
   },
-  // --password / --token style CLI flags. The space form refuses a value that
-  // starts with `-`: `--no-auth --verbose` would otherwise eat the next flag,
-  // mangling the line to redact nothing. The `=` form keeps no such guard —
-  // there the `-` can only be part of the value.
+  // --password / --token style CLI flags. The space form refuses only a value
+  // starting with `--`, which no token shape does, so `--no-auth --verbose`
+  // stops eating the next flag. A single `-` stays fair game: base64url values
+  // begin with one about once in 64, and losing those to a prettier `--password
+  // -u root` would trade a permanent leak for cosmetics.
   {
     pattern: new RegExp(
-      String.raw`(--(?:[a-z0-9]+[-_])*${SECRET_FLAG_TAIL}(?:[-_]id)?(?:=|[ \t]+(?!-)))` +
+      String.raw`(--(?:[a-z0-9]+[-_])*${SECRET_FLAG_TAIL}(?:[-_]id)?(?:=|[ \t]+(?!--)))` +
         SHELL_WORD,
       "gi",
     ),
