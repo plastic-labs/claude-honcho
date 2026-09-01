@@ -135,6 +135,64 @@ describe("redactSecrets defaults", () => {
       .toBe('mysql --password *** -u root');
   });
 
+  test("secret-bearing flag names, not just an exact list", () => {
+    // The rule used to match a fixed set of whole flag names, so a qualifier on
+    // either side left the value in the clear: --auth matched but --auth-token
+    // did not, and --access-key was absent altogether.
+    expect(redactSecrets('aws --access-key AKIAsynthetic'))
+      .toBe('aws --access-key ***');
+    expect(redactSecrets('aws --access-key=AKIAsynthetic'))
+      .toBe('aws --access-key=***');
+    expect(redactSecrets('aws --access_key synthetic-value'))
+      .toBe('aws --access_key ***');
+    expect(redactSecrets('aws --accesskey synthetic-value'))
+      .toBe('aws --accesskey ***');
+    expect(redactSecrets('aws --access-key-id synthetic-value'))
+      .toBe('aws --access-key-id ***');
+    expect(redactSecrets('aws --aws-secret-access-key synthetic-value'))
+      .toBe('aws --aws-secret-access-key ***');
+    expect(redactSecrets('deploy --api_key synthetic-value'))
+      .toBe('deploy --api_key ***');
+    expect(redactSecrets('deploy --auth-token synthetic-value'))
+      .toBe('deploy --auth-token ***');
+    expect(redactSecrets('deploy --refresh-token synthetic-value'))
+      .toBe('deploy --refresh-token ***');
+    expect(redactSecrets('deploy --session-token synthetic-value'))
+      .toBe('deploy --session-token ***');
+    expect(redactSecrets('oidc --client-secret synthetic-value'))
+      .toBe('oidc --client-secret ***');
+    expect(redactSecrets('ssh --private-key synthetic-value'))
+      .toBe('ssh --private-key ***');
+    expect(redactSecrets('curl --bearer synthetic-value'))
+      .toBe('curl --bearer ***');
+    expect(redactSecrets('gcloud --credentials synthetic-value'))
+      .toBe('gcloud --credentials ***');
+    expect(redactSecrets('ssh --passphrase synthetic-value'))
+      .toBe('ssh --passphrase ***');
+  });
+
+  test("a secret word inside a flag name is not enough", () => {
+    // The word has to end the flag name, or every --max-tokens in a transcript
+    // loses its value for nothing.
+    expect(redactSecrets('llm --max-tokens 4096')).toBe('llm --max-tokens 4096');
+    expect(redactSecrets('api --token-count 42')).toBe('api --token-count 42');
+    expect(redactSecrets('iam --password-policy strict')).toBe('iam --password-policy strict');
+    expect(redactSecrets('git --author sam')).toBe('git --author sam');
+    expect(redactSecrets('svc --auth-type oidc')).toBe('svc --auth-type oidc');
+    expect(redactSecrets('gcloud --credentials-file creds.json'))
+      .toBe('gcloud --credentials-file creds.json');
+    expect(redactSecrets('ssh --ssh-key id_ed25519')).toBe('ssh --ssh-key id_ed25519');
+  });
+
+  test("a following flag is not swallowed as the secret value", () => {
+    // Space-separated boolean flags are common; eating the next flag mangles the
+    // transcript and redacts nothing sensitive.
+    expect(redactSecrets('svc --no-auth --verbose')).toBe('svc --no-auth --verbose');
+    expect(redactSecrets('mysql --password -u root')).toBe('mysql --password -u root');
+    // The `=` form has no such ambiguity: a value may legitimately start with -.
+    expect(redactSecrets('mysql --password=-hunter2')).toBe('mysql --password=***');
+  });
+
   test("Authorization headers", () => {
     expect(redactSecrets('curl -H "Authorization: Bearer eyJhbGciOi"'))
       .toBe('curl -H "Authorization: Bearer ***"');

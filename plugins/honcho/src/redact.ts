@@ -24,6 +24,19 @@ const SHELL_WORD = String.raw`(?:"(?:\\.|[^"\\])*"|'[^']*'|\\.|[^\s;|&"'\\])+`;
  */
 const TOKEN_END = String.raw`(?![A-Za-z0-9_-])`;
 
+/**
+ * The part of a CLI flag name that marks its value as a secret. It must END the
+ * name (an `-id` tail aside), the same discipline the JSON/YAML rule uses: a
+ * merely-contained word would redact every `--max-tokens` and `--password-policy`
+ * in a transcript. Qualifiers on the front are free, so `--auth-token` and
+ * `--aws-secret-access-key` match without being listed one by one — the fixed
+ * whole-name list this replaced matched `--auth` but not `--auth-token`, and had
+ * no `--access-key` at all.
+ */
+const SECRET_FLAG_TAIL =
+  String.raw`(?:password|passwd|passphrase|pwd|secret|token|bearer|credentials?|auth` +
+  String.raw`|(?:api|access|private|secret|signing|encryption)[-_]?key)`;
+
 const DEFAULT_RULES: RedactRule[] = [
   // PEM private key blocks (PKCS#8, RSA, EC, OpenSSH, etc.)
   {
@@ -39,10 +52,14 @@ const DEFAULT_RULES: RedactRule[] = [
     ),
     replacement: "$1=***",
   },
-  // --password / --token style CLI flags
+  // --password / --token style CLI flags. The space form refuses a value that
+  // starts with `-`: `--no-auth --verbose` would otherwise eat the next flag,
+  // mangling the line to redact nothing. The `=` form keeps no such guard —
+  // there the `-` can only be part of the value.
   {
     pattern: new RegExp(
-      String.raw`(--(?:password|passwd|pwd|token|api-?key|secret|auth)[= ])` + SHELL_WORD,
+      String.raw`(--(?:[a-z0-9]+[-_])*${SECRET_FLAG_TAIL}(?:[-_]id)?(?:=|[ \t]+(?!-)))` +
+        SHELL_WORD,
       "gi",
     ),
     replacement: "$1***",
