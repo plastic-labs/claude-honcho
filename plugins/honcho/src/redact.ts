@@ -15,7 +15,7 @@ interface RedactRule {
  * whole rather than stopping at `pre`. Shared by the assignment and CLI-flag
  * rules: two copies would be free to drift apart.
  */
-const SHELL_WORD = String.raw`(?:"(?:\\.|[^"\\])*"|'[^']*'|\\.|[^\s;|&"'\\])+`;
+const SHELL_WORD = String.raw`(?:"(?:\\[\s\S]|[^"\\])*"|'[^']*'|\\[\s\S]|[^\s;|&"'\\])+`;
 
 /**
  * Ends a token shape. A terminal `\b` cannot follow a `-`, which left tokens
@@ -33,15 +33,6 @@ const TOKEN_END = String.raw`(?![A-Za-z0-9_-])`;
  * whole-name list this replaced matched `--auth` but not `--auth-token`, and had
  * no `--access-key` at all.
  */
-/**
- * Words that, following a secret word in a KEY=value name, mark the value as
- * metadata about the secret rather than the secret: `TOKEN_COUNT=3`. Written as
- * a denylist on purpose — an allowlist of secret-bearing tails would leak every
- * suffix nobody thought of, and `SECRET_KEY_BASE` is exactly that case.
- */
-const BENIGN_KEY_TAIL =
-  String.raw`(?:COUNT|RESET|POLICY|EXPIRY|EXPIRES|TTL|LEN|LENGTH|SIZE|TYPE|NAME|ENABLED` +
-  String.raw`|DISABLED|REQUIRED|ROTATION|LIMIT|USAGE|PREFIX|SUFFIX|FORMAT|VERSION|SCOPES?)`;
 
 const SECRET_FLAG_TAIL =
   String.raw`(?:password|passwd|passphrase|pwd|secret|token|bearer|credentials?|auth` +
@@ -49,7 +40,7 @@ const SECRET_FLAG_TAIL =
   // Names that end past the secret word, each one known to carry the value
   // itself: `--secret-string` is how AWS Secrets Manager takes it, and curl's
   // `--user` is `login:password`. A username redacted with them is cheap.
-  String.raw`|secret[-_]?(?:string|value)|connection[-_]?string|user)`;
+  String.raw`|secret[-_]?(?:string|value)|connection[-_]?string|user[-_]?pass(?:word)?|user)`;
 
 const DEFAULT_RULES: RedactRule[] = [
   // PEM private key blocks (PKCS#8, RSA, EC, OpenSSH, etc.)
@@ -60,8 +51,7 @@ const DEFAULT_RULES: RedactRule[] = [
   // KEY=value assignments with a secret-bearing key (PGPASSWORD=..., AWS_SECRET_ACCESS_KEY=...)
   {
     pattern: new RegExp(
-      String.raw`\b(\w*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_KEY|CREDENTIALS?)` +
-        String.raw`(?!_?${BENIGN_KEY_TAIL}\b)\w*)\s*=\s*` +
+      String.raw`\b(\w*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_KEY|CREDENTIALS?)\w*)\s*=\s*` +
         SHELL_WORD,
       "gi",
     ),
@@ -74,7 +64,7 @@ const DEFAULT_RULES: RedactRule[] = [
   // -u root` would trade a permanent leak for cosmetics.
   {
     pattern: new RegExp(
-      String.raw`(--(?:[a-z0-9]+[-_])*${SECRET_FLAG_TAIL}(?:[-_]id)?(?:=|[ \t]+(?!--)))` +
+      String.raw`(--(?:[a-z0-9]+[-_])*${SECRET_FLAG_TAIL}(?:[-_]id)?(?:=|[ \t]+))` +
         SHELL_WORD,
       "gi",
     ),

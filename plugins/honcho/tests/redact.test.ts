@@ -184,15 +184,25 @@ describe("redactSecrets defaults", () => {
     expect(redactSecrets('ssh --ssh-key id_ed25519')).toBe('ssh --ssh-key id_ed25519');
   });
 
-  test("a value starting with - is still a secret; only a long flag is not", () => {
-    // base64url values start with `-` about one time in 64, and `--token -AbC…`
-    // is a real invocation, so refusing every `-` would leak them. Only `--`
-    // is unambiguous: no token shape begins with two hyphens.
+  test("the token after a secret flag is redacted whatever it starts with", () => {
+    // Two lookaheads were tried here and both leaked: (?!-) lost base64url
+    // values, which begin with `-` about one time in 64, and (?!--) lost
+    // `--password --hunter2`, which getopt parses as a value. Redacting a
+    // following flag is cosmetic damage; either miss is permanent. Upstream
+    // guards nothing here either.
     expect(redactSecrets('tool --token -AbC_opaqueBase64urlValue'))
       .toBe('tool --token ***');
+    expect(redactSecrets('tool --password --hunter2')).toBe('tool --password ***');
     expect(redactSecrets('mysql --password -u root')).toBe('mysql --password *** root');
     expect(redactSecrets('mysql --password=-hunter2')).toBe('mysql --password=***');
-    expect(redactSecrets('svc --no-auth --verbose')).toBe('svc --no-auth --verbose');
+  });
+
+  test("a value split across a shell line continuation", () => {
+    // `\\.` cannot cross a newline without the s flag, so the value on the
+    // next line stayed in the clear — upstream redacts the backslash and leaks
+    // the value itself.
+    expect(redactSecrets('PGPASSWORD=\\\nhunter2')).toBe('PGPASSWORD=***');
+    expect(redactSecrets('tool --password \\\nhunter2')).toBe('tool --password ***');
   });
 
   test("flags whose value IS the secret but whose name ends elsewhere", () => {
@@ -207,6 +217,8 @@ describe("redactSecrets defaults", () => {
     expect(redactSecrets('curl --user alice:hunter2 https://example.test'))
       .toBe('curl --user *** https://example.test');
     expect(redactSecrets('curl --proxy-user alice:hunter2')).toBe('curl --proxy-user ***');
+    expect(redactSecrets('tool --userpass alice:hunter2')).toBe('tool --userpass ***');
+    expect(redactSecrets('tool --user-password alice:hunter2')).toBe('tool --user-password ***');
     // --user-agent still ends in `agent`, so it is untouched.
     expect(redactSecrets('curl --user-agent Mozilla/5.0')).toBe('curl --user-agent Mozilla/5.0');
   });
@@ -214,7 +226,10 @@ describe("redactSecrets defaults", () => {
   test("a suffix after the secret word does not clear the assignment rule", () => {
     // Upstream matched `\\w*` on BOTH sides of the secret word. The fork dropped
     // the trailing one, which silently un-redacted every name that continues
-    // past it — SECRET_KEY_BASE is a Rails production secret.
+    // past it — SECRET_KEY_BASE is a Rails production secret. A denylist of
+    // "benign" tails was tried and dropped: it re-leaked PASSWORD_RESET,
+    // TOKEN_PREFIX and TOKEN_SUFFIX, and no name list can tell a secret from
+    // metadata about one.
     expect(redactSecrets('SECRET_KEY_BASE=0123456789abcdef'))
       .toBe('SECRET_KEY_BASE=***');
     expect(redactSecrets('DB_PASSWORD_HASH=argon2opaque'))
@@ -305,8 +320,11 @@ describe("redactSecrets defaults", () => {
       .toBe('https://example.test/run?api_key=***&auth=***&limit=1');
     expect(redactSecrets('https://example.test/run?api-key=synthetic-value&access-key=synthetic-access'))
       .toBe('https://example.test/run?api-key=***&access-key=***');
+    // The assignment rule also fires inside a query string, so these lose their
+    // values. Deliberate: PASSWORD_RESET=<temporary password> is a real secret
+    // and no rule distinguishes it from password_reset=true by name.
     expect(redactSecrets('https://example.test/run?token_count=3&password_reset=true'))
-      .toBe('https://example.test/run?token_count=3&password_reset=true');
+      .toBe('https://example.test/run?token_count=***&password_reset=***');
   });
 
   test("does not mangle ordinary commands", () => {
