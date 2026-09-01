@@ -195,6 +195,9 @@ describe("redactSecrets defaults", () => {
     expect(redactSecrets('tool --password --hunter2')).toBe('tool --password ***');
     expect(redactSecrets('mysql --password -u root')).toBe('mysql --password *** root');
     expect(redactSecrets('mysql --password=-hunter2')).toBe('mysql --password=***');
+    // The cost, stated so it is a decision and not a surprise: a valueless flag
+    // eats the next word.
+    expect(redactSecrets('svc --no-auth --verbose')).toBe('svc --no-auth ***');
   });
 
   test("a value split across a shell line continuation", () => {
@@ -203,6 +206,9 @@ describe("redactSecrets defaults", () => {
     // the value itself.
     expect(redactSecrets('PGPASSWORD=\\\nhunter2')).toBe('PGPASSWORD=***');
     expect(redactSecrets('tool --password \\\nhunter2')).toBe('tool --password ***');
+    // The quoted branch takes the same escape, so a continuation inside quotes
+    // keeps the value in one word rather than ending it at the newline.
+    expect(redactSecrets('PGPASSWORD="hun\\\nter2" psql')).toBe('PGPASSWORD=*** psql');
   });
 
   test("flags whose value IS the secret but whose name ends elsewhere", () => {
@@ -236,6 +242,13 @@ describe("redactSecrets defaults", () => {
       .toBe('DB_PASSWORD_HASH=***');
     expect(redactSecrets('ACCESS_TOKEN_VALUE=opaquevalue'))
       .toBe('ACCESS_TOKEN_VALUE=***');
+    // The three the denylist re-leaked, pinned so it cannot come back.
+    expect(redactSecrets('PASSWORD_RESET=temporary-password-Z9'))
+      .toBe('PASSWORD_RESET=***');
+    expect(redactSecrets('TOKEN_PREFIX=first-secret-fragment'))
+      .toBe('TOKEN_PREFIX=***');
+    expect(redactSecrets('TOKEN_SUFFIX=second-secret-fragment'))
+      .toBe('TOKEN_SUFFIX=***');
   });
 
   test("Authorization headers", () => {

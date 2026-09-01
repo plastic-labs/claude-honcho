@@ -57,11 +57,13 @@ const DEFAULT_RULES: RedactRule[] = [
     ),
     replacement: "$1=***",
   },
-  // --password / --token style CLI flags. The space form refuses only a value
-  // starting with `--`, which no token shape does, so `--no-auth --verbose`
-  // stops eating the next flag. A single `-` stays fair game: base64url values
-  // begin with one about once in 64, and losing those to a prettier `--password
-  // -u root` would trade a permanent leak for cosmetics.
+  // --password / --token style CLI flags. The space form takes whatever word
+  // follows, exactly as upstream does — two guards were tried here and both
+  // leaked: `(?!-)` lost base64url values, which start with `-` about once in
+  // 64, and `(?!--)` lost `--password --hunter2`, which getopt reads as a
+  // value. The cost is that a valueless flag eats the next word, so
+  // `svc --no-auth --verbose` redacts `--verbose`. That is a legible line with
+  // one word missing; the alternative is a secret in the corpus forever.
   {
     pattern: new RegExp(
       String.raw`(--(?:[a-z0-9]+[-_])*${SECRET_FLAG_TAIL}(?:[-_]id)?(?:=|[ \t]+))` +
