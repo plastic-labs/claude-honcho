@@ -44,9 +44,10 @@ Give Claude Code long-term memory that survives context wipes, session restarts,
 
 ## Prerequisites
 
-A Honcho API key from [app.honcho.dev](https://app.honcho.dev). Nothing else --
-the plugin ships as a self-contained bundle and runs on the Node runtime Claude
-Code already provides.
+- A Honcho API key from [app.honcho.dev](https://app.honcho.dev)
+- [Node.js](https://nodejs.org) on your PATH
+
+The plugin ships as a self-contained bundle -- no other dependencies needed.
 
 ## Quick Start
 
@@ -120,7 +121,7 @@ to the peer name you chose in your environment: it will carry across different p
 - **Git Awareness** — Detects branch switches, commits, and changes made outside Claude
 - **Flexible Sessions** — Map sessions per directory, per git branch, or per chat instance
 - **AI Self-Awareness** — Claude knows what it was working on, even after restarts
-- **Cross-Tool Context** — Link workspaces across Claude Code, Cursor, and other hosts so context flows between tools
+- **Configurable Memory Injection** — Choose exactly what context is injected at session start and per turn
 - **Team Support** — Multiple people can share a workspace and build context together
 - **MCP Tools** — Search memory, query knowledge about you, and save insights
 
@@ -128,13 +129,20 @@ to the peer name you chose in your environment: it will carry across different p
 
 The honcho plugin provides these tools via MCP:
 
-| Tool                | Description                                      |
-| ------------------- | ------------------------------------------------ |
-| `search`            | Semantic search across session messages           |
-| `chat`              | Query Honcho's knowledge about the user           |
-| `create_conclusion` | Save insights about the user to memory            |
-| `get_config`        | View current configuration and status             |
-| `set_config`        | Change any configuration field programmatically   |
+| Tool                 | Description                                                    |
+| -------------------- | -------------------------------------------------------------- |
+| `search`             | Semantic search across session messages and saved conclusions  |
+| `chat`               | Query Honcho's knowledge about the user (dialectic reasoning)  |
+| `create_conclusion`  | Save insights about the user to memory                         |
+| `list_conclusions`   | List saved conclusions                                         |
+| `query_conclusions`  | Semantic search over saved conclusions                         |
+| `delete_conclusion`  | Delete a conclusion by ID                                      |
+| `get_briefing`       | Load the session briefing: session summary + peer card         |
+| `get_context`        | Retrieve the full context object (representation + peer card)  |
+| `get_representation` | Retrieve the user's representation string                      |
+| `get_config`         | View current configuration and status                          |
+| `set_config`         | Change any configuration field programmatically                |
+| `honcho_remember`    | Fan-out dialectic recall (only registered when `rememberTool: true`) |
 
 ## Skills
 
@@ -144,6 +152,7 @@ The honcho plugin provides these tools via MCP:
 | `/honcho:config`    | Interactive configuration menu                              |
 | `/honcho:setup`     | First-time setup — validate API key and create config       |
 | `/honcho:interview` | Interview to capture stable, cross-project user preferences |
+| `/honcho:briefing`  | Load the session briefing via a visible tool call            |
 | `/honcho:import`    | Backfill past Claude Code sessions into Honcho memory        |
 | `/honcho:insights`  | Distill memory into CLAUDE.md edits, style rules, skill ideas |
 
@@ -181,6 +190,8 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
 
   // Message handling
   "saveMessages": true,
+  "saveToolUse": false,               // Save [Tool] action summaries (default: false)
+  "saveGitEvents": false,             // Save [Git External] state-change events (default: false)
   "messageUpload": {
     "maxUserTokens": null,            // Truncate user messages (null = no limit)
     "maxAssistantTokens": null,       // Truncate assistant messages (null = no limit)
@@ -193,6 +204,16 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
     "ttlSeconds": 300,                // Cache TTL for context
     "skipDialectic": false            // Skip dialectic chat() calls in user-prompt hook
   },
+  "reasoningLevel": "medium",         // Default dialectic reasoning tier: "minimal" | "low" | "medium" | "high" | "max"
+
+  // Memory injection (see "Memory Injection" below)
+  "injection": {
+    "sessionStart": ["directives", "summary", "peerCard"],
+    "perTurn": ["userContext"]
+  },
+
+  // On-demand recall tool (see "The honcho_remember Tool" below)
+  "rememberTool": false,
 
   // Observation mode
   "observationMode": "unified",       // "unified" (default) | "directional"
@@ -205,6 +226,7 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
 
   // Miscellaneous
   "redactPatterns": [],               // Extra regexes redacted from tool summaries (additive to built-in secret patterns)
+  "statusline": "on",                 // Memory statusline visibility: "on" | "off"
   "enabled": true,
   "logging": true,
 
@@ -222,6 +244,67 @@ Session strategy controls how Honcho maps your conversations to sessions. Change
 | `per-directory` (default) | One session per project directory. Stable across restarts. | Most users — each project accumulates its own memory |
 | `git-branch` | Session name includes the current git branch. Switching branches switches sessions. | Feature-branch workflows where context per branch matters |
 | `chat-instance` | Each Claude Code chat gets its own session. No continuity between restarts. | Ephemeral usage, experimentation, or when you want a clean slate each time |
+
+### Memory Injection
+
+The `injection` config block controls exactly what memory is injected into Claude's context, on two surfaces: **once at session start** and **per prompt**. Each surface selects zero or more components; retrieval knobs shape what those components emit. Configure it with `/honcho:config` (memory injection settings), `set_config`, or by editing `~/.honcho/config.json`.
+
+**Session-start components** (default: `["directives", "summary", "peerCard"]`):
+
+| Component | What it injects |
+| --- | --- |
+| `directives` | Static memory-usage guidance — treat injected memory as background, use `chat`/`search` for recall, save insights with `create_conclusion` |
+| `summary` | The session's long summary narrative (skipped on a fresh session) |
+| `peerCard` | Your peer card — a structured identity/attribute list |
+| `peerRepresentation` | Your full derived representation, injected at full length |
+| `briefing` | A nudge for Claude to call the `get_briefing` MCP tool instead of injecting the summary and peer card inline — the tool call renders as an expandable row in the UI. Use it *in place of* `summary`/`peerCard`, not alongside them |
+
+**Per-turn components** (default: `["userContext"]`):
+
+| Component | What it injects |
+| --- | --- |
+| `userContext` | A fresh, prompt-scoped context fetch for *you* — conclusions selected by semantic search, shaped by the retrieval knobs below |
+| `assistantContext` | The same context fetch for the AI peer — what Honcho has derived about the assistant itself |
+| `sessionContext` | Recent raw messages from the currently mapped Honcho session, which can span other Claude instances sharing the session name |
+| `dialectic` | A reasoned `chat()` answer over your representation, seeded from `dialecticTemplate`. Off by default — much slower than a context fetch |
+
+**Retrieval knobs:**
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `searchTopK` | `10` | Top-K conclusions pulled by the context fetch's semantic search |
+| `maxConclusions` | `15` | Max conclusions injected per context fetch |
+| `searchMaxDistance` | `0.6` | Max cosine distance for the semantic search — lower is stricter |
+| `searchQuerySource` | `"prompt"` | What drives the per-turn search: the raw `"prompt"` or extracted `"topics"` |
+| `sessionContextTokens` | `1500` | Token budget for the `sessionContext` message fetch |
+| `dialecticTemplate` | compact factual recall | Query template for the `dialectic` component; the prompt is substituted into `%{user_query}` |
+| `dialecticReasoning` | `"medium"` | Reasoning tier for the per-turn `dialectic` call — separate from the top-level `reasoningLevel` |
+
+If injected context feels off-topic, lower `searchMaxDistance`; if too sparse, raise it or bump `searchTopK`.
+
+**Visibility:** per-turn components report a one-line summary in the terminal by default. To print a component's full injected payload, list it in `showContents`:
+
+```json
+{ "injection": { "showContents": ["userContext", "sessionContext"] } }
+```
+
+### The `honcho_remember` Tool
+
+An experimental on-demand recall tool. When enabled, Claude gets a `honcho_remember` MCP tool that fans out up to 5 parallel dialectic queries about you and returns per-question answers — useful before starting a task, when catching up ("where were we?"), or whenever your history could shape the response.
+
+To enable it, just ask Claude: *"Set my Honcho rememberTool config to true"* (it uses the `set_config` tool). Or set it in `~/.honcho/config.json`:
+
+```json
+{
+  "hosts": {
+    "claude_code": { "rememberTool": true }
+  }
+}
+```
+
+Then restart Claude Code — MCP tools register at startup.
+
+When it's on, the injected session-start directives steer Claude to use it proactively as the primary recall path.
 
 ### Observation Mode
 
