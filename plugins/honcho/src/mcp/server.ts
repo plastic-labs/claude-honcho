@@ -25,6 +25,7 @@ import {
   type HonchoEnvironment,
   type ObservationMode,
   type StatuslineMode,
+  type StatusMessagesMode,
   type SessionStartComponent,
   type PerTurnComponent,
   SESSION_START_COMPONENTS,
@@ -119,6 +120,7 @@ function handleGetConfig(cwd: string) {
     reasoningLevel: cfg.reasoningLevel ?? "medium",
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
+    statusMessages: cfg.statusMessages ?? "on",
     redactPatterns: cfg.redactPatterns ?? [],
     injection: cfg.injection ?? {},
     rememberTool: cfg.rememberTool === true,
@@ -500,6 +502,21 @@ function handleSetConfig(args: Record<string, unknown>) {
       break;
     }
 
+    case "statusMessages": {
+      const mode = String(value).toLowerCase();
+      if (mode !== "on" && mode !== "off") {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: "statusMessages must be one of: on, off" }, null, 2) }],
+          isError: true,
+        };
+      }
+      previousValue = cfg.statusMessages ?? "on";
+      cfg.statusMessages = mode as StatusMessagesMode;
+      // statusMessages is a global field — write to root (user-directed action)
+      saveRootField("statusMessages", cfg.statusMessages);
+      break;
+    }
+
     case "redactPatterns": {
       const arr = coerceStringArray(value);
       if (!arr) {
@@ -680,6 +697,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     reasoningLevel: cfg.reasoningLevel ?? "medium",
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
+    statusMessages: cfg.statusMessages ?? "on",
     redactPatterns: cfg.redactPatterns ?? [],
     injection: cfg.injection ?? {},
     rememberTool: cfg.rememberTool === true,
@@ -984,6 +1002,8 @@ export async function runMcpServer(): Promise<void> {
                   "contextRefresh.skipDialectic",
                   "reasoningLevel",
                   "observationMode",
+                  "statusline",
+                  "statusMessages",
                   "redactPatterns",
                   "injection.sessionStart",
                   "injection.perTurn",

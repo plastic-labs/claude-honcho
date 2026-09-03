@@ -2,16 +2,22 @@
  * Visual logging for honcho hooks
  *
  * Only hooks that output JSON with `systemMessage` show inline indicators in Claude Code:
+ * - SessionStart — addSystemMessage() adds to existing JSON output
  * - UserPromptSubmit — addSystemMessage() adds to existing JSON output
  * - PostToolUse — visCapture() outputs JSON with systemMessage
  * - Stop — visStopMessage() outputs JSON with systemMessage
  *
- * SessionStart, SessionEnd, and PreCompact output plain text to stdout (context injection),
+ * SessionEnd and PreCompact output plain text to stdout (context injection),
  * so they cannot show inline indicators. Their activity is logged to the verbose log file only.
+ *
+ * `statusMessages: "off"` mutes every indicator at the two emission points
+ * below — visMessage() and addSystemMessage(). The builders above them stay
+ * pure formatters, so there is exactly one place to keep in sync when a new
+ * surface starts reporting.
  */
 
 import { arrows, symbols } from "./unicode.js";
-import { isLoggingEnabled } from "./config.js";
+import { areStatusMessagesEnabled, isLoggingEnabled } from "./config.js";
 
 // Plain text (no ANSI) for systemMessage — shown in Claude Code's UI
 const sym = {
@@ -23,6 +29,24 @@ const sym = {
 };
 
 type HookDirection = "in" | "out" | "info" | "ok" | "warn" | "error";
+
+/**
+ * Resolved once per hook process: every hook is a short-lived process, so the
+ * config file cannot change underneath us, and this sits on the per-turn path.
+ * A config that fails to load leaves the indicators on — muting is opt-in.
+ */
+let statusMessagesEnabled: boolean | undefined;
+
+function statusMessagesOn(): boolean {
+  if (statusMessagesEnabled === undefined) {
+    try {
+      statusMessagesEnabled = areStatusMessagesEnabled();
+    } catch {
+      statusMessagesEnabled = true;
+    }
+  }
+  return statusMessagesEnabled;
+}
 
 const directionSymbol: Record<HookDirection, string> = {
   in:    sym.left,
@@ -45,6 +69,7 @@ function formatLine(direction: HookDirection, hookName: string, message: string)
  * Use this for hooks that don't already write to stdout (PostToolUse, Stop)
  */
 export function visMessage(direction: HookDirection, hookName: string, message: string): void {
+  if (!statusMessagesOn()) return;
   const line = formatLine(direction, hookName, message);
   console.log(JSON.stringify({ systemMessage: line }));
 }
@@ -147,9 +172,12 @@ export function visStopMessage(direction: HookDirection, message: string): void 
 
 /**
  * Add systemMessage to an existing hookSpecificOutput JSON object
- * Used by UserPromptSubmit which already outputs JSON
+ * Used by SessionStart and UserPromptSubmit, which already output JSON.
+ * Returns the object untouched when status messages are muted, so the hook's
+ * own payload (additionalContext) is unaffected.
  */
 export function addSystemMessage(existingJson: any, message: string): any {
+  if (!statusMessagesOn()) return existingJson;
   return { ...existingJson, systemMessage: message };
 }
 
