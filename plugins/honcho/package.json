@@ -15,6 +15,7 @@
   "author": "Plastic Labs",
   "license": "MIT",
   "dependencies": {
+    "@honcho-ai/harness-plugin-core": "^0.1.0",
     "@honcho-ai/sdk": "^2.1.0",
     "@modelcontextprotocol/sdk": "^1.26.0"
   },

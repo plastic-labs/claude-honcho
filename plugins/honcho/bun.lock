@@ -5,6 +5,7 @@
     "": {
       "name": "claude-honcho",
       "dependencies": {
+        "@honcho-ai/harness-plugin-core": "^0.1.0",
         "@honcho-ai/sdk": "^2.1.0",
         "@modelcontextprotocol/sdk": "^1.26.0",
       },
@@ -15,6 +16,8 @@
     },
   },
   "packages": {
+    "@honcho-ai/harness-plugin-core": ["@honcho-ai/harness-plugin-core@0.1.0", "", {}, "sha512-6xem7mPQMfYcXpn699BuelSOnIfugsj3kC3Mx7p4oK2xAp8PCkHyVFRkYOjSjTxDTMBowdQwCBu+494IC4xHvw=="],
+
     "@honcho-ai/sdk": ["@honcho-ai/sdk@2.1.0", "", { "dependencies": { "zod": "4.0.0" } }, "sha512-GPyeKTDRhg5jd77RAh63LwrxLxnbluLdYUF1gsI6g6CU4eTyv8s1+KJ3/OTCiBwJ/dhjznNvQUngkUjjnNzUTA=="],
 
     "@hono/node-server": ["@hono/node-server@1.19.9", "", { "peerDependencies": { "hono": "^4" } }, "sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw=="],
