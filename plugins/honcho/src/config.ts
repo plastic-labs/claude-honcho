@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { captureGitState } from "./git.js";
 import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
+import { telemetryHeaders } from "@honcho-ai/harness-plugin-core";
 
 function sanitizeForSessionName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
@@ -959,6 +960,7 @@ export interface HonchoClientOptions {
   workspaceId: string;
   timeout?: number;
   maxRetries?: number;
+  defaultHeaders?: Record<string, string>;
 }
 
 /** Get the base URL for Honcho API. Priority: baseUrl > environment > production */
@@ -978,6 +980,15 @@ export function getHonchoBaseUrl(config: HonchoCLAUDEConfig): string {
   return getHonchoBaseUrlForEndpoint(config.endpoint);
 }
 
+/** Client identity headers (`X-Honcho-Host`, `X-Honcho-Plugin`) for telemetry attribution. */
+export function getTelemetryHeaders(host: HonchoHost = getDetectedHost()): Record<string, string> {
+  return telemetryHeaders({
+    host: host.replace(/_/g, "-"),
+    plugin: "claude-honcho",
+    pluginVersion: getPluginVersion(),
+  });
+}
+
 export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClientOptions {
   return {
     apiKey: config.apiKey,
@@ -985,6 +996,7 @@ export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClient
     workspaceId: config.workspace,
     timeout: 120000,
     maxRetries: 1,
+    defaultHeaders: getTelemetryHeaders(),
   };
 }
 

@@ -4,6 +4,10 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [0.3.0] - unreleased
 
+### Added
+
+- Every Honcho request carries `X-Honcho-Host` and `X-Honcho-Plugin` headers (via `@honcho-ai/harness-plugin-core`) so server-side telemetry can attribute traffic to the plugin and host harness.
+
 ### Changed
 
 - The plugin is distributed as the npm package `@honcho-ai/claude-honcho` and the marketplace installs from it. Releases ship a self-contained bundle that runs under Node, so Bun is no longer a prerequisite for using the plugin — it remains the development toolchain.
