@@ -2,6 +2,7 @@ import { Honcho, Session, Peer } from "@honcho-ai/sdk";
 import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
 import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { redactSecrets } from "../redact.js";
 import { isHarnessInjected, isTerseReply } from "./user-prompt.js";
 
 interface HookInput {
@@ -83,7 +84,8 @@ async function postUserMessage(
   const userPeer = new Peer(config.peerName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
   const createdAt = new Date().toISOString();
   const configuration = isTerseReply(prompt) ? { reasoning: { enabled: false } } : undefined;
-  const messages = chunkContent(prompt).map((chunk) =>
+  const redactedPrompt = redactSecrets(prompt, config.redactPatterns);
+  const messages = chunkContent(redactedPrompt).map((chunk) =>
     userPeer.message(chunk, {
       createdAt,
       metadata: {

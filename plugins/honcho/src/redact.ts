@@ -1,5 +1,5 @@
 /**
- * Best-effort secret redaction for tool-capture summaries.
+ * Best-effort secret redaction for uploaded content.
  * Regex-based, so novel secret formats pass through; users extend the
  * defaults via the `redactPatterns` config.
  */
@@ -9,15 +9,67 @@ interface RedactRule {
   replacement: string;
 }
 
+/**
+ * One complete shell word. Adjacent quoted, escaped and bare fragments are a
+ * single value to the shell, so `PGPASSWORD=pre"secret suffix"` must redact
+ * whole rather than stopping at `pre`. Shared by the assignment and CLI-flag
+ * rules: two copies would be free to drift apart.
+ */
+const SHELL_WORD = String.raw`(?:"(?:\\[\s\S]|[^"\\])*"|'[^']*'|\\[\s\S]|[^\s;|&"'\\])+`;
+
+/**
+ * Ends a token shape. A terminal `\b` cannot follow a `-`, which left tokens
+ * ending in a hyphen matched short — or, at their minimum length, not matched
+ * at all, since there is nothing to backtrack into.
+ */
+const TOKEN_END = String.raw`(?![A-Za-z0-9_-])`;
+
+/**
+ * The part of a CLI flag name that marks its value as a secret. It must END the
+ * name (an `-id` tail aside), the same discipline the JSON/YAML rule uses: a
+ * merely-contained word would redact every `--max-tokens` and `--password-policy`
+ * in a transcript. Qualifiers on the front are free, so `--auth-token` and
+ * `--aws-secret-access-key` match without being listed one by one — the fixed
+ * whole-name list this replaced matched `--auth` but not `--auth-token`, and had
+ * no `--access-key` at all.
+ */
+
+const SECRET_FLAG_TAIL =
+  String.raw`(?:password|passwd|passphrase|pwd|secret|token|bearer|credentials?|auth` +
+  String.raw`|(?:api|access|private|secret|signing|encryption)[-_]?key` +
+  // Names that end past the secret word, each one known to carry the value
+  // itself: `--secret-string` is how AWS Secrets Manager takes it, and curl's
+  // `--user` is `login:password`. A username redacted with them is cheap.
+  String.raw`|secret[-_]?(?:string|value)|connection[-_]?string|user[-_]?pass(?:word)?|user)`;
+
 const DEFAULT_RULES: RedactRule[] = [
+  // PEM private key blocks (PKCS#8, RSA, EC, OpenSSH, etc.)
+  {
+    pattern: /-----BEGIN ((?:[A-Z0-9]+ )?PRIVATE KEY)-----[\s\S]*?-----END \1-----/g,
+    replacement: "***",
+  },
   // KEY=value assignments with a secret-bearing key (PGPASSWORD=..., AWS_SECRET_ACCESS_KEY=...)
   {
-    pattern: /\b(\w*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_KEY|CREDENTIALS?)\w*)\s*=\s*("[^"]*"|'[^']*'|[^\s;|&"']+)/gi,
+    pattern: new RegExp(
+      String.raw`\b(\w*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_KEY|CREDENTIALS?)\w*)\s*=\s*` +
+        SHELL_WORD,
+      "gi",
+    ),
     replacement: "$1=***",
   },
-  // --password / --token style CLI flags
+  // --password / --token style CLI flags. The space form takes whatever word
+  // follows, exactly as upstream does — two guards were tried here and both
+  // leaked: `(?!-)` lost base64url values, which start with `-` about once in
+  // 64, and `(?!--)` lost `--password --hunter2`, which getopt reads as a
+  // value. The cost is that a valueless flag eats the next word, so
+  // `svc --no-auth --verbose` redacts `--verbose`. That is a legible line with
+  // one word missing; the alternative is a secret in the corpus forever.
   {
-    pattern: /(--(?:password|passwd|pwd|token|api-?key|secret|auth)[= ])(?:"[^"]*"|'[^']*'|[^\s;|&"']+)/gi,
+    pattern: new RegExp(
+      String.raw`(--(?:[a-z0-9]+[-_])*${SECRET_FLAG_TAIL}(?:[-_]id)?(?:=|[ \t]+))` +
+        SHELL_WORD,
+      "gi",
+    ),
     replacement: "$1***",
   },
   // Authorization headers
@@ -30,9 +82,37 @@ const DEFAULT_RULES: RedactRule[] = [
     pattern: /([a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:)[^@\s]+@/gi,
     replacement: "$1***@",
   },
-  // Well-known token shapes: Honcho, AWS, OpenAI/Anthropic-style sk-, GitHub, Slack, GitLab, npm
+  // JSON/YAML secret assignments. Require a secret-bearing key suffix so
+  // ordinary fields such as token_count and password_policy stay intact.
   {
-    pattern: /\b(?:hch[_-]?[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{16,}|(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36})\b/g,
+    pattern: /(^|[\s{,])((?:["'])?[a-z0-9_-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|credentials?|client[_-]?secret|private[_-]?key)(?:["'])?\s*:\s*)(?:(["'])(?:\\.|(?!\3)[^\\\r\n])*\3|[^\s#,\]}]+)/gim,
+    replacement: "$1$2$3***$3",
+  },
+  // Credentials in URL query strings
+  {
+    pattern: /([?&](?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|auth|credentials?)=)[^&#\s"']+/gi,
+    replacement: "$1***",
+  },
+  // JSON Web Tokens
+  {
+    pattern: new RegExp(
+      String.raw`\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}` + TOKEN_END,
+      "g",
+    ),
+    replacement: "***",
+  },
+  // Telegram bot tokens
+  {
+    pattern: new RegExp(String.raw`\b\d{9,10}:AA[A-Za-z0-9_-]{35,}` + TOKEN_END, "g"),
+    replacement: "***",
+  },
+  // Well-known token shapes: Honcho, AWS, OpenAI/Anthropic-style sk-, NVIDIA, Google, GitHub, Slack, GitLab, npm
+  {
+    pattern: new RegExp(
+      String.raw`\b(?:hch[_-]?[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{16,}|nvapi-[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{35}|(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36})` +
+        TOKEN_END,
+      "g",
+    ),
     replacement: "***",
   },
 ];

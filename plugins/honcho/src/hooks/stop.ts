@@ -3,6 +3,7 @@ import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, 
 import { existsSync, readFileSync } from "fs";
 import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { redactSecrets } from "../redact.js";
 import { visStopMessage } from "../visual.js";
 
 interface HookInput {
@@ -158,8 +159,9 @@ export async function handleStop(): Promise<void> {
     // Last block is the turn's response; earlier ones are intermediate reasoning.
     const fallbackTs = new Date().toISOString();
     const lastIdx = turnMessages.length - 1;
-    const messages = turnMessages.flatMap((block, i) =>
-      chunkContent(block.text).map((chunk) =>
+    const messages = turnMessages.flatMap((block, i) => {
+      const redactedText = redactSecrets(block.text, config.redactPatterns);
+      return chunkContent(redactedText).map((chunk) =>
         aiPeer.message(chunk, {
           createdAt: block.timestamp || fallbackTs,
           metadata: {
@@ -168,8 +170,8 @@ export async function handleStop(): Promise<void> {
             session_affinity: sessionName,
           },
         })
-      )
-    );
+      );
+    });
     logApiCall("session.addMessages", "POST", `${turnMessages.length} assistant msg(s), ${messages.length} chunk(s), direct`);
 
     const session = new Session(sessionName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
