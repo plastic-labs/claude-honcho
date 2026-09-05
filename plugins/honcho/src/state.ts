@@ -7,7 +7,7 @@
 
 import { homedir } from "os";
 import { join } from "path";
-import { writeFileSync, unlinkSync } from "fs";
+import { writeFileSync, readFileSync, unlinkSync } from "fs";
 
 const DIR = join(homedir(), ".honcho");
 
@@ -20,6 +20,20 @@ function stateFile(sessionId?: string): string {
 }
 function sessionFile(sessionId?: string): string {
   return join(DIR, sessionId ? `session-${sessionId}.json` : "session.json");
+}
+// The per-session record of which conclusions UserPromptSubmit has already
+// injected. Deliberately a SIBLING of state-*.json rather than a field inside
+// it: setMemoryState() rewrites state-${sessionId}.json wholesale on every
+// phase change (several times per turn), so a ledger stored there would be
+// clobbered constantly. Same directory, same session_id keying, and
+// clearSessionFiles() cleans it up with the rest.
+/**
+ * Path to a session's dedup ledger.
+ *
+ * @param sessionId - Session key; omitted yields the shared `dedup.json`.
+ */
+function dedupFile(sessionId?: string): string {
+  return join(DIR, sessionId ? `dedup-${sessionId}.json` : "dedup.json");
 }
 
 export type MemoryPhase =
@@ -47,10 +61,105 @@ export function setSessionLink(url: string, name: string | undefined, sessionId?
   }
 }
 
-// Clean up this window's files when its session ends, so they don't accumulate.
+/**
+ * Which conclusions this session has already injected, and when.
+ *
+ * `turn` counts injecting UserPromptSubmit turns (trivial and harness-injected
+ * prompts exit before reaching this, so they don't advance it). `seen` maps a
+ * short content hash to the turn it was LAST ACTUALLY injected on — a
+ * suppressed repeat deliberately does not refresh its stamp, so a conclusion
+ * becomes eligible again a fixed window after its last real injection rather
+ * than being buried for the rest of the session.
+ *
+ * Only hashes are stored, never conclusion text: the ledger stays tiny and no
+ * memory content is duplicated into a second file on disk.
+ */
+export interface DedupLedger {
+  turn: number;
+  seen: Record<string, number>;
+}
+
+/** Entries older than this many turns are dropped on save, bounding file size. */
+export const DEDUP_LEDGER_RETAIN_TURNS = 50;
+
+/** Drop stamps too old to ever matter again. Pure, so it is directly testable. */
+export function pruneLedger(ledger: DedupLedger): DedupLedger {
+  const cutoff = ledger.turn - DEDUP_LEDGER_RETAIN_TURNS;
+  const seen: Record<string, number> = {};
+  for (const [key, turn] of Object.entries(ledger.seen)) {
+    if (turn > cutoff) seen[key] = turn;
+  }
+  return { turn: ledger.turn, seen };
+}
+
+/**
+ * A ledger's `seen` map must be a plain object of finite numeric turn stamps.
+ * Arrays and non-numeric values are treated as corruption and discarded.
+ */
+function isValidSeenMap(seen: unknown): seen is Record<string, number> {
+  if (!seen || typeof seen !== "object" || Array.isArray(seen)) return false;
+  return Object.values(seen as Record<string, unknown>).every(
+    (v) => typeof v === "number" && Number.isFinite(v),
+  );
+}
+
+/**
+ * Read this session's dedup ledger from disk.
+ *
+ * Never throws: a missing, unreadable, or corrupt ledger yields a clean
+ * `{ turn: 0, seen: {} }`. Losing a ledger costs at most one turn of repeated
+ * conclusions, so failing open is strictly better than failing the hook.
+ *
+ * @param sessionId - Session key; omitted falls back to the shared file.
+ * @returns A validated ledger, with any corrupt `seen` map discarded.
+ */
+export function loadDedupLedger(sessionId?: string): DedupLedger {
+  try {
+    const raw = JSON.parse(readFileSync(dedupFile(sessionId), "utf-8"));
+    const turn = typeof raw?.turn === "number" && raw.turn >= 0 ? raw.turn : 0;
+    // `typeof x === "object"` alone admits arrays and non-numeric stamps. A
+    // stamp that will not coerce to a number makes `ledger.turn - lastTurn`
+    // NaN, and `NaN > DEDUP_WINDOW_TURNS` is false — so that conclusion reads
+    // as a permanent repeat. Only *kept* entries get restamped, so a poisoned
+    // entry never heals for the life of the session. Cheap to reject up front.
+    const seen = isValidSeenMap(raw?.seen) ? raw.seen : {};
+    return { turn, seen };
+  } catch {
+    // Missing or corrupt: start clean. A lost ledger costs at most one turn of
+    // repeats — never any memory content.
+    return { turn: 0, seen: {} };
+  }
+}
+
+/**
+ * Persist the ledger, pruned to {@link DEDUP_LEDGER_RETAIN_TURNS}.
+ *
+ * Best-effort: a failed write is swallowed, because the only consequence is
+ * that the next turn may re-inject conclusions it already showed.
+ *
+ * @param ledger - Ledger to write; pruned before serialization.
+ * @param sessionId - Session key; omitted falls back to the shared file.
+ */
+export function saveDedupLedger(ledger: DedupLedger, sessionId?: string): void {
+  try {
+    writeFileSync(dedupFile(sessionId), JSON.stringify(pruneLedger(ledger)));
+  } catch {
+    // best-effort — a failed write just means the next turn may repeat itself
+  }
+}
+
+/**
+ * Delete this window's per-session files when its session ends, so they don't
+ * accumulate: the state, session, and dedup-ledger files.
+ *
+ * A missing file is not an error. Without a `sessionId` there is nothing
+ * session-scoped to remove, so this is a no-op.
+ *
+ * @param sessionId - Session whose files should be removed.
+ */
 export function clearSessionFiles(sessionId?: string): void {
   if (!sessionId) return;
-  for (const f of [stateFile(sessionId), sessionFile(sessionId)]) {
+  for (const f of [stateFile(sessionId), sessionFile(sessionId), dedupFile(sessionId)]) {
     try { unlinkSync(f); } catch { /* already gone */ }
   }
 }
