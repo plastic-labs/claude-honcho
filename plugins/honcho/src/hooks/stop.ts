@@ -3,6 +3,7 @@ import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, 
 import { existsSync, readFileSync } from "fs";
 import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
+import { recordMessageSave } from "../state.js";
 import { visStopMessage } from "../visual.js";
 
 interface HookInput {
@@ -179,6 +180,7 @@ export async function handleStop(): Promise<void> {
     });
 
     logHook("stop", `Saved ${turnMessages.length} assistant message(s)`);
+    recordMessageSave("assistant", turnMessages.length, hookInput.session_id);
     visStopMessage("out", `saved ${turnMessages.length} assistant msg(s)`);
   } catch (error) {
     logHook("stop", `Upload failed: ${error}`, { error: String(error) });
