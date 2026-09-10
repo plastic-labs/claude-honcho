@@ -38,6 +38,8 @@ const SKIP_CONTEXT_PATTERNS = [
 // system reminders.
 const HARNESS_INJECTED_PATTERNS = [
   /^<task-notification>/,
+  // Channel envelopes arrive in the user-message slot; they are not human speech.
+  /^<channel\b/,
   /^<local-command-stdout>/,
   /^<command-name>/,
   /^<command-message>/,
