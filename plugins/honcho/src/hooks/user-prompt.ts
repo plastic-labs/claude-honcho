@@ -38,6 +38,9 @@ const SKIP_CONTEXT_PATTERNS = [
 // system reminders.
 const HARNESS_INJECTED_PATTERNS = [
   /^<task-notification>/,
+  // SendMessage between Claude Code sessions arrives in the user-message slot
+  // wrapped in this envelope. It is another agent's text, not the human's.
+  /^<cross-session-message\b/,
   /^<local-command-stdout>/,
   /^<command-name>/,
   /^<command-message>/,
