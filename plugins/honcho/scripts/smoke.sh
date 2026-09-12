@@ -18,7 +18,7 @@ cd "$SMOKE"
 # Hooks + MCP server: disabled config, exits after config load.
 # (Standalone assignment so a mktemp failure propagates under set -e.)
 TMP_HOME="$(mktemp -d)"
-export HOME="$TMP_HOME"
+export HOME="$TMP_HOME" USERPROFILE="$TMP_HOME" # USERPROFILE: node homedir() on Windows
 mkdir -p "$HOME/.honcho"
 echo '{"apiKey":"smoke","enabled":false}' > "$HOME/.honcho/config.json"
 
@@ -37,10 +37,25 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 echo "smoke: dist/skills/backfill-runner.js"
 bounded node dist/skills/backfill-runner.js --dry-run </dev/null >/dev/null
 
+# The per-turn hook must actually see the prompt: the stdin payload has to
+# survive the initHook() -> getCachedStdin() hand-off across bundle chunks
+# (#133 shipped a bundle where it did not, and every other smoke here passed).
+# An enabled config with an unreachable endpoint gets past the config gate;
+# the hook logs the prompt before its first network call and fails fast on
+# connect, so the run stays offline. Exit status is not the signal, the log is.
+TMP_HOME="$(mktemp -d)"
+export HOME="$TMP_HOME" USERPROFILE="$TMP_HOME" # USERPROFILE: node homedir() on Windows
+mkdir -p "$HOME/.honcho"
+echo '{"apiKey":"smoke","peerName":"smoke","enabled":true,"endpoint":{"baseUrl":"http://127.0.0.1:9"}}' > "$HOME/.honcho/config.json"
+echo "smoke: dist/hooks/user-prompt.js (prompt reaches the handler)"
+echo '{"session_id":"smoke","cwd":"/tmp","hook_event_name":"UserPromptSubmit","prompt":"smoke prompt"}' \
+  | bounded node dist/hooks/user-prompt.js >/dev/null 2>&1 || true
+grep -q "Prompt received" "$HOME/.honcho/activity.log"
+
 # Setup and status with no config and no key exercise their offline
 # not-configured paths (a configured run would validate the connection).
 TMP_HOME="$(mktemp -d)"
-export HOME="$TMP_HOME"
+export HOME="$TMP_HOME" USERPROFILE="$TMP_HOME" # USERPROFILE: node homedir() on Windows
 unset HONCHO_API_KEY
 
 # Setup exits 1 by design when no key is found; assert it reached that
