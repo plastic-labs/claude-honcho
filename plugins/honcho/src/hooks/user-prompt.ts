@@ -20,38 +20,15 @@ interface HookInput {
   workspace_roots?: string[];
 }
 
-// Terse acknowledgements
-const TRIVIAL_REPLY_PATTERN = /^(yes|no|ok|sure|thanks|y|n|yep|nope|yeah|nah|continue|go ahead|do it|proceed)$/i;
+// Prompt classifiers live in a leaf module so save-user-message can share them
+// without importing this hook's module graph (see src/prompt-filters.ts).
+import { isHarnessInjected, isTerseReply } from "../prompt-filters.js";
+export { isHarnessInjected, isTerseReply };
 
-export function isTerseReply(prompt: string): boolean {
-  return TRIVIAL_REPLY_PATTERN.test(prompt.trim());
-}
-
-// Patterns to skip context injection
+// Patterns to skip context injection (terse replies are handled by isTerseReply)
 const SKIP_CONTEXT_PATTERNS = [
-  TRIVIAL_REPLY_PATTERN,
   /^\//, // slash commands
 ];
-
-// Harness-injected turns that Claude Code delivers in the user-message slot but
-// the human never typed: background-task events, slash-command stdout, injected
-// system reminders.
-const HARNESS_INJECTED_PATTERNS = [
-  /^<task-notification>/,
-  /^<local-command-stdout>/,
-  /^<command-name>/,
-  /^<command-message>/,
-  /^<system-reminder>/,
-  /^<bash-(stdout|stderr|input)>/,
-  // `<<...>>` sentinels the runtime re-submits through the user slot and
-  // resolves at fire time (e.g. <<autonomous-loop-dynamic>> from /loop wakeups)
-  /^<<[\w-]+>>$/,
-];
-
-export function isHarnessInjected(prompt: string): boolean {
-  const trimmed = prompt.trim();
-  return HARNESS_INJECTED_PATTERNS.some((p) => p.test(trimmed));
-}
 
 const FETCH_TIMEOUT_MS = 4000;
 // The dialectic chat() call is far slower than context() (~12s at medium, up to

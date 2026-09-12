@@ -4,6 +4,10 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [0.3.0] - unreleased
 
+### Fixed
+
+- Release build fails closed when the bundler duplicates a first-party module across outputs (the 0.3.2 tarball inlined `src/config.ts` into `dist/hooks/user-prompt.js`, so the per-turn hook read an empty stdin cache and never injected — #133). The smoke test now also asserts a `UserPromptSubmit` payload reaches the handler, and the prompt classifiers `save-user-message` shares with `user-prompt` moved to a leaf module so no hook entry imports another hook's module graph.
+
 ### Added
 
 - Every Honcho request carries `X-Honcho-Host` and `X-Honcho-Plugin` headers (via `@honcho-ai/harness-plugin-core`) so server-side telemetry can attribute traffic to the plugin and host harness.

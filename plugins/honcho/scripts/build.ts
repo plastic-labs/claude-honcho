@@ -7,10 +7,39 @@
 // dev-only fallbacks, never published. Nothing in .stage/ is committed.
 import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import type { BuildArtifact } from "bun";
 
 const ROOT = join(import.meta.dir, "..");
 const STAGE = join(ROOT, ".stage");
+
+// Every first-party module must be bundled into exactly one output of a
+// build. With splitting on, a module two entries share belongs in a chunk;
+// the 0.3.2 release instead had src/config.ts inlined into
+// dist/hooks/user-prompt.js while the same entry imported getCachedStdin()
+// from the shared chunk — two copies of the module's state, so the stdin
+// initHook() cached in one copy was invisible to the other and the hook exited
+// on an empty prompt (#133). The duplication is not reproducible on every
+// machine, so the release fails closed here instead of trusting the bundler.
+async function assertSingleOwner(label: string, outputs: BuildArtifact[]): Promise<void> {
+  const owners = new Map<string, string[]>();
+  for (const artifact of outputs) {
+    if (artifact.kind !== "sourcemap") continue;
+    const map = (await artifact.json()) as { sources?: string[] };
+    const output = relative(STAGE, artifact.path.replace(/\.map$/, ""));
+    for (const source of map.sources ?? []) {
+      const rel = source.replace(/^(\.\.\/)+/, "");
+      if (rel.startsWith("node_modules/")) continue;
+      owners.set(rel, [...(owners.get(rel) ?? []), output]);
+    }
+  }
+  const duplicated = [...owners].filter(([, outs]) => outs.length > 1);
+  if (duplicated.length === 0) return;
+  for (const [source, outs] of duplicated) {
+    console.error(`${label}: ${source} is bundled into ${outs.join(", ")} — module state would be duplicated`);
+  }
+  process.exit(1);
+}
 
 const version =
   process.env.RELEASE_VERSION ||
@@ -36,6 +65,7 @@ if (!result.success) {
   for (const log of result.logs) console.error(log);
   process.exit(1);
 }
+await assertSingleOwner("hooks build", result.outputs);
 
 // Skill runners: separate build rooted at src/ so entries land in
 // dist/skills/, where setup-runner's ../../scripts hop finds the staged
@@ -56,6 +86,7 @@ if (!runnerResult.success) {
   for (const log of runnerResult.logs) console.error(log);
   process.exit(1);
 }
+await assertSingleOwner("runners build", runnerResult.outputs);
 
 // Scripts stage before the manifests so the resolution check below can see
 // them.
