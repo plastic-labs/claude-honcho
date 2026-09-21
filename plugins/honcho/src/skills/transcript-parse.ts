@@ -2,7 +2,9 @@
  * Parse Claude Code session transcripts (`~/.claude/projects/<dir>/<uuid>.jsonl`)
  * for the /honcho:import backfill.
  */
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 
 export interface TranscriptEntry {
   type?: string;
@@ -126,4 +128,34 @@ export function parseTranscriptForBackfill(transcriptPath: string): {
   }
 
   return { messages, cwd, gitBranch, sessionId };
+}
+
+const PROJECTS_DIR = join(homedir(), ".claude", "projects");
+
+/** All transcript files under ~/.claude/projects modified within `days`. */
+export function findTranscripts(days: number): Array<{ path: string; mtimeMs: number }> {
+  if (!existsSync(PROJECTS_DIR)) return [];
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const out: Array<{ path: string; mtimeMs: number }> = [];
+  for (const dir of readdirSync(PROJECTS_DIR)) {
+    const dirPath = join(PROJECTS_DIR, dir);
+    let entries: string[];
+    try {
+      if (!statSync(dirPath).isDirectory()) continue;
+      entries = readdirSync(dirPath);
+    } catch {
+      continue;
+    }
+    for (const file of entries) {
+      if (!file.endsWith(".jsonl")) continue;
+      const path = join(dirPath, file);
+      try {
+        const st = statSync(path);
+        if (st.mtimeMs >= cutoff) out.push({ path, mtimeMs: st.mtimeMs });
+      } catch {
+        continue;
+      }
+    }
+  }
+  return out;
 }

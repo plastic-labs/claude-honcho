@@ -24,7 +24,7 @@ import {
   type SessionStrategy,
 } from "../config.js";
 import { addMessagesBatched, chunkContent } from "../cache.js";
-import { parseTranscriptForBackfill, type ParsedMessage } from "./transcript-parse.js";
+import { parseTranscriptForBackfill, findTranscripts, type ParsedMessage } from "./transcript-parse.js";
 import * as s from "../styles.js";
 import { homedir } from "os";
 import { join, basename } from "path";
@@ -51,7 +51,6 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
-const PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const STATE_FILE = join(getConfigDir(), "backfill-state.json");
 
 /** Idempotency ledger: which (workspace, transcript@mtime) pairs already imported. */
@@ -70,34 +69,6 @@ function loadState(): BackfillState {
 function saveState(state: BackfillState): void {
   if (!existsSync(getConfigDir())) mkdirSync(getConfigDir(), { recursive: true });
   writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-}
-
-/** All transcript files under ~/.claude/projects modified within `days`. */
-export function findTranscripts(days: number): Array<{ path: string; mtimeMs: number }> {
-  if (!existsSync(PROJECTS_DIR)) return [];
-  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-  const out: Array<{ path: string; mtimeMs: number }> = [];
-  for (const dir of readdirSync(PROJECTS_DIR)) {
-    const dirPath = join(PROJECTS_DIR, dir);
-    let entries: string[];
-    try {
-      if (!statSync(dirPath).isDirectory()) continue;
-      entries = readdirSync(dirPath);
-    } catch {
-      continue;
-    }
-    for (const file of entries) {
-      if (!file.endsWith(".jsonl")) continue;
-      const path = join(dirPath, file);
-      try {
-        const st = statSync(path);
-        if (st.mtimeMs >= cutoff) out.push({ path, mtimeMs: st.mtimeMs });
-      } catch {
-        continue;
-      }
-    }
-  }
-  return out;
 }
 
 interface SessionGroup {
