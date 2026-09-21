@@ -264,3 +264,13 @@ export async function run(): Promise<void> {
   }
   console.log("");
 }
+
+/** Entry point: runs the backfill and reports a failure as exit 1. */
+export async function main(): Promise<void> {
+  try {
+    await run();
+  } catch (err) {
+    console.log(s.error(`Backfill failed: ${err instanceof Error ? err.message : String(err)}`));
+    process.exit(1);
+  }
+}
