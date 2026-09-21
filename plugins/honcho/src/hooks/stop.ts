@@ -11,6 +11,7 @@ interface HookInput {
   cwd?: string;
   stop_hook_active?: boolean;
   workspace_roots?: string[];
+  last_assistant_message?: string;
 }
 
 interface TranscriptEntry {
@@ -56,10 +57,20 @@ function assistantText(entry: TranscriptEntry): string {
   return "";
 }
 
+type TurnBlock = { text: string; timestamp?: string };
+
 /** Assistant text blocks of the just-completed segment: everything since the last
  *  real user prompt OR wakeup boundary. Wakeup firings would otherwise re-collect
- *  the whole accumulated turn, duplicating blocks already uploaded. */
-export function getCurrentTurnAssistantMessages(transcriptPath: string): Array<{ text: string; timestamp?: string }> {
+ *  the whole accumulated turn, duplicating blocks already uploaded. Stop can fire
+ *  before the final assistant entry is flushed, so the payload's copy of it fills in. */
+export function getCurrentTurnAssistantMessages(transcriptPath: string, lastAssistantMessage?: string): TurnBlock[] {
+  const blocks = readTranscriptTurnBlocks(transcriptPath);
+  const last = lastAssistantMessage?.trim();
+  if (last && blocks[blocks.length - 1]?.text.trim() !== last) blocks.push({ text: last });
+  return blocks;
+}
+
+function readTranscriptTurnBlocks(transcriptPath: string): TurnBlock[] {
   if (!transcriptPath || !existsSync(transcriptPath)) return [];
 
   let lines: string[];
@@ -85,7 +96,7 @@ export function getCurrentTurnAssistantMessages(transcriptPath: string): Array<{
   // return nothing if there's no last prompt
   if (lastPromptIdx === -1) return [];
 
-  const blocks: Array<{ text: string; timestamp?: string }> = [];
+  const blocks: TurnBlock[] = [];
   for (let i = lastPromptIdx + 1; i < lines.length; i++) {
     try {
       const entry: TranscriptEntry = JSON.parse(lines[i]);
@@ -139,7 +150,7 @@ export async function handleStop(): Promise<void> {
   // Set log context
   setLogContext(cwd, sessionName);
 
-  const turnMessages = getCurrentTurnAssistantMessages(transcriptPath || "");
+  const turnMessages = getCurrentTurnAssistantMessages(transcriptPath || "", hookInput.last_assistant_message);
 
   if (turnMessages.length === 0) {
     logHook("stop", `Skipping (no assistant content this turn)`);
