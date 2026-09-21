@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig } from "../config.js";
+import { initHook, loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig } from "../config.js";
 import { renderSessionStart } from "../injection.js";
 import {
   setCachedSessionId,
@@ -240,4 +240,10 @@ export async function handleSessionStart(): Promise<void> {
     setMemoryState("idle", undefined, claudeInstanceId);
     process.exit(0);
   }
+}
+
+/** Entry point: reads stdin once, then runs the handler. */
+export async function main(): Promise<void> {
+  await initHook();
+  await handleSessionStart();
 }

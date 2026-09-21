@@ -1,4 +1,4 @@
-import { loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
 import { getInstanceIdForCwd } from "../cache.js";
 import { clearSessionFiles } from "../state.js";
 import { logHook, setLogContext } from "../log.js";
@@ -50,4 +50,10 @@ export async function handleSessionEnd(): Promise<void> {
   clearSessionFiles(hookInput.session_id);
   logHook("session-end", "Session ended — no upload (messages saved live)");
   process.exit(0);
+}
+
+/** Entry point: reads stdin once, then runs the handler. */
+export async function main(): Promise<void> {
+  await initHook();
+  await handleSessionEnd();
 }

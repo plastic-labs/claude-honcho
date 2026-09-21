@@ -7,7 +7,8 @@
 // dev-only fallbacks, never published. Nothing in .stage/ is committed.
 import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import type { BuildArtifact } from "bun";
 
 const ROOT = join(import.meta.dir, "..");
 const STAGE = join(ROOT, ".stage");
@@ -19,7 +20,28 @@ const version =
 await rm(STAGE, { recursive: true, force: true });
 await mkdir(join(STAGE, ".claude-plugin"), { recursive: true });
 
-// Bundle: one self-contained entry per hook wrapper, plus the MCP server.
+// A source module must appear once per bundle. Bun duplicates a module that an
+// entry imports directly while a dependency also imports it, which gives the
+// entry a private copy of the module's state (#133).
+async function assertNoDuplicateModules(outputs: BuildArtifact[]): Promise<void> {
+  let failed = false;
+  for (const artifact of outputs) {
+    if (artifact.kind !== "sourcemap") continue;
+    const bundle = relative(STAGE, artifact.path.replace(/\.map$/, ""));
+    const seen = new Set<string>();
+    for (const source of (await artifact.json()).sources as string[]) {
+      if (seen.has(source)) {
+        console.error(`${source} is bundled twice into ${bundle}`);
+        failed = true;
+      }
+      seen.add(source);
+    }
+  }
+  if (failed) process.exit(1);
+}
+
+// Bundle: one self-contained file per hook wrapper, plus the MCP server. No
+// code splitting, so every bundle is one greppable file.
 const hookEntries = (await readdir(join(ROOT, "hooks")))
   .filter((f) => f.endsWith(".ts"))
   .map((f) => join(ROOT, "hooks", f));
@@ -29,13 +51,14 @@ const result = await Bun.build({
   outdir: join(STAGE, "dist"),
   root: ROOT,
   target: "node",
-  splitting: true,
+  splitting: false,
   sourcemap: "linked",
 });
 if (!result.success) {
   for (const log of result.logs) console.error(log);
   process.exit(1);
 }
+await assertNoDuplicateModules(result.outputs);
 
 // Skill runners: separate build rooted at src/ so entries land in
 // dist/skills/, where setup-runner's ../../scripts hop finds the staged
@@ -49,13 +72,14 @@ const runnerResult = await Bun.build({
   outdir: join(STAGE, "dist"),
   root: join(ROOT, "src"),
   target: "node",
-  splitting: true,
+  splitting: false,
   sourcemap: "linked",
 });
 if (!runnerResult.success) {
   for (const log of runnerResult.logs) console.error(log);
   process.exit(1);
 }
+await assertNoDuplicateModules(runnerResult.outputs);
 
 // Scripts stage before the manifests so the resolution check below can see
 // them.
