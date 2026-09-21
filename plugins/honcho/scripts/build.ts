@@ -7,7 +7,8 @@
 // dev-only fallbacks, never published. Nothing in .stage/ is committed.
 import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import type { BuildArtifact } from "bun";
 
 const ROOT = join(import.meta.dir, "..");
 const STAGE = join(ROOT, ".stage");
@@ -18,6 +19,26 @@ const version =
 
 await rm(STAGE, { recursive: true, force: true });
 await mkdir(join(STAGE, ".claude-plugin"), { recursive: true });
+
+// Every source module must land in exactly one bundle. Bun's splitter can
+// emit part of a shared module into an entry that imports it directly, which
+// gives that entry a private copy of the module's state (#133).
+async function assertNoSplitModules(outputs: BuildArtifact[]): Promise<void> {
+  const owners = new Map<string, Set<string>>();
+  for (const artifact of outputs) {
+    if (artifact.kind !== "sourcemap") continue;
+    const bundle = relative(STAGE, artifact.path.replace(/\.map$/, ""));
+    for (const source of (await artifact.json()).sources as string[]) {
+      owners.set(source, (owners.get(source) ?? new Set()).add(bundle));
+    }
+  }
+  const split = [...owners].filter(([, bundles]) => bundles.size > 1);
+  if (split.length === 0) return;
+  for (const [source, bundles] of split) {
+    console.error(`${source} is bundled into more than one output: ${[...bundles].join(", ")}`);
+  }
+  process.exit(1);
+}
 
 // Bundle: one self-contained entry per hook wrapper, plus the MCP server.
 const hookEntries = (await readdir(join(ROOT, "hooks")))
@@ -36,6 +57,7 @@ if (!result.success) {
   for (const log of result.logs) console.error(log);
   process.exit(1);
 }
+await assertNoSplitModules(result.outputs);
 
 // Skill runners: separate build rooted at src/ so entries land in
 // dist/skills/, where setup-runner's ../../scripts hop finds the staged

@@ -1,6 +1,4 @@
 #!/usr/bin/env bun
-import { initHook } from "../src/config.js";
-import { handlePostToolUse } from "../src/hooks/post-tool-use.js";
+import { main } from "../src/hooks/post-tool-use.js";
 
-await initHook();
-await handlePostToolUse();
+await main();
