@@ -1,7 +1,7 @@
 import { Honcho } from "@honcho-ai/sdk";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig, type InjectionConfig, type PerTurnComponent } from "../config.js";
+import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig, type InjectionConfig, type PerTurnComponent } from "../config.js";
 import {
   getMessageCount,
   incrementMessageCount,
@@ -497,4 +497,10 @@ function outputContext(peerName: string, contextParts: string[], systemMsg?: str
     output = addSystemMessage(output, systemMsg);
   }
   console.log(JSON.stringify(output));
+}
+
+/** Entry point: reads stdin once, then runs the handler. */
+export async function main(): Promise<void> {
+  await initHook();
+  await handleUserPrompt();
 }

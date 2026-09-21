@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
 import { getClaudeInstanceId } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { redactSecrets } from "../redact.js";
@@ -257,4 +257,10 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
       },
     }),
   ]);
+}
+
+/** Entry point: reads stdin once, then runs the handler. */
+export async function main(): Promise<void> {
+  await initHook();
+  await handlePostToolUse();
 }

@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode } from "../config.js";
+import { initHook, loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode } from "../config.js";
 import { Spinner } from "../spinner.js";
 import { setMemoryState } from "../state.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -235,4 +235,10 @@ export async function handlePreCompact(): Promise<void> {
     console.error(`[honcho] Pre-compact warning: ${error}`);
     process.exit(0);
   }
+}
+
+/** Entry point: reads stdin once, then runs the handler. */
+export async function main(): Promise<void> {
+  await initHook();
+  await handlePreCompact();
 }

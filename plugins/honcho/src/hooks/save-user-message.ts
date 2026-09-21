@@ -1,5 +1,5 @@
 import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
 import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { isHarnessInjected, isTerseReply } from "./user-prompt.js";
@@ -100,4 +100,10 @@ async function postUserMessage(
     logHook("save-user-message", `Direct upload failed, retrying via get-or-create: ${e}`);
     return honcho.session(sessionName);
   });
+}
+
+/** Entry point: reads stdin once, then runs the handler. */
+export async function main(): Promise<void> {
+  await initHook();
+  await handleSaveUserMessage();
 }

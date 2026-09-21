@@ -1,4 +1,4 @@
-import { getCachedStdin } from "../config.js";
+import { initHook, getCachedStdin } from "../config.js";
 import { setMemoryState } from "../state.js";
 
 // Maps each honcho MCP tool to the short verb the statusline flashes while the
@@ -29,4 +29,10 @@ export async function handlePreToolHoncho(): Promise<void> {
     // never block the tool call
   }
   process.exit(0);
+}
+
+/** Entry point: reads stdin once, then runs the handler. */
+export async function main(): Promise<void> {
+  await initHook();
+  await handlePreToolHoncho();
 }

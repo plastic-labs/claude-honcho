@@ -1,6 +1,4 @@
 #!/usr/bin/env bun
-import { initHook } from "../src/config.js";
-import { handleSessionStart } from "../src/hooks/session-start.js";
+import { main } from "../src/hooks/session-start.js";
 
-await initHook();
-await handleSessionStart();
+await main();
