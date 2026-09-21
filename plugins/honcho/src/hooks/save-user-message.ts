@@ -2,7 +2,7 @@ import { Honcho, Session, Peer } from "@honcho-ai/sdk";
 import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
 import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
-import { isHarnessInjected, isTerseReply } from "../prompt-filter.js";
+import { isHarnessInjected, isTerseReply } from "../prompt-filters.js";
 
 interface HookInput {
   prompt?: string;

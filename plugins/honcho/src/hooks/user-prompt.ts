@@ -12,7 +12,7 @@ import { visInjectionMessage, visDialecticMessage, visSessionContextMessage, vis
 import type { ReasoningLevel } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
 import { setMemoryState, setSessionLink } from "../state.js";
-import { isHarnessInjected, shouldSkipContextRetrieval } from "../prompt-filter.js";
+import { TRIVIAL_REPLY_PATTERN, isHarnessInjected } from "../prompt-filters.js";
 
 interface HookInput {
   prompt?: string;
@@ -20,6 +20,12 @@ interface HookInput {
   session_id?: string;
   workspace_roots?: string[];
 }
+
+// Patterns to skip context injection
+const SKIP_CONTEXT_PATTERNS = [
+  TRIVIAL_REPLY_PATTERN,
+  /^\//, // slash commands
+];
 
 const FETCH_TIMEOUT_MS = 4000;
 // The dialectic chat() call is far slower than context() (~12s at medium, up to
@@ -74,6 +80,10 @@ function extractTopics(prompt: string): { topics: string[]; precise: boolean } {
   const stopwords = new Set(['the', 'and', 'for', 'that', 'this', 'with', 'from', 'have', 'are', 'was', 'were', 'been', 'being', 'has', 'had', 'does', 'did', 'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must', 'shall', 'need', 'want', 'like', 'just', 'also', 'more', 'some', 'what', 'when', 'where', 'which', 'who', 'how', 'why', 'all', 'each', 'every', 'both', 'few', 'most', 'other', 'into', 'over', 'such', 'only', 'same', 'than', 'very', 'your', 'make', 'take', 'come', 'give', 'look', 'think', 'know']);
   const words = prompt.toLowerCase().match(/\b[a-z]{4,}\b/g) || [];
   return { topics: [...new Set(words.filter(w => !stopwords.has(w)))].slice(0, 10), precise: false };
+}
+
+function shouldSkipContextRetrieval(prompt: string): boolean {
+  return SKIP_CONTEXT_PATTERNS.some((p) => p.test(prompt.trim()));
 }
 
 function formatSessionLink(sessionUrl: string): string {
