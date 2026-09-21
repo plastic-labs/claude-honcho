@@ -78,6 +78,7 @@ if (!runnerResult.success) {
   for (const log of runnerResult.logs) console.error(log);
   process.exit(1);
 }
+await assertNoSplitModules(runnerResult.outputs);
 
 // Scripts stage before the manifests so the resolution check below can see
 // them.
