@@ -53,3 +53,46 @@ describe("getCurrentTurnAssistantMessages segment boundaries", () => {
     expect(getCurrentTurnAssistantMessages(path)).toEqual([]);
   });
 });
+
+// Captured from Claude Code 2.1.276: at Stop time the transcript ends at the prompt's
+// bookkeeping entries and the assistant entry has not been flushed yet.
+const capturedPrompt = {
+  type: "user",
+  promptSource: "typed",
+  origin: { kind: "human" },
+  message: { role: "user", content: "Reply with exactly one short sentence: what editor do I use?" },
+  timestamp: "2026-09-21T15:30:32.889Z",
+};
+const capturedTail = [
+  { type: "attachment", attachment: { type: "hook_additional_context" } },
+  { type: "attachment", attachment: { type: "prompt_snapshot" } },
+  { type: "last-prompt", lastPrompt: "Reply with exactly one short sentence: what editor do I use?" },
+  { type: "mode", mode: "normal" },
+  { type: "permission-mode", permissionMode: "default" },
+  { type: "atis-latch", atis: "" },
+  { type: "ai-title", aiTitle: "Editor recommendation" },
+];
+const capturedReply = { type: "assistant", timestamp: "t3", message: { role: "assistant", content: [{ type: "text", text: "You use Zed." }] } };
+
+describe("getCurrentTurnAssistantMessages payload fallback", () => {
+  test("unflushed final entry is filled from last_assistant_message", () => {
+    const path = transcript([capturedPrompt, ...capturedTail]);
+    expect(getCurrentTurnAssistantMessages(path, "You use Zed.").map((b) => b.text)).toEqual(["You use Zed."]);
+  });
+
+  test("flushed final entry is not duplicated", () => {
+    const path = transcript([capturedPrompt, ...capturedTail, capturedReply]);
+    expect(getCurrentTurnAssistantMessages(path, "You use Zed.")).toEqual([{ text: "You use Zed.", timestamp: "t3" }]);
+  });
+
+  test("intermediate blocks flushed, final one not", () => {
+    const path = transcript([prompt, msgA, toolResult]);
+    expect(getCurrentTurnAssistantMessages(path, "done").map((b) => b.text)).toEqual(["narration A", "done"]);
+  });
+
+  test("empty last_assistant_message changes nothing", () => {
+    const path = transcript([prompt, msgA]);
+    expect(getCurrentTurnAssistantMessages(path, "").map((b) => b.text)).toEqual(["narration A"]);
+    expect(getCurrentTurnAssistantMessages(path, undefined).map((b) => b.text)).toEqual(["narration A"]);
+  });
+});

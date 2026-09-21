@@ -12,6 +12,10 @@ All notable changes to claude-honcho will be documented in this file.
 
 - The plugin is distributed as the npm package `@honcho-ai/claude-honcho` and the marketplace installs from it. Releases ship a self-contained bundle that runs under Node, so Bun is no longer a prerequisite for using the plugin — it remains the development toolchain.
 
+### Fixed
+
+- Stop hook no longer drops the turn's final reply when it fires before Claude Code has flushed the assistant entry to the transcript. The payload's `last_assistant_message` fills in.
+
 ### Removed
 
 - `install-local.sh` / `install-local.ps1`. Develop against a working tree with `claude --plugin-dir plugins/honcho` instead.
