@@ -174,6 +174,7 @@ export async function handleStop(): Promise<void> {
         aiPeer.message(chunk, {
           createdAt: block.timestamp || fallbackTs,
           metadata: {
+            source: "claude",
             instance_id: instanceId || undefined,
             type: i === lastIdx ? "assistant_response" : "assistant_intermediate",
             session_affinity: sessionName,
