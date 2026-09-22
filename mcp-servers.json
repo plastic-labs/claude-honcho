@@ -1,0 +1,10 @@
+{
+  "honcho": {
+    "command": "node",
+    "args": [
+      "${CLAUDE_PLUGIN_ROOT}/dist/mcp-server.js"
+    ],
+    "timeout": 150000,
+    "alwaysLoad": true
+  }
+}
