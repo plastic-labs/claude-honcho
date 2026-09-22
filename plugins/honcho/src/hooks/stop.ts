@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "fs";
 import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visStopMessage } from "../visual.js";
+import { stripLeadingReminders } from "../prompt-filters.js";
 
 interface HookInput {
   session_id?: string;
@@ -44,7 +45,7 @@ function isRealUserPrompt(entry: TranscriptEntry): boolean {
       : Array.isArray(mc)
         ? mc.filter((b) => b.type === "text" && b.text).map((b) => b.text!).join("")
         : "";
-  const trimmed = text.trim();
+  const trimmed = stripLeadingReminders(text).trim();
   return trimmed.length > 0 && !trimmed.startsWith("<");
 }
 

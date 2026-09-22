@@ -22,7 +22,15 @@ const HARNESS_INJECTED_PATTERNS = [
   /^<<[\w-]+>>$/,
 ];
 
+// Reminder blocks the harness prepends to a typed prompt (worktree notice,
+// background-task status); the user's text follows them.
+const LEADING_REMINDERS = /^(?:\s*<system-reminder>[\s\S]*?<\/system-reminder>)+\s*/;
+
+export function stripLeadingReminders(prompt: string): string {
+  return prompt.replace(LEADING_REMINDERS, "");
+}
+
 export function isHarnessInjected(prompt: string): boolean {
-  const trimmed = prompt.trim();
-  return HARNESS_INJECTED_PATTERNS.some((p) => p.test(trimmed));
+  const trimmed = stripLeadingReminders(prompt).trim();
+  return !trimmed || HARNESS_INJECTED_PATTERNS.some((p) => p.test(trimmed));
 }
