@@ -48,6 +48,12 @@ describe("getCurrentTurnAssistantMessages segment boundaries", () => {
     expect(getCurrentTurnAssistantMessages(path).map((b) => b.text)).toEqual(["narration A", "narration B"]);
   });
 
+  test("prompt behind a leading system-reminder starts the segment", () => {
+    const prefixed = { type: "user", message: { content: "<system-reminder>\nYou are operating in a git worktree.\n</system-reminder>\n\ndo the thing" } };
+    const path = transcript([prefixed, msgA]);
+    expect(getCurrentTurnAssistantMessages(path).map((b) => b.text)).toEqual(["narration A"]);
+  });
+
   test("no prompt and no wakeup collects nothing", () => {
     const path = transcript([toolResult, msgA]);
     expect(getCurrentTurnAssistantMessages(path)).toEqual([]);

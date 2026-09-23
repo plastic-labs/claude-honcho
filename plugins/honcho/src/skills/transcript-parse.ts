@@ -5,6 +5,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { stripLeadingReminders } from "../prompt-filters.js";
 
 export interface TranscriptEntry {
   type?: string;
@@ -48,7 +49,7 @@ function isRealUserPrompt(entry: TranscriptEntry): boolean {
       : Array.isArray(mc)
         ? mc.filter((b) => b.type === "text" && b.text).map((b) => b.text!).join("")
         : "";
-  const trimmed = text.trim();
+  const trimmed = stripLeadingReminders(text).trim();
   return trimmed.length > 0 && !trimmed.startsWith("<");
 }
 
@@ -108,7 +109,7 @@ export function parseTranscriptForBackfill(transcriptPath: string): {
 
     if (type === "user") {
       if (!isRealUserPrompt(entry)) continue;
-      const content = userText(entry).trim();
+      const content = stripLeadingReminders(userText(entry)).trim();
       if (content) {
         messages.push({ role: "user", content, timestamp: entry.timestamp, cwd: entry.cwd, gitBranch: entry.gitBranch });
       }

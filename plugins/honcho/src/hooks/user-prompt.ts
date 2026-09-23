@@ -12,7 +12,7 @@ import { visInjectionMessage, visDialecticMessage, visSessionContextMessage, vis
 import type { ReasoningLevel } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
 import { setMemoryState, setSessionLink } from "../state.js";
-import { TRIVIAL_REPLY_PATTERN, isHarnessInjected } from "../prompt-filters.js";
+import { TRIVIAL_REPLY_PATTERN, isHarnessInjected, stripLeadingReminders } from "../prompt-filters.js";
 
 interface HookInput {
   prompt?: string;
@@ -178,7 +178,8 @@ export async function handleUserPrompt(): Promise<void> {
 
   // Skip trivial prompts — no context needed for "y", "ok", etc. Harness-injected
   // turns are excluded from storage; don't use them as retrieval queries either.
-  if (isHarnessInjected(prompt) || shouldSkipContextRetrieval(prompt)) {
+  const userPrompt = stripLeadingReminders(prompt);
+  if (isHarnessInjected(prompt) || shouldSkipContextRetrieval(userPrompt)) {
     logHook("user-prompt", "Skipping context (harness-injected or trivial prompt)");
     visSkipMessage("user-prompt", sessionLink ? `${sessionLink} · skipped` : "skipped");
     process.exit(0);
@@ -203,10 +204,10 @@ export async function handleUserPrompt(): Promise<void> {
   // and the hook completes as soon as the slowest selected component resolves or
   // times out.
   const [userCtxResult, assistantCtxResult, sessionCtx, dialectic] = await Promise.all([
-    wantUserContext ? raceTimeout(fetchUserContext(config, prompt, injection), FETCH_TIMEOUT_MS) : Promise.resolve(null),
-    wantAssistantContext ? raceTimeout(fetchAssistantContext(config, prompt, injection), FETCH_TIMEOUT_MS) : Promise.resolve(null),
+    wantUserContext ? raceTimeout(fetchUserContext(config, userPrompt, injection), FETCH_TIMEOUT_MS) : Promise.resolve(null),
+    wantAssistantContext ? raceTimeout(fetchAssistantContext(config, userPrompt, injection), FETCH_TIMEOUT_MS) : Promise.resolve(null),
     wantSessionContext ? raceTimeout(fetchSessionContext(config, sessionName, injection), FETCH_TIMEOUT_MS) : Promise.resolve(null),
-    wantDialectic ? raceTimeout(fetchDialectic(config, prompt, injection), DIALECTIC_TIMEOUT_MS) : Promise.resolve(null),
+    wantDialectic ? raceTimeout(fetchDialectic(config, userPrompt, injection), DIALECTIC_TIMEOUT_MS) : Promise.resolve(null),
   ]);
 
   const userCtx: { context: any; matched?: string[]; queryLabel?: string } | null =
