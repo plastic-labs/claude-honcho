@@ -252,6 +252,7 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
   await session.addMessages([
     aiPeer.message(`[Tool] ${summary}`, {
       metadata: {
+        source: "claude",
         instance_id: instanceId || undefined,
         session_affinity: sessionName,
       },

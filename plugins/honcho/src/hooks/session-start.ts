@@ -143,6 +143,7 @@ export async function handleSessionStart(): Promise<void> {
         .map((change) =>
           userPeer.message(`[Git External] ${change.description}`, {
             metadata: {
+              source: "claude",
               type: "git_change",
               change_type: change.type,
               from: change.from,
