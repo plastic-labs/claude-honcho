@@ -252,7 +252,12 @@ Turns that Claude Code injects into the user slot (task notifications, slash-com
 
 ```jsonc
 {
-  "skipUserPatterns": ["^\\[orchestrator\\]", "^Sub-agent report:"]
+  "skipUserPatterns": [
+    "^\\[orchestrator\\]",           // messages an orchestrator types into a worker session
+    "^Sub-agent report:",            // hand-backs relayed with a text prefix
+    "^<agent-message[\\s>]",         // sub-agent hand-backs Claude Code wraps in <agent-message>
+    "^<cross-session-message[\\s>]"  // messages from other Claude sessions, wrapped in <cross-session-message>
+  ]
 }
 ```
 
