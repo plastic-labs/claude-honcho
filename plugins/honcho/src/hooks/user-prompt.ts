@@ -1,7 +1,7 @@
 import { Honcho } from "@honcho-ai/sdk";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig, type InjectionConfig, type PerTurnComponent } from "../config.js";
+import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig, type InjectionConfig, type PerTurnComponent, isQuiet } from "../config.js";
 import {
   getMessageCount,
   incrementMessageCount,
@@ -292,7 +292,7 @@ function emitPerTurn(
   const visMsg = visLines.join("\n");
   const systemMessage = banner ? `${banner}\n${visMsg}` : visMsg;
   if (parts.length === 0) {
-    console.log(JSON.stringify({ systemMessage }));
+    if (!isQuiet()) console.log(JSON.stringify({ systemMessage }));
     return;
   }
   outputContext(config.peerName, parts, systemMessage);
