@@ -178,6 +178,7 @@ export interface HostConfig {
   /** Per-host overrides for settings that may differ across tools */
   enabled?: boolean;
   logging?: boolean;
+  quiet?: boolean;
   saveMessages?: boolean;
   saveToolUse?: boolean;
   saveGitEvents?: boolean;
@@ -308,6 +309,7 @@ interface HonchoFileConfig {
   redactPatterns?: string[];
   enabled?: boolean;
   logging?: boolean;
+  quiet?: boolean;
   sessionStrategy?: SessionStrategy;
   /** Prefix session names with peerName (default: true, disable for solo use) */
   sessionPeerPrefix?: boolean;
@@ -383,6 +385,8 @@ export interface HonchoCLAUDEConfig {
   enabled?: boolean;
   /** Enable file logging to ~/.honcho/ (default: true) */
   logging?: boolean;
+  /** Hide the inline [honcho] hook messages in the Claude Code UI (default: false) */
+  quiet?: boolean;
   /** When true, flat workspace/aiPeer fields apply to ALL hosts */
   globalOverride?: boolean;
 }
@@ -519,6 +523,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     rememberTool: hostBlock?.rememberTool ?? raw.rememberTool,
     enabled: hostBlock?.enabled ?? raw.enabled,
     logging: hostBlock?.logging ?? raw.logging,
+    quiet: hostBlock?.quiet ?? raw.quiet,
     globalOverride: raw.globalOverride,
   };
 
@@ -671,6 +676,7 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
 
   setHostIfExplicit("enabled", enabledForSave, existing.enabled);
   setHostIfExplicit("logging", loggingForSave, existing.logging);
+  setHostIfExplicit("quiet", config.quiet, existing.quiet);
   setHostIfExplicit("saveMessages", config.saveMessages, existing.saveMessages);
   setHostIfExplicit("sessionStrategy", config.sessionStrategy, existing.sessionStrategy);
   setHostIfExplicit("sessionPeerPrefix", config.sessionPeerPrefix, existing.sessionPeerPrefix);
@@ -911,6 +917,11 @@ export function getInjectionConfig(config?: HonchoCLAUDEConfig | null): Required
 export function isLoggingEnabled(): boolean {
   const config = loadConfig();
   return config?.logging !== false;
+}
+
+export function isQuiet(): boolean {
+  const config = loadConfig();
+  return config?.quiet === true;
 }
 
 export function isPluginEnabled(): boolean {

@@ -7,6 +7,7 @@ All notable changes to claude-honcho will be documented in this file.
 ### Added
 
 - Every Honcho request carries `X-Honcho-Host` and `X-Honcho-Plugin` headers (via `@honcho-ai/harness-plugin-core`) so server-side telemetry can attribute traffic to the plugin and host harness.
+- `quiet` config field. Set it to `true` to hide the inline `[honcho]` hook messages in the Claude Code UI (tool captures, per-turn injection summaries, saved-response notes). Memory capture and injection are unaffected. Settable via `set_config`.
 
 ### Changed
 

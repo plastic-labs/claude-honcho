@@ -11,7 +11,7 @@
  */
 
 import { arrows, symbols } from "./unicode.js";
-import { isLoggingEnabled } from "./config.js";
+import { isLoggingEnabled, isQuiet } from "./config.js";
 
 // Plain text (no ANSI) for systemMessage — shown in Claude Code's UI
 const sym = {
@@ -45,6 +45,7 @@ function formatLine(direction: HookDirection, hookName: string, message: string)
  * Use this for hooks that don't already write to stdout (PostToolUse, Stop)
  */
 export function visMessage(direction: HookDirection, hookName: string, message: string): void {
+  if (isQuiet()) return;
   const line = formatLine(direction, hookName, message);
   console.log(JSON.stringify({ systemMessage: line }));
 }
@@ -147,9 +148,11 @@ export function visStopMessage(direction: HookDirection, message: string): void 
 
 /**
  * Add systemMessage to an existing hookSpecificOutput JSON object
- * Used by UserPromptSubmit which already outputs JSON
+ * Used by hooks that already output JSON. With `quiet` set, the output is
+ * returned untouched — the context still injects, nothing is shown inline.
  */
-export function addSystemMessage(existingJson: any, message: string): any {
+export function addSystemMessage(existingJson: any, message: string, quiet: boolean = isQuiet()): any {
+  if (quiet) return existingJson;
   return { ...existingJson, systemMessage: message };
 }
 
