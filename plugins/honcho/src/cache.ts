@@ -80,7 +80,11 @@ export function setCachedSessionId(cwd: string, name: string, id: string, instan
   saveIdCache(cache);
 }
 
-/** Find the most recently active CWD from cached sessions (fallback for MCP servers without project dir) */
+/**
+ * Find the most recently active CWD from cached sessions. Machine-wide: with
+ * concurrent sessions this is whichever started (or resumed/compacted) last,
+ * so callers must prefer their own project dir and use this only as a fallback.
+ */
 export function getLastActiveCwd(): string | null {
   const cache = loadIdCache();
   if (!cache.sessions) return null;

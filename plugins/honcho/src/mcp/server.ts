@@ -6,6 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { Honcho } from "@honcho-ai/sdk";
 import { existsSync, readFileSync } from "fs";
+import { homedir } from "os";
 import {
   loadConfig,
   saveConfig,
@@ -43,6 +44,22 @@ import {
   clearUserContextOnly,
   clearClaudeContextOnly,
 } from "../cache.js";
+
+/**
+ * The project directory this MCP server serves. Claude Code starts one server
+ * per session, sets CLAUDE_PROJECT_DIR in its environment and launches it in
+ * the project directory, so both identify this session. The cache's
+ * last-active cwd is machine-wide (the newest SessionStart of ANY session), so
+ * it is only a last resort, e.g. when the server's cwd no longer exists.
+ */
+export function resolveMcpCwd(): string {
+  if (process.env.CLAUDE_PROJECT_DIR) return process.env.CLAUDE_PROJECT_DIR;
+  try {
+    return process.cwd();
+  } catch {
+    return getLastActiveCwd() || homedir();
+  }
+}
 
 // ============================================
 // Environment variable names that can shadow config fields
@@ -694,7 +711,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     : undefined;
 
   // Include session URL when session-affecting fields change
-  const cwd = getLastActiveCwd() || process.cwd();
+  const cwd = resolveMcpCwd();
   const newSessionName = SESSION_AFFECTING_FIELDS.has(field) ? getSessionName(cwd) : undefined;
   const sessionUrl = newSessionName ? honchoSessionUrl(cfg.workspace, newSessionName) : undefined;
 
@@ -1018,7 +1035,7 @@ export async function runMcpServer(): Promise<void> {
   // Handle tool calls
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const cwd = getLastActiveCwd() || process.cwd();
+    const cwd = resolveMcpCwd();
 
     // ── Config tools (no Honcho session needed) ──
 
