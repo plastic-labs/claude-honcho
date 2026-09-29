@@ -120,6 +120,7 @@ function handleGetConfig(cwd: string) {
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
     redactPatterns: cfg.redactPatterns ?? [],
+    skipUserPatterns: cfg.skipUserPatterns ?? [],
     injection: cfg.injection ?? {},
     rememberTool: cfg.rememberTool === true,
     enabled: cfg.enabled !== false,
@@ -522,6 +523,28 @@ function handleSetConfig(args: Record<string, unknown>) {
       break;
     }
 
+    case "skipUserPatterns": {
+      const arr = coerceStringArray(value);
+      if (!arr) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: "skipUserPatterns must be an array of regex strings" }, null, 2) }],
+          isError: true,
+        };
+      }
+      for (const source of arr) {
+        const err = validateRedactPattern(source);
+        if (err) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ success: false, error: err }, null, 2) }],
+            isError: true,
+          };
+        }
+      }
+      previousValue = cfg.skipUserPatterns;
+      cfg.skipUserPatterns = arr;
+      break;
+    }
+
     case "injection.sessionStart": {
       const arr = validateComponentArray(value, SESSION_START_COMPONENTS, field);
       if (!Array.isArray(arr)) return arr;
@@ -681,6 +704,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
     redactPatterns: cfg.redactPatterns ?? [],
+    skipUserPatterns: cfg.skipUserPatterns ?? [],
     injection: cfg.injection ?? {},
     rememberTool: cfg.rememberTool === true,
     enabled: cfg.enabled !== false,
@@ -985,6 +1009,7 @@ export async function runMcpServer(): Promise<void> {
                   "reasoningLevel",
                   "observationMode",
                   "redactPatterns",
+                  "skipUserPatterns",
                   "injection.sessionStart",
                   "injection.perTurn",
                   "injection.showContents",
@@ -1001,7 +1026,7 @@ export async function runMcpServer(): Promise<void> {
                 ],
               },
               value: {
-                description: "New value. For sessions.set: {path, name}. For sessions.remove: {path}. For injection.sessionStart / injection.perTurn / injection.showContents: a string array of component names (e.g. [\"summary\",\"peerCard\"]). For redactPatterns: a string array of regexes redacted from tool summaries in addition to the built-in secret patterns.",
+                description: "New value. For sessions.set: {path, name}. For sessions.remove: {path}. For injection.sessionStart / injection.perTurn / injection.showContents: a string array of component names (e.g. [\"summary\",\"peerCard\"]). For redactPatterns: a string array of regexes redacted from tool summaries in addition to the built-in secret patterns. For skipUserPatterns: a string array of regexes; a user prompt matching one is neither saved to Honcho nor used for context retrieval.",
               },
               confirm: {
                 type: "boolean",

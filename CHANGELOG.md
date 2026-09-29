@@ -6,6 +6,7 @@ All notable changes to claude-honcho will be documented in this file.
 
 ### Added
 
+- `skipUserPatterns` config: regexes for user prompts the plugin never saves to Honcho and never uses as a context-retrieval query, alongside the built-in harness filter. Lets multi-agent setups that relay agent text through the user slot keep it out of the human peer's memory. Settable via `set_config`.
 - Every Honcho request carries `X-Honcho-Host` and `X-Honcho-Plugin` headers (via `@honcho-ai/harness-plugin-core`) so server-side telemetry can attribute traffic to the plugin and host harness.
 
 ### Changed

@@ -226,6 +226,7 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
 
   // Miscellaneous
   "redactPatterns": [],               // Extra regexes redacted from tool summaries (additive to built-in secret patterns)
+  "skipUserPatterns": [],             // Regexes for user prompts never saved nor used for recall (see below)
   "statusline": "on",                 // Memory statusline visibility: "on" | "off"
   "enabled": true,
   "logging": true,
@@ -244,6 +245,22 @@ Session strategy controls how Honcho maps your conversations to sessions. Change
 | `per-directory` (default) | One session per project directory. Stable across restarts. | Most users — each project accumulates its own memory |
 | `git-branch` | Session name includes the current git branch. Switching branches switches sessions. | Feature-branch workflows where context per branch matters |
 | `chat-instance` | Each Claude Code chat gets its own session. No continuity between restarts. | Ephemeral usage, experimentation, or when you want a clean slate each time |
+
+### Skipping Relayed Prompts
+
+Turns that Claude Code injects into the user slot (task notifications, slash-command output, system reminders) are never saved to Honcho. Multi-agent setups can add their own: when an orchestrator types its messages into a worker session, or a sub-agent's hand-back arrives as a prompt, that text lands in the user slot and Honcho would attribute it to you. `skipUserPatterns` keeps such prompts out of your peer's memory:
+
+```jsonc
+{
+  "skipUserPatterns": ["^\\[orchestrator\\]", "^Sub-agent report:"]
+}
+```
+
+- Each entry is a JavaScript regex source string, tested without flags against the prompt (anchor with `^` to match a prefix).
+- A matching prompt is neither saved to Honcho nor used as a context-retrieval query for that turn.
+- Matching runs after leading `<system-reminder>` blocks and a leading `<pasted_content ...>` wrapper are stripped.
+- `set_config` rejects an invalid regex; an invalid entry in a hand-edited config file is skipped with a warning in the activity log.
+- Default: `[]`. Set it with the `set_config` MCP tool or by editing `~/.honcho/config.json`.
 
 ### Memory Injection
 

@@ -195,6 +195,8 @@ export interface HostConfig {
   contextRefresh?: ContextRefreshConfig;
   /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
   redactPatterns?: string[];
+  /** Regex patterns for user prompts never uploaded nor used for retrieval (additive to the built-in harness filter) */
+  skipUserPatterns?: string[];
   endpoint?: HonchoEndpointConfig;
   /** Composable injection config (session-start + per-turn component menus). */
   injection?: InjectionConfig;
@@ -306,6 +308,8 @@ interface HonchoFileConfig {
   endpoint?: HonchoEndpointConfig;
   /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
   redactPatterns?: string[];
+  /** Regex patterns for user prompts never uploaded nor used for retrieval (additive to the built-in harness filter) */
+  skipUserPatterns?: string[];
   enabled?: boolean;
   logging?: boolean;
   sessionStrategy?: SessionStrategy;
@@ -374,6 +378,8 @@ export interface HonchoCLAUDEConfig {
   endpoint?: HonchoEndpointConfig;
   /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
   redactPatterns?: string[];
+  /** Regex patterns for user prompts never uploaded nor used for retrieval (additive to the built-in harness filter) */
+  skipUserPatterns?: string[];
   /** Composable injection config (session-start + per-turn component menus) */
   injection?: InjectionConfig;
   /** Register the on-demand `honcho_remember` MCP tool (default: false).
@@ -515,6 +521,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     contextRefresh: hostBlock?.contextRefresh ?? raw.contextRefresh,
     endpoint: hostBlock?.endpoint ?? raw.endpoint,
     redactPatterns: hostBlock?.redactPatterns ?? raw.redactPatterns,
+    skipUserPatterns: hostBlock?.skipUserPatterns ?? raw.skipUserPatterns,
     injection: hostBlock?.injection ?? raw.injection,
     rememberTool: hostBlock?.rememberTool ?? raw.rememberTool,
     enabled: hostBlock?.enabled ?? raw.enabled,
@@ -679,6 +686,7 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   setHostIfExplicit("messageUpload", config.messageUpload, existing.messageUpload);
   setHostIfExplicit("contextRefresh", config.contextRefresh, existing.contextRefresh);
   setHostIfExplicit("redactPatterns", config.redactPatterns, existing.redactPatterns);
+  setHostIfExplicit("skipUserPatterns", config.skipUserPatterns, existing.skipUserPatterns);
   setHostIfExplicit("endpoint", config.endpoint, existing.endpoint);
   setHostIfExplicit("injection", config.injection, existing.injection);
   setHostIfExplicit("rememberTool", config.rememberTool, existing.rememberTool);

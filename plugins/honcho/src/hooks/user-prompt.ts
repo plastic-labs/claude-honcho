@@ -12,7 +12,7 @@ import { visInjectionMessage, visDialecticMessage, visSessionContextMessage, vis
 import type { ReasoningLevel } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
 import { setMemoryState, setSessionLink } from "../state.js";
-import { TRIVIAL_REPLY_PATTERN, isHarnessInjected, stripLeadingReminders } from "../prompt-filters.js";
+import { TRIVIAL_REPLY_PATTERN, isExcludedUserPrompt, stripLeadingReminders } from "../prompt-filters.js";
 
 interface HookInput {
   prompt?: string;
@@ -177,10 +177,12 @@ export async function handleUserPrompt(): Promise<void> {
         : undefined;
 
   // Skip trivial prompts — no context needed for "y", "ok", etc. Harness-injected
-  // turns are excluded from storage; don't use them as retrieval queries either.
+  // turns and prompts matching skipUserPatterns are excluded from storage; don't
+  // use them as retrieval queries either.
   const userPrompt = stripLeadingReminders(prompt);
-  if (isHarnessInjected(prompt) || shouldSkipContextRetrieval(userPrompt)) {
-    logHook("user-prompt", "Skipping context (harness-injected or trivial prompt)");
+  const warn = (msg: string) => logHook("user-prompt", msg);
+  if (isExcludedUserPrompt(prompt, config.skipUserPatterns, warn) || shouldSkipContextRetrieval(userPrompt)) {
+    logHook("user-prompt", "Skipping context (harness-injected, skip-pattern or trivial prompt)");
     visSkipMessage("user-prompt", sessionLink ? `${sessionLink} · skipped` : "skipped");
     process.exit(0);
   }
