@@ -35,8 +35,8 @@ export function isHarnessInjected(prompt: string): boolean {
   return !trimmed || HARNESS_INJECTED_PATTERNS.some((p) => p.test(trimmed));
 }
 
-// Some terminals and harnesses wrap pasted text in a <pasted_content ...> tag;
-// user skip patterns match the text inside it.
+// Claude Code wraps pasted text in a <pasted_content ...> tag; user skip
+// patterns match the text inside a leading one.
 const PASTED_CONTENT_OPEN = /^<pasted_content\b[^>]*>/;
 const PASTED_CONTENT_CLOSE = /<\/pasted_content>\s*$/;
 

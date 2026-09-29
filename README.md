@@ -257,8 +257,9 @@ Turns that Claude Code injects into the user slot (task notifications, slash-com
 ```
 
 - Each entry is a JavaScript regex source string, tested without flags against the prompt (anchor with `^` to match a prefix).
-- A matching prompt is neither saved to Honcho nor used as a context-retrieval query for that turn.
-- Matching runs after leading `<system-reminder>` blocks and a leading `<pasted_content ...>` wrapper are stripped.
+- A matching prompt is neither saved to Honcho nor used as a context-retrieval query for that turn, and `/honcho:import` drops it from backfilled transcripts too.
+- Matching runs after leading `<system-reminder>` blocks and a leading `<pasted_content ...>` wrapper (Claude Code wraps pasted text in one) are stripped.
+- When you paste text and then type more after it, the pasted part and your typing are one prompt: a `^`-anchored pattern that matches the pasted part skips the whole prompt, typed text included.
 - `set_config` rejects an invalid regex; an invalid entry in a hand-edited config file is skipped with a warning in the activity log.
 - Default: `[]`. Set it with the `set_config` MCP tool or by editing `~/.honcho/config.json`.
 

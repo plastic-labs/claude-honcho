@@ -19,4 +19,21 @@ describe("parseTranscriptForBackfill", () => {
     const users = parseTranscriptForBackfill(path).messages.filter((m) => m.role === "user");
     expect(users.map((m) => m.content)).toEqual(["do the thing"]);
   });
+
+  test("drops user prompts matching skipUserPatterns and keeps the replies", () => {
+    const path = transcript([
+      { type: "user", message: { content: "[relay] status from the worker" } },
+      { type: "assistant", message: { content: [{ type: "text", text: "noted" }] } },
+      { type: "user", message: { content: "do the thing" } },
+      { type: "assistant", message: { content: [{ type: "text", text: "done" }] } },
+    ]);
+    const warnings: string[] = [];
+    const { messages } = parseTranscriptForBackfill(path, {
+      skipUserPatterns: ["(unclosed", "^\\[relay\\]"],
+      onInvalid: (m) => warnings.push(m),
+    });
+    expect(messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["do the thing"]);
+    expect(messages.filter((m) => m.role === "assistant").map((m) => m.content)).toEqual(["noted", "done"]);
+    expect(warnings.length).toBeGreaterThan(0);
+  });
 });

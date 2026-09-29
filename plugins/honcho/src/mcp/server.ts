@@ -282,6 +282,27 @@ function validateComponentArray(
   return arr;
 }
 
+/**
+ * Validate a regex-array set_config value (redactPatterns, skipUserPatterns):
+ * every entry must compile. Returns the array, or an isError tool result.
+ */
+function validateRegexArray(
+  value: unknown,
+  field: string,
+): string[] | { content: { type: "text"; text: string }[]; isError: true } {
+  const err = (msg: string) => ({
+    content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: msg }, null, 2) }],
+    isError: true as const,
+  });
+  const arr = coerceStringArray(value);
+  if (!arr) return err(`${field} must be an array of regex strings`);
+  for (const source of arr) {
+    const invalid = validateRedactPattern(source);
+    if (invalid) return err(invalid);
+  }
+  return arr;
+}
+
 function handleSetConfig(args: Record<string, unknown>) {
   const field = args.field;
   if (typeof field !== "string" || !field) {
@@ -502,44 +523,16 @@ function handleSetConfig(args: Record<string, unknown>) {
     }
 
     case "redactPatterns": {
-      const arr = coerceStringArray(value);
-      if (!arr) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "redactPatterns must be an array of regex strings" }, null, 2) }],
-          isError: true,
-        };
-      }
-      for (const source of arr) {
-        const err = validateRedactPattern(source);
-        if (err) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({ success: false, error: err }, null, 2) }],
-            isError: true,
-          };
-        }
-      }
+      const arr = validateRegexArray(value, field);
+      if (!Array.isArray(arr)) return arr;
       previousValue = cfg.redactPatterns;
       cfg.redactPatterns = arr;
       break;
     }
 
     case "skipUserPatterns": {
-      const arr = coerceStringArray(value);
-      if (!arr) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "skipUserPatterns must be an array of regex strings" }, null, 2) }],
-          isError: true,
-        };
-      }
-      for (const source of arr) {
-        const err = validateRedactPattern(source);
-        if (err) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({ success: false, error: err }, null, 2) }],
-            isError: true,
-          };
-        }
-      }
+      const arr = validateRegexArray(value, field);
+      if (!Array.isArray(arr)) return arr;
       previousValue = cfg.skipUserPatterns;
       cfg.skipUserPatterns = arr;
       break;

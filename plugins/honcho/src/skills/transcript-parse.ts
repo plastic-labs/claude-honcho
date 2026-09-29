@@ -5,7 +5,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import { stripLeadingReminders } from "../prompt-filters.js";
+import { matchesSkipUserPattern, stripLeadingReminders } from "../prompt-filters.js";
 
 export interface TranscriptEntry {
   type?: string;
@@ -79,9 +79,13 @@ function readLines(transcriptPath: string): string[] {
 /**
  * Full-conversation parse: user + assistant messages in order, each with its
  * timestamp and the cwd/gitBranch for session mapping. Skips isMeta / isSidechain
- * / tool-result-only / `<...>` command caveats.
+ * / tool-result-only / `<...>` command caveats, and user prompts matching
+ * `options.skipUserPatterns` (as the live hooks do).
  */
-export function parseTranscriptForBackfill(transcriptPath: string): {
+export function parseTranscriptForBackfill(
+  transcriptPath: string,
+  options: { skipUserPatterns?: string[]; onInvalid?: (message: string) => void } = {}
+): {
   messages: ParsedMessage[];
   cwd?: string;
   gitBranch?: string;
@@ -128,7 +132,13 @@ export function parseTranscriptForBackfill(transcriptPath: string): {
     messages[i].isResponse = !next || next.role === "user";
   }
 
-  return { messages, cwd, gitBranch, sessionId };
+  // Drop skipped prompts after turn classification, so the surrounding replies
+  // keep the turn boundaries the live Stop hook would have given them.
+  const kept = messages.filter(
+    (m) => m.role !== "user" || !matchesSkipUserPattern(m.content, options.skipUserPatterns, options.onInvalid)
+  );
+
+  return { messages: kept, cwd, gitBranch, sessionId };
 }
 
 const PROJECTS_DIR = join(homedir(), ".claude", "projects");
