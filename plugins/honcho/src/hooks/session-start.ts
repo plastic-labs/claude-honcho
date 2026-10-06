@@ -41,8 +41,8 @@ function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
 export async function handleSessionStart(): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    console.error("[honcho] Not configured. Run: honcho init");
-    process.exit(1);
+    console.log(JSON.stringify({ systemMessage: "[honcho] Not configured. Run /honcho:setup to connect Honcho memory." }));
+    process.exit(0);
   }
 
   // Early exit if plugin is disabled

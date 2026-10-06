@@ -767,7 +767,7 @@ export async function runMcpServer(): Promise<void> {
   setDetectedHost("claude_code");
   const config = loadConfig();
   if (!config) {
-    console.error("[honcho-mcp] Not configured. Run: honcho init");
+    console.error("[honcho-mcp] Not configured. Run /honcho:setup");
     process.exit(1);
   }
 
