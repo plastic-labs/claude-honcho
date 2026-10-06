@@ -12,7 +12,7 @@ import { visInjectionMessage, visDialecticMessage, visSessionContextMessage, vis
 import type { ReasoningLevel } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
 import { setMemoryState, setSessionLink } from "../state.js";
-import { TRIVIAL_REPLY_PATTERN, isHarnessInjected, stripLeadingReminders } from "../prompt-filters.js";
+import { isHarnessInjected, isSlashCommand, isTerseReply, stripLeadingReminders } from "../prompt-filters.js";
 
 interface HookInput {
   prompt?: string;
@@ -20,12 +20,6 @@ interface HookInput {
   session_id?: string;
   workspace_roots?: string[];
 }
-
-// Patterns to skip context injection
-const SKIP_CONTEXT_PATTERNS = [
-  TRIVIAL_REPLY_PATTERN,
-  /^\//, // slash commands
-];
 
 const FETCH_TIMEOUT_MS = 4000;
 // The dialectic chat() call is far slower than context() (~12s at medium, up to
@@ -82,8 +76,12 @@ function extractTopics(prompt: string): { topics: string[]; precise: boolean } {
   return { topics: [...new Set(words.filter(w => !stopwords.has(w)))].slice(0, 10), precise: false };
 }
 
-function shouldSkipContextRetrieval(prompt: string): boolean {
-  return SKIP_CONTEXT_PATTERNS.some((p) => p.test(prompt.trim()));
+/** Why retrieval is skipped for this prompt, or null to retrieve. */
+function skipReason(prompt: string): string | null {
+  if (isHarnessInjected(prompt)) return "automated message";
+  if (isSlashCommand(prompt)) return "slash command";
+  if (isTerseReply(stripLeadingReminders(prompt))) return "short reply";
+  return null;
 }
 
 function formatSessionLink(sessionUrl: string): string {
@@ -169,21 +167,21 @@ export async function handleUserPrompt(): Promise<void> {
   // The nag flag is written at SessionStart and stable for the session, so
   // its presence on message 2 tells us the link hasn't been shown yet.
   const nag = readVersionNag();
-  const sessionLink =
+  const banner =
     messageCountBefore === 0
       ? nag ?? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
       : messageCountBefore === 1 && nag
         ? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
         : undefined;
 
-  // Skip trivial prompts — no context needed for "y", "ok", etc. Harness-injected
-  // turns are excluded from storage; don't use them as retrieval queries either.
-  const userPrompt = stripLeadingReminders(prompt);
-  if (isHarnessInjected(prompt) || shouldSkipContextRetrieval(userPrompt)) {
-    logHook("user-prompt", "Skipping context (harness-injected or trivial prompt)");
-    visSkipMessage("user-prompt", sessionLink ? `${sessionLink} · skipped` : "skipped");
+  // No retrieval for slash commands, harness-injected turns, or "y", "ok", etc.
+  const skip = skipReason(prompt);
+  if (skip) {
+    logHook("user-prompt", `Skipping context (${skip})`);
+    visSkipMessage("user-prompt", skip, banner);
     process.exit(0);
   }
+  const userPrompt = stripLeadingReminders(prompt);
 
   const injection = getInjectionConfig(config);
   const wantUserContext = injection.perTurn.includes("userContext");
@@ -193,7 +191,7 @@ export async function handleUserPrompt(): Promise<void> {
 
   if (!wantUserContext && !wantAssistantContext && !wantSessionContext && !wantDialectic) {
     logHook("user-prompt", "No per-turn injection components selected");
-    visSkipMessage("user-prompt", sessionLink ? `${sessionLink} · injection off` : "injection off");
+    visSkipMessage("user-prompt", "injection off", banner);
     process.exit(0);
   }
 
@@ -215,7 +213,7 @@ export async function handleUserPrompt(): Promise<void> {
       ? { context: userCtxResult.context, matched: userCtxResult.matched, queryLabel: userCtxResult.queryLabel }
       : null;
 
-  emitPerTurn(config, injection, userCtx, assistantCtxResult?.context ?? null, sessionCtx, dialectic, sessionLink);
+  emitPerTurn(config, injection, userCtx, assistantCtxResult?.context ?? null, sessionCtx, dialectic, banner);
   process.exit(0);
 }
 
@@ -234,7 +232,7 @@ function emitPerTurn(
   assistantCtx: any | null,
   sessionCtx: SessionContextResult | null,
   dialectic: DialecticResult | null,
-  sessionLink?: string,
+  banner?: string,
 ): void {
   const parts: string[] = [];
   const visLines: string[] = [];
@@ -269,7 +267,7 @@ function emitPerTurn(
   if (parts.length === 0) return;
 
   const visMsg = visLines.join("\n");
-  outputContext(config.peerName, parts, sessionLink ? `${sessionLink}\n${visMsg}` : visMsg);
+  outputContext(config.peerName, parts, banner ? `${banner}\n${visMsg}` : visMsg);
 }
 
 interface DialecticResult {

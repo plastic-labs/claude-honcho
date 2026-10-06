@@ -131,10 +131,12 @@ export function visCapture(summary: string): void {
 }
 
 /**
- * Output skip as systemMessage (for hooks with no existing stdout)
+ * Output skip as systemMessage (for hooks with no existing stdout), below a
+ * one-off banner when one is due.
  */
-export function visSkipMessage(hookName: string, reason: string): void {
-  visMessage("info", hookName, `skipped (${reason})`);
+export function visSkipMessage(hookName: string, reason: string, banner?: string): void {
+  const line = formatLine("info", hookName, `skipped (${reason})`);
+  console.log(JSON.stringify({ systemMessage: banner ? `${banner}\n${line}` : line }));
 }
 
 /**
