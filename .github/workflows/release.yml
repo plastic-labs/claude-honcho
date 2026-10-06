@@ -5,14 +5,17 @@ name: Release
 # at build time, so a release never commits anything to main. The registry
 # and the GitHub Releases page are the record of what is published.
 #
-# Publish and release creation are idempotent, so re-dispatching the same
-# version completes whatever a failed run left undone.
+# Publishing is staged: this workflow stages the version on npm through
+# trusted publishing (OIDC, no stored token), and a maintainer approves it with
+# 2FA on npmjs.com or with `npm stage approve`. The GitHub Release is created as
+# a draft; publish it after approving on npm, which creates the tag and runs
+# release-branch.yml to mirror the approved package onto release/honcho.
 #
-# The npm dist-tag is derived from the version: prerelease versions publish
+# Re-dispatching a version that is already on npm skips staging and only
+# fills in a missing draft release.
+#
+# The npm dist-tag is derived from the version: prerelease versions stage
 # under next, stable versions under latest.
-#
-# Requires the NPM_TOKEN secret: an npm automation token with publish rights
-# on the @honcho-ai scope.
 
 on:
   workflow_dispatch:
@@ -26,33 +29,46 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-permissions:
-  contents: write # release/honcho branch, tag + GitHub Release
-  id-token: write # npm provenance
+permissions: {}
 
 jobs:
   release:
     # Dispatch runs the workflow definition from the selected ref; only the
-    # reviewed copy on main may perform a release.
+    # reviewed copy on main may stage a release.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Matches the environment on the npm trusted publisher config, and limits
+    # OIDC tokens to deployments from main.
+    environment: npm
+    permissions:
+      contents: write # draft GitHub Release
+      id-token: write # npm trusted publishing and provenance
     defaults:
       run:
         working-directory: plugins/honcho
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          node-version: 22
+          persist-credentials: false
+
+      # No dependency cache: a release must not restore state that another
+      # workflow run could have written.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      # npm 12 needs node ^22.22.2; a range keeps an older cached 22.x off.
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ^22.22.2
           registry-url: https://registry.npmjs.org
+
+      # npm stage needs npm 11.15+. Pinned so a compromised npm release can't
+      # reach the publish step.
+      - run: npm install -g npm@12.2.0
 
       # npm's latest tag points at the most recently published version, not
       # the semver max, so a non-monotonic stable release would repoint
-      # latest backwards. Prereleases are exempt (they publish under next).
+      # latest backwards. Prereleases are exempt (they stage under next).
       - name: Validate version
         id: version
         env:
@@ -107,50 +123,38 @@ jobs:
 
       - name: Validate staged plugin
         run: |
-          npm install -g @anthropic-ai/claude-code
+          # Pinned: every step in this job can mint the publish OIDC token.
+          npm install -g @anthropic-ai/claude-code@2.1.291
           claude plugin validate .stage --strict
 
       - name: Smoke test bundled entry points
         run: bash scripts/smoke.sh .stage
 
-      - name: Publish to npm
+      - name: Stage on npm
         env:
           VERSION: ${{ steps.version.outputs.version }}
           DIST_TAG: ${{ steps.version.outputs.dist-tag }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          # Fail closed: publish only on a confirmed E404 for this version.
+          # Fail closed: stage only on a confirmed E404 for this version.
           set +e
           EXISTS_OUT="$(npm view "@honcho-ai/claude-honcho@$VERSION" version 2>&1)"
           EXISTS_STATUS=$?
           set -e
           if [ "$EXISTS_STATUS" -eq 0 ] && [ -n "$EXISTS_OUT" ]; then
-            echo "$VERSION already on npm; skipping publish"
+            echo "$VERSION already on npm; skipping stage"
           elif [ "$EXISTS_STATUS" -ne 0 ] && ! echo "$EXISTS_OUT" | grep -q "E404"; then
             echo "::error::npm lookup for $VERSION failed: $EXISTS_OUT"
             exit 1
           else
-            npm publish .stage --provenance --access public --tag "$DIST_TAG"
+            npm stage publish .stage --provenance --access public --tag "$DIST_TAG"
+            echo "::notice::Staged $VERSION. Approve it at https://www.npmjs.com/package/@honcho-ai/claude-honcho or with npm stage approve, then publish the draft release honcho-v$VERSION."
           fi
 
-      # Standby distribution channel: the same staged tree on an orphan
-      # branch, so marketplace.json can switch to a github source with a
-      # one-line change if npm distribution ever becomes a problem.
-      - name: Push release branch
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          cd .stage
-          git init -b release/honcho
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "honcho v$VERSION"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" release/honcho
-
-      # gh release create makes the tag server-side at --target, so the tag
-      # always lands on the exact commit that was published.
-      - name: Create GitHub Release
+      # A draft release creates no tag until it is published, so a rejected
+      # stage leaves nothing behind but the draft. --target pins the tag to
+      # the exact commit that was staged. Publishing the draft triggers
+      # release-branch.yml.
+      - name: Draft GitHub Release
         env:
           VERSION: ${{ steps.version.outputs.version }}
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
@@ -161,7 +165,8 @@ jobs:
             echo "$TAG release already exists; skipping"
           else
             gh release create "$TAG" \
-              --target "${{ github.sha }}" \
+              --draft \
+              --target "$GITHUB_SHA" \
               --title "honcho v$VERSION" \
               --generate-notes \
               $([ "$PRERELEASE" = "true" ] && echo --prerelease)
