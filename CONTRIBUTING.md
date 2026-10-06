@@ -147,7 +147,8 @@ installable until a maintainer approves it with 2FA:
 2. Publish the draft GitHub Release `honcho-v0.4.0` that the workflow
    created. This creates the tag on the commit that was staged, and the
    `Release branch` workflow then mirrors the approved npm tarball onto the
-   `release/honcho` branch.
+   `release/honcho` branch. Prereleases and versions lower than the branch's
+   current one are not mirrored.
 
 If the stage is rejected, delete the draft release. Prerelease versions
 (`0.4.0-rc.1`) stage under the `next` dist-tag. Re-dispatching a version that

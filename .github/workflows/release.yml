@@ -124,7 +124,9 @@ jobs:
       - name: Validate staged plugin
         run: |
           # Pinned: every step in this job can mint the publish OIDC token.
-          npm install -g @anthropic-ai/claude-code@2.1.292
+          # npm 12 skips install scripts unless allowed; claude needs its
+          # postinstall to fetch the native binary.
+          npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@2.1.292
           claude plugin validate .stage --strict
 
       - name: Smoke test bundled entry points

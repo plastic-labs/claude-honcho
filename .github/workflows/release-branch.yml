@@ -8,6 +8,10 @@ name: Release branch
 # created, which they do only after approving the staged version on npm. The
 # branch gets the tarball npm serves, so it never carries an unapproved or
 # rejected build.
+#
+# The branch tracks what npm's latest tag serves: prereleases are skipped, and
+# so is any version lower than the one already on the branch. Roll back by
+# pushing the branch by hand.
 
 on:
   release:
@@ -36,6 +40,30 @@ jobs:
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::'$TAG' does not name a valid semver version"
             exit 1
+          fi
+          if [[ "$VERSION" == *-* ]]; then
+            echo "::notice::$VERSION is a prerelease; release/honcho tracks stable versions only"
+            exit 0
+          fi
+          # Fail closed: only a confirmed 404 (no branch yet) counts as absence.
+          set +e
+          BRANCH_OUT="$(gh api "repos/$GITHUB_REPOSITORY/contents/package.json?ref=release/honcho" --jq .content 2>&1)"
+          BRANCH_STATUS=$?
+          set -e
+          if [ "$BRANCH_STATUS" -eq 0 ]; then
+            CURRENT="$(echo "$BRANCH_OUT" | base64 -d | jq -r .version)"
+          elif echo "$BRANCH_OUT" | grep -q "HTTP 404"; then
+            CURRENT=""
+          else
+            echo "::error::release/honcho lookup failed: $BRANCH_OUT"
+            exit 1
+          fi
+          if [ -n "$CURRENT" ] && [ "$CURRENT" != "$VERSION" ]; then
+            HIGHEST="$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -n1)"
+            if [ "$HIGHEST" != "$VERSION" ]; then
+              echo "::notice::release/honcho already has $CURRENT; not moving it back to $VERSION"
+              exit 0
+            fi
           fi
           # Only an approved stage is visible to npm view.
           if ! npm view "@honcho-ai/claude-honcho@$VERSION" version >/dev/null 2>&1; then
