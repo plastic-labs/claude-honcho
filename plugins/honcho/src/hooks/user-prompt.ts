@@ -143,7 +143,8 @@ export async function handleUserPrompt(): Promise<void> {
   }
 
   logHook("user-prompt", `Prompt received (${prompt.length} chars)`);
-  setSessionLink(honchoSessionUrl(config.workspace, sessionName), sessionName, hookInput.session_id);
+  const sessionUrl = honchoSessionUrl(config, sessionName);
+  setSessionLink(sessionUrl, sessionName, hookInput.session_id);
 
   // The prompt upload runs as a separate async hook (save-user-message.ts) so
   // the write never blocks this turn's injection. This hook is read-only.
@@ -167,11 +168,12 @@ export async function handleUserPrompt(): Promise<void> {
   // The nag flag is written at SessionStart and stable for the session, so
   // its presence on message 2 tells us the link hasn't been shown yet.
   const nag = readVersionNag();
+  const link = sessionUrl ? formatSessionLink(sessionUrl) : undefined;
   const banner =
     messageCountBefore === 0
-      ? nag ?? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
+      ? nag ?? link
       : messageCountBefore === 1 && nag
-        ? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
+        ? link
         : undefined;
 
   // No retrieval for slash commands, harness-injected turns, or "y", "ok", etc.

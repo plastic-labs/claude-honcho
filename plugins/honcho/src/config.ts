@@ -1000,6 +1000,11 @@ export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClient
   };
 }
 
+/** Whether the config targets the hosted production API. */
+export function isProductionEndpoint(config: HonchoCLAUDEConfig): boolean {
+  return getHonchoBaseUrl(config) === HONCHO_BASE_URLS.production;
+}
+
 export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url: string } {
   if (config.endpoint?.baseUrl) {
     return { type: "custom", url: config.endpoint.baseUrl };
