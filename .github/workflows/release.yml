@@ -124,7 +124,7 @@ jobs:
       - name: Validate staged plugin
         run: |
           # Pinned: every step in this job can mint the publish OIDC token.
-          npm install -g @anthropic-ai/claude-code@2.1.291
+          npm install -g @anthropic-ai/claude-code@2.1.292
           claude plugin validate .stage --strict
 
       - name: Smoke test bundled entry points

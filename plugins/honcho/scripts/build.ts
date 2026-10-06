@@ -109,10 +109,11 @@ function assertStagedPaths(relPath: string, text: string): void {
   }
 }
 
+// The quote is escaped (\") inside JSON text and bare in markdown.
 function rewriteEntryPoints(text: string): string {
   return text
-    .replace(/bun run ("?)\$\{CLAUDE_PLUGIN_ROOT\}\/(hooks\/[\w-]+|mcp-server)\.ts\1/g, 'node $1${CLAUDE_PLUGIN_ROOT}/dist/$2.js$1')
-    .replace(/bun run ("?)\$\{CLAUDE_PLUGIN_ROOT\}\/src\/(skills\/[\w-]+)\.ts\1/g, 'node $1${CLAUDE_PLUGIN_ROOT}/dist/$2.js$1');
+    .replace(/bun run (\\"|"?)\$\{CLAUDE_PLUGIN_ROOT\}\/(hooks\/[\w-]+|mcp-server)\.ts\1/g, 'node $1${CLAUDE_PLUGIN_ROOT}/dist/$2.js$1')
+    .replace(/bun run (\\"|"?)\$\{CLAUDE_PLUGIN_ROOT\}\/src\/(skills\/[\w-]+)\.ts\1/g, 'node $1${CLAUDE_PLUGIN_ROOT}/dist/$2.js$1');
 }
 
 const hooksJson = rewriteEntryPoints(await Bun.file(join(ROOT, "hooks/hooks.json")).text());
