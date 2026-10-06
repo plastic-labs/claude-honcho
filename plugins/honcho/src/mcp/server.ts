@@ -763,12 +763,42 @@ const REMEMBER_TOOL = {
   },
 };
 
+const NOT_CONFIGURED_RESULT = {
+  content: [{ type: "text", text: "Honcho isn't configured; run /honcho:setup to connect it, then try again." }],
+  isError: true,
+};
+
+interface HonchoClients {
+  config: HonchoCLAUDEConfig;
+  honcho: Honcho;
+  honchoDialectic: Honcho;
+}
+
+/** Build the Honcho clients from the current config, or null when no API key is configured. */
+function createClients(): HonchoClients | null {
+  const config = loadConfig();
+  if (!config) return null;
+  return {
+    config,
+    honcho: new Honcho(getHonchoClientOptions(config)),
+    // Dedicated client for dialectic queries, which run far past the shared
+    // 8s timeout (≈80s at max reasoning). No retries: the chat case enforces
+    // one DIALECTIC_TIMEOUT_MS deadline across the whole flow.
+    honchoDialectic: new Honcho({
+      ...getHonchoClientOptions(config),
+      timeout: DIALECTIC_TIMEOUT_MS,
+      maxRetries: 0,
+    }),
+  };
+}
+
 export async function runMcpServer(): Promise<void> {
   setDetectedHost("claude_code");
-  const config = loadConfig();
-  if (!config) {
+  // Without a key the server still starts; every tool answers with setup
+  // instructions until a config appears, then the clients are built on first use.
+  let clients = createClients();
+  if (!clients) {
     console.error("[honcho-mcp] Not configured. Run /honcho:setup");
-    process.exit(1);
   }
 
   const server = new Server(
@@ -783,22 +813,10 @@ export async function runMcpServer(): Promise<void> {
     }
   );
 
-  // Initialize Honcho client
-  const honcho = new Honcho(getHonchoClientOptions(config));
-
-  // Dedicated client for dialectic queries, which run far past the shared
-  // 8s timeout (≈80s at max reasoning). No retries: the chat case enforces
-  // one DIALECTIC_TIMEOUT_MS deadline across the whole flow.
-  const honchoDialectic = new Honcho({
-    ...getHonchoClientOptions(config),
-    timeout: DIALECTIC_TIMEOUT_MS,
-    maxRetries: 0,
-  });
-
   // honcho_remember is opt-in. Resolved once at startup — toggling rememberTool
   // takes effect on next restart, consistent with the plugin's "restart Claude
   // Code after MCP changes" policy.
-  const rememberEnabled = config.rememberTool === true;
+  const rememberEnabled = clients?.config.rememberTool === true;
 
   // List available tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -1019,6 +1037,12 @@ export async function runMcpServer(): Promise<void> {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     const cwd = getLastActiveCwd() || process.cwd();
+
+    clients ??= createClients();
+    if (!clients) {
+      return NOT_CONFIGURED_RESULT;
+    }
+    const { config, honcho, honchoDialectic } = clients;
 
     // ── Config tools (no Honcho session needed) ──
 

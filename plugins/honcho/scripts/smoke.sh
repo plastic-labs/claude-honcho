@@ -50,4 +50,13 @@ echo "smoke: dist/skills/setup-runner.js"
 echo "smoke: dist/skills/status-runner.js"
 bounded node dist/skills/status-runner.js </dev/null | grep -q "Not configured"
 
+# The MCP server must start without a key and answer tools with setup steps.
+echo "smoke: dist/mcp-server.js (no key)"
+{
+  printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_config","arguments":{}}}'
+  sleep 1
+} | bounded node dist/mcp-server.js 2>/dev/null | grep -q "run /honcho:setup"
+
 echo "smoke: all entry points OK"
