@@ -12,6 +12,9 @@ export function isTerseReply(prompt: string): boolean {
 // system reminders.
 const HARNESS_INJECTED_PATTERNS = [
   /^<task-notification>/,
+  // Another Claude Code session's message (SendMessage), delivered in the user slot.
+  // It is that agent's text, not the human's.
+  /^<cross-session-message\b/,
   /^<local-command-stdout>/,
   /^<command-name>/,
   /^<command-message>/,
