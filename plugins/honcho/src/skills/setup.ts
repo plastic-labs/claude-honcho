@@ -170,8 +170,8 @@ export async function setup(): Promise<void> {
   if (!configExists()) {
     console.log(s.section("Creating config"));
     try {
-      // Root-level globals (owned by user/CLI, written only at initial setup)
-      saveRootField("apiKey", config.apiKey);
+      // Root-level globals (owned by user/CLI, written only at initial setup).
+      // The API key stays in HONCHO_API_KEY and is never written here.
       saveRootField("peerName", config.peerName);
       // Per-host config goes in hosts.claude_code via saveConfig
       saveConfig({
@@ -184,6 +184,7 @@ export async function setup(): Promise<void> {
         logging: true,
       });
       console.log(s.success(`Written to ${getConfigPath()}`));
+      console.log(s.dim("  The API key is not written there; it is read from HONCHO_API_KEY."));
     } catch (err) {
       console.log(s.warn(`Failed to write config: ${err instanceof Error ? err.message : String(err)}`));
       process.exit(1);
