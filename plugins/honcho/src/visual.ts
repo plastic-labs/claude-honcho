@@ -4,7 +4,7 @@
  * Only hooks that output JSON with `systemMessage` show inline indicators in Claude Code:
  * - UserPromptSubmit — addSystemMessage() adds to existing JSON output
  * - PostToolUse — visCapture() outputs JSON with systemMessage
- * - Stop — visStopMessage() outputs JSON with systemMessage
+ * - Stop — visStopMessage() outputs JSON with systemMessage, on a failed upload only
  *
  * SessionStart, SessionEnd, and PreCompact output plain text to stdout (context injection),
  * so they cannot show inline indicators. Their activity is logged to the verbose log file only.

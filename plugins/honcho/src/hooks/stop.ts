@@ -1,5 +1,5 @@
 import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, isLoggingEnabled, getCachedStdin, readStdinText } from "../config.js";
 import { existsSync, readFileSync } from "fs";
 import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -191,9 +191,10 @@ export async function handleStop(): Promise<void> {
     });
 
     logHook("stop", `Saved ${turnMessages.length} assistant message(s)`);
-    visStopMessage("out", `saved ${turnMessages.length} assistant msg(s)`);
   } catch (error) {
     logHook("stop", `Upload failed: ${error}`, { error: String(error) });
+    const seeLog = isLoggingEnabled() ? " (see ~/.honcho/activity.log)" : "";
+    visStopMessage("warn", `upload failed, ${turnMessages.length} assistant msg(s) not saved${seeLog}`);
   }
 
   process.exit(0);
