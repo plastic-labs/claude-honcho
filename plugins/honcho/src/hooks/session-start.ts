@@ -73,11 +73,22 @@ export async function handleSessionStart(): Promise<void> {
   const sessionName = getSessionName(cwd, claudeInstanceId);
   setLogContext(cwd, sessionName);
 
-  // Clear verbose log for fresh session
-  clearVerboseLog();
+  // A resumed conversation already carries its session-start injection; only
+  // the local session bookkeeping is refreshed.
+  const source = hookInput.source ?? "startup";
+  if (source === "resume") {
+    setCachedSessionId(cwd, sessionName, sessionName, claudeInstanceId);
+    setSessionLink(honchoSessionUrl(config, sessionName), sessionName, claudeInstanceId);
+    logHook("session-start", "Resumed conversation; skipping injection");
+    process.exit(0);
+  }
 
-  // Reset message count for this session (for threshold-based knowledge graph refresh)
-  resetMessageCount();
+  // Compaction continues the same conversation: keep the verbose log and the
+  // first-prompt counter. Startup and clear begin a new one.
+  if (source !== "compact") {
+    clearVerboseLog();
+    resetMessageCount();
+  }
 
   // Capture git state (before any API calls for speed)
   const previousGitState = getCachedGitState(cwd);
