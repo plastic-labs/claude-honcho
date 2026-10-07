@@ -11,7 +11,7 @@
           },
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.ts",
+            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.ts\"",
             "timeout": 30
           }
         ]
@@ -22,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/session-end.ts",
+            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/session-end.ts\"",
             "timeout": 5
           }
         ]
@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-use.ts",
+            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-use.ts\"",
             "timeout": 10,
             "async": true
           }
@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-honcho.ts",
+            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-honcho.ts\"",
             "timeout": 4
           }
         ]
@@ -58,12 +58,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt.ts",
+            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt.ts\"",
             "timeout": 125
           },
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/save-user-message.ts",
+            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/save-user-message.ts\"",
             "timeout": 30,
             "async": true
           }
@@ -76,7 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.ts",
+            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.ts\"",
             "timeout": 20
           }
         ]
@@ -86,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.ts",
+            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.ts\"",
             "timeout": 20
           }
         ]
@@ -97,7 +97,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/stop.ts",
+            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/stop.ts\"",
             "timeout": 10,
             "async": true
           }
