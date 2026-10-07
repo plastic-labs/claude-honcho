@@ -114,13 +114,22 @@ export function visSessionContextMessage(hookName: string, lines: string[], toke
 
 /**
  * Build the systemMessage for the SessionStart composition: a single status
- * line naming which components were injected (e.g. "injected summary + peer
- * card (12 items)"). Session start is a once-per-session surface, so unlike the
- * per-turn line it stays terse — the payload itself goes to additionalContext.
+ * line naming which components were injected and which came back empty (e.g.
+ * "injected directives · summary none yet · peer card empty"). Session start is
+ * a once-per-session surface, so unlike the per-turn line it stays terse — the
+ * payload itself goes to additionalContext.
  */
-export function visComposedInjection(hookName: string, labels: string[]): string {
-  const summary = labels.length ? `injected ${labels.join(" + ")}` : "nothing to inject";
-  return formatLine("in", hookName, summary);
+export function visComposedInjection(hookName: string, labels: string[], notes: string[] = []): string {
+  const head = labels.length ? `injected ${labels.join(" + ")}` : "nothing injected";
+  return formatLine("in", hookName, [head, ...notes].join(" · "));
+}
+
+/**
+ * Build the per-turn line for a selected component that injected nothing.
+ * `unavailable` marks a fetch that failed or timed out.
+ */
+export function visEmptyComponent(hookName: string, message: string, unavailable = false): string {
+  return formatLine(unavailable ? "warn" : "info", hookName, message);
 }
 
 /**

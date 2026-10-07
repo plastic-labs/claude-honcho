@@ -222,9 +222,9 @@ export async function handleSessionStart(): Promise<void> {
     const contextValue = userContextResult.status === "fulfilled" ? (userContextResult.value as any) : null;
     const summaryValue = summaryResult.status === "fulfilled" ? (summaryResult.value as any) : null;
     const rendered = renderSessionStart(startComponents, {
-      summary: summaryValue?.longSummary?.content ?? null,
-      peerCard: contextValue?.peerCard ?? null,
-      representation: contextValue?.representation ?? null,
+      summary: summaryValue ? (summaryValue.longSummary?.content ?? "") : null,
+      peerCard: contextValue ? (contextValue.peerCard ?? []) : null,
+      representation: contextValue ? (contextValue.representation ?? "") : null,
       remember: config.rememberTool === true,
     });
 
@@ -233,14 +233,17 @@ export async function handleSessionStart(): Promise<void> {
     spinner.stop();
     setMemoryState("idle", undefined, claudeInstanceId);
 
+    const systemMessage = visComposedInjection("session-start", rendered.labels, rendered.notes);
     if (rendered.content) {
       console.log(JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "SessionStart",
           additionalContext: `[Honcho Memory for ${config.peerName}]: ${rendered.content}`,
         },
-        systemMessage: visComposedInjection("session-start", rendered.labels),
+        systemMessage,
       }));
+    } else if (rendered.notes.length) {
+      console.log(JSON.stringify({ systemMessage }));
     }
 
     logFlow("complete", `Cache warmed: ${successCount}/1 context · injected: ${rendered.labels.join(", ") || "none"}`);
