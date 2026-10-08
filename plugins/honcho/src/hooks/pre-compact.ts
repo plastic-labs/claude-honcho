@@ -3,7 +3,7 @@ import { initHook, loadConfig, getSessionForPath, getSessionName, getHonchoClien
 import { Spinner } from "../spinner.js";
 import { setMemoryState } from "../state.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
-import { formatVerboseBlock, formatVerboseList } from "../visual.js";
+import { verboseApiResult, verboseList, visAnchorSummary } from "../visual.js";
 
 
 interface HookInput {
@@ -13,6 +13,23 @@ interface HookInput {
   trigger?: "manual" | "auto";
   custom_instructions?: string;
   workspace_roots?: string[];
+}
+
+// Appended to both dialectic questions; the answers go into the anchor verbatim.
+const FACTS_ONLY =
+  "Answer with facts only, as a terse bullet list written in the third person. " +
+  "No preamble, no closing summary, no offers to help further, and no questions.";
+
+// A trailing offer such as "If you'd like, I can convert this into…".
+const CHAT_FILLER = /^(if you('d| would)? like|if you want|let me know|would you like|want me to|i can also)\b/i;
+
+/** Drop trailing paragraphs that are chat filler rather than facts. */
+export function stripChatFiller(answer: string): string {
+  const paragraphs = answer.trim().split(/\n\s*\n/);
+  while (paragraphs.length > 1 && CHAT_FILLER.test(paragraphs[paragraphs.length - 1].trim())) {
+    paragraphs.pop();
+  }
+  return paragraphs.join("\n\n");
 }
 
 /**
@@ -148,6 +165,7 @@ export async function handlePreCompact(): Promise<void> {
 
     // Fetch ALL context in parallel - this is the RIGHT time for expensive calls
     // because the context is about to be reset anyway
+    const fetchStart = Date.now();
     const dialecticArgs = observationMode === "unified"
       ? { session, reasoningLevel: config.reasoningLevel ?? "low" }
       : { target: config.peerName, session, reasoningLevel: config.reasoningLevel ?? "low" };
@@ -163,35 +181,28 @@ export async function handlePreCompact(): Promise<void> {
         session.summaries(),
         // Fresh dialectic - ask about user (worth the cost at compaction time)
         contextPeer.chat(
-          `Summarize the most important things to remember about ${config.peerName}. Focus on their preferences, working style, current projects, and any critical context that should survive a conversation summary.`,
+          `What are the most important things to remember about ${config.peerName}? Cover their preferences, working style, current projects, and any critical context that should survive a conversation summary. ${FACTS_ONLY}`,
           dialecticArgs
         ),
         // Fresh dialectic - what were we working on together
         contextPeer.chat(
-          `What are the most important things that were worked on with ${config.peerName}? Summarize key context that should be preserved.`,
+          `What are the most important things that were worked on with ${config.peerName}? ${FACTS_ONLY}`,
           dialecticArgs
         ),
       ]);
+    const fetchMs = Date.now() - fetchStart;
 
     // Extract results
     const userContext = userContextResult.status === "fulfilled" ? userContextResult.value : null;
     const summaries = summariesResult.status === "fulfilled" ? summariesResult.value : null;
 
-    // Build verbose output blocks — these will be appended to stdout after the
-    // memory card. PreCompact stdout is only shown in Ctrl+O, so verbose data
-    // is hidden by default and visible when the user presses Ctrl+O.
-    const verboseBlocks: string[] = [];
-    verboseBlocks.push(formatVerboseBlock(`pre-compact ${contextLabel}`, (userContext as any)?.representation));
-    verboseBlocks.push(formatVerboseList("pre-compact peerCard", (userContext as any)?.peerCard));
+    verboseApiResult(`pre-compact ${contextLabel} → representation`, (userContext as any)?.representation);
+    verboseList("pre-compact peerCard", (userContext as any)?.peerCard);
 
-    const userDialectic =
-      userChatResult.status === "fulfilled"
-        ? userChatResult.value
-        : null;
-    const claudeDialectic =
-      claudeChatResult.status === "fulfilled"
-        ? claudeChatResult.value
-        : null;
+    const dialecticAnswer = (r: PromiseSettledResult<string | null>) =>
+      r.status === "fulfilled" && typeof r.value === "string" && r.value.trim() ? stripChatFiller(r.value) : null;
+    const userDialectic = dialecticAnswer(userChatResult);
+    const claudeDialectic = dialecticAnswer(claudeChatResult);
 
     // Format the memory card
     const memoryCard = formatMemoryCard(
@@ -209,21 +220,21 @@ export async function handlePreCompact(): Promise<void> {
     }
     setMemoryState("idle", undefined, hookInput.session_id);
 
-    // Add dialectic responses to verbose output
-    if (userDialectic) {
-      verboseBlocks.push(formatVerboseBlock(`pre-compact peer.chat(user) → "${config.peerName}"`, userDialectic));
-    }
-    if (claudeDialectic) {
-      verboseBlocks.push(formatVerboseBlock(`pre-compact peer.chat(claude) → "${config.aiPeer}"`, claudeDialectic));
-    }
+    verboseApiResult(`pre-compact peer.chat(user) → "${config.peerName}"`, userDialectic);
+    verboseApiResult(`pre-compact peer.chat(claude) → "${config.aiPeer}"`, claudeDialectic);
 
     logHook("pre-compact", `Memory anchored (${memoryCard.length} chars)`);
 
-    // Output memory card to stdout, followed by verbose API data.
-    // PreCompact stdout is only shown in Ctrl+O, so the verbose blocks
-    // are hidden by default and visible when the user presses Ctrl+O.
-    const verboseOutput = verboseBlocks.filter(Boolean).join("\n");
-    console.log(`[${config.aiPeer}/Honcho Memory Anchor]\n\n${memoryCard}${verboseOutput}`);
+    // The memory card, then one summary line. Full API payloads go to the
+    // verbose log only.
+    const ctx = userContext as any;
+    const anchored: string[] = [];
+    if (ctx?.peerCard?.length) anchored.push(`peer card (${ctx.peerCard.length} items)`);
+    if (typeof ctx?.representation === "string" && ctx.representation.trim()) anchored.push("conclusions");
+    if ((summaries as any)?.shortSummary?.content) anchored.push("session summary");
+    const answers = [userDialectic, claudeDialectic].filter(Boolean).length;
+    if (answers) anchored.push(`${answers} dialectic answer${answers === 1 ? "" : "s"}`);
+    console.log(`[${config.aiPeer}/Honcho Memory Anchor]\n\n${memoryCard}\n\n${visAnchorSummary("pre-compact", anchored, fetchMs)}`);
     process.exit(0);
   } catch (error) {
     logHook("pre-compact", `Error: ${error}`, { error: String(error) });

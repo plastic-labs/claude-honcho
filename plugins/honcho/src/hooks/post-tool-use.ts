@@ -192,8 +192,8 @@ export async function handlePostToolUse(): Promise<void> {
     process.exit(0);
   }
 
-  // Early exit if plugin is disabled
-  if (!isPluginEnabled()) {
+  // Early exit if plugin is disabled, or if [Tool] uploads aren't opted in
+  if (!isPluginEnabled() || config.saveMessages === false || config.saveToolUse !== true) {
     process.exit(0);
   }
 
@@ -224,20 +224,19 @@ export async function handlePostToolUse(): Promise<void> {
     config.redactPatterns
   );
   logHook("post-tool-use", summary, { tool: toolName });
-  visCapture(summary);
 
   // Upload to Honcho and wait for completion
-  await logToHonchoAsync(config, cwd, summary).catch((e) => logHook("post-tool-use", `Upload failed: ${e}`, { error: String(e) }));
+  try {
+    await logToHonchoAsync(config, cwd, summary);
+    visCapture(summary);
+  } catch (e) {
+    logHook("post-tool-use", `Upload failed: ${e}`, { error: String(e) });
+  }
 
   process.exit(0);
 }
 
 async function logToHonchoAsync(config: any, cwd: string, summary: string): Promise<void> {
-  // Skip if message saving is disabled, or if [Tool] logging isn't opted in.
-  if (config.saveMessages === false || config.saveToolUse !== true) {
-    return;
-  }
-
   const honcho = new Honcho(getHonchoClientOptions(config));
   const sessionName = getSessionName(cwd);
 

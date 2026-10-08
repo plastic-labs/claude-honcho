@@ -34,3 +34,11 @@ export function isHarnessInjected(prompt: string): boolean {
   const trimmed = stripLeadingReminders(prompt).trim();
   return !trimmed || HARNESS_INJECTED_PATTERNS.some((p) => p.test(trimmed));
 }
+
+// A slash command or skill invocation ("/compact", "/honcho:config", "/loop 5m
+// /foo"). A prompt that opens with an absolute path is not one.
+const SLASH_COMMAND = /^\/[\w:-]+(?:\s|$)/;
+
+export function isSlashCommand(prompt: string): boolean {
+  return SLASH_COMMAND.test(stripLeadingReminders(prompt).trim());
+}

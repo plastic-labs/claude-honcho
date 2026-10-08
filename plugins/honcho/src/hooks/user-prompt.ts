@@ -8,11 +8,11 @@ import {
   getInstanceIdForCwd,
 } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
-import { visInjectionMessage, visDialecticMessage, visSessionContextMessage, visSkipMessage, addSystemMessage, verboseApiResult, verboseList } from "../visual.js";
+import { visInjectionMessage, visDialecticMessage, visSessionContextMessage, visSkipMessage, visEmptyComponent, addSystemMessage, verboseApiResult, verboseList } from "../visual.js";
 import type { ReasoningLevel } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
 import { setMemoryState, setSessionLink } from "../state.js";
-import { TRIVIAL_REPLY_PATTERN, isHarnessInjected, stripLeadingReminders } from "../prompt-filters.js";
+import { isHarnessInjected, isSlashCommand, isTerseReply, stripLeadingReminders } from "../prompt-filters.js";
 
 interface HookInput {
   prompt?: string;
@@ -20,12 +20,6 @@ interface HookInput {
   session_id?: string;
   workspace_roots?: string[];
 }
-
-// Patterns to skip context injection
-const SKIP_CONTEXT_PATTERNS = [
-  TRIVIAL_REPLY_PATTERN,
-  /^\//, // slash commands
-];
 
 const FETCH_TIMEOUT_MS = 4000;
 // The dialectic chat() call is far slower than context() (~12s at medium, up to
@@ -82,8 +76,12 @@ function extractTopics(prompt: string): { topics: string[]; precise: boolean } {
   return { topics: [...new Set(words.filter(w => !stopwords.has(w)))].slice(0, 10), precise: false };
 }
 
-function shouldSkipContextRetrieval(prompt: string): boolean {
-  return SKIP_CONTEXT_PATTERNS.some((p) => p.test(prompt.trim()));
+/** Why retrieval is skipped for this prompt, or null to retrieve. */
+function skipReason(prompt: string): string | null {
+  if (isHarnessInjected(prompt)) return "automated message";
+  if (isSlashCommand(prompt)) return "slash command";
+  if (isTerseReply(stripLeadingReminders(prompt))) return "short reply";
+  return null;
 }
 
 function formatSessionLink(sessionUrl: string): string {
@@ -145,7 +143,8 @@ export async function handleUserPrompt(): Promise<void> {
   }
 
   logHook("user-prompt", `Prompt received (${prompt.length} chars)`);
-  setSessionLink(honchoSessionUrl(config.workspace, sessionName), sessionName, hookInput.session_id);
+  const sessionUrl = honchoSessionUrl(config, sessionName);
+  setSessionLink(sessionUrl, sessionName, hookInput.session_id);
 
   // The prompt upload runs as a separate async hook (save-user-message.ts) so
   // the write never blocks this turn's injection. This hook is read-only.
@@ -169,21 +168,22 @@ export async function handleUserPrompt(): Promise<void> {
   // The nag flag is written at SessionStart and stable for the session, so
   // its presence on message 2 tells us the link hasn't been shown yet.
   const nag = readVersionNag();
-  const sessionLink =
+  const link = sessionUrl ? formatSessionLink(sessionUrl) : undefined;
+  const banner =
     messageCountBefore === 0
-      ? nag ?? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
+      ? nag ?? link
       : messageCountBefore === 1 && nag
-        ? formatSessionLink(honchoSessionUrl(config.workspace, sessionName))
+        ? link
         : undefined;
 
-  // Skip trivial prompts — no context needed for "y", "ok", etc. Harness-injected
-  // turns are excluded from storage; don't use them as retrieval queries either.
-  const userPrompt = stripLeadingReminders(prompt);
-  if (isHarnessInjected(prompt) || shouldSkipContextRetrieval(userPrompt)) {
-    logHook("user-prompt", "Skipping context (harness-injected or trivial prompt)");
-    visSkipMessage("user-prompt", sessionLink ? `${sessionLink} · skipped` : "skipped");
+  // No retrieval for slash commands, harness-injected turns, or "y", "ok", etc.
+  const skip = skipReason(prompt);
+  if (skip) {
+    logHook("user-prompt", `Skipping context (${skip})`);
+    visSkipMessage("user-prompt", skip, banner);
     process.exit(0);
   }
+  const userPrompt = stripLeadingReminders(prompt);
 
   const injection = getInjectionConfig(config);
   const wantUserContext = injection.perTurn.includes("userContext");
@@ -193,7 +193,7 @@ export async function handleUserPrompt(): Promise<void> {
 
   if (!wantUserContext && !wantAssistantContext && !wantSessionContext && !wantDialectic) {
     logHook("user-prompt", "No per-turn injection components selected");
-    visSkipMessage("user-prompt", sessionLink ? `${sessionLink} · injection off` : "injection off");
+    visSkipMessage("user-prompt", "injection off", banner);
     process.exit(0);
   }
 
@@ -215,17 +215,17 @@ export async function handleUserPrompt(): Promise<void> {
       ? { context: userCtxResult.context, matched: userCtxResult.matched, queryLabel: userCtxResult.queryLabel }
       : null;
 
-  emitPerTurn(config, injection, userCtx, assistantCtxResult?.context ?? null, sessionCtx, dialectic, sessionLink);
+  emitPerTurn(config, injection, userCtx, assistantCtxResult?.context ?? null, sessionCtx, dialectic, banner);
   process.exit(0);
 }
 
 /**
  * Emit the per-turn injection: the selected components composed into one
  * additionalContext payload plus a per-component systemMessage summary. Every
- * component reports a one-line summary; only those listed in
- * `injection.showContents` also print their payload to the terminal. Exits
- * silently when nothing resolved to content — mirroring the old no-cache
- * fall-through.
+ * selected component reports a one-line summary, including one that came back
+ * empty (null means its fetch failed or timed out); only those listed in
+ * `injection.showContents` also print their payload to the terminal. With no
+ * content, only the systemMessage is printed.
  */
 function emitPerTurn(
   config: any,
@@ -234,42 +234,68 @@ function emitPerTurn(
   assistantCtx: any | null,
   sessionCtx: SessionContextResult | null,
   dialectic: DialecticResult | null,
-  sessionLink?: string,
+  banner?: string,
 ): void {
   const parts: string[] = [];
   const visLines: string[] = [];
   const show = (c: PerTurnComponent) => injection.showContents?.includes(c) ?? false;
+  const want = (c: PerTurnComponent) => injection.perTurn?.includes(c) ?? false;
+  const unavailable = (what: string) => visLines.push(visEmptyComponent("user-prompt", `${what} unavailable`, true));
+  const empty = (message: string) => visLines.push(visEmptyComponent("user-prompt", message));
 
-  if (userCtx) {
-    const conclusions = extractConclusions(userCtx.context);
-    if (conclusions.length > 0) {
+  if (want("userContext")) {
+    const conclusions = userCtx ? extractConclusions(userCtx.context) : [];
+    if (!userCtx) {
+      unavailable("user context");
+    } else if (conclusions.length === 0) {
+      empty("no conclusions matched");
+    } else {
       parts.push(`Relevant conclusions: ${conclusions.join("; ")}`);
       visLines.push(visInjectionMessage("user-prompt", { conclusions, matched: userCtx.matched, queryLabel: userCtx.queryLabel, showContents: show("userContext") }));
     }
   }
 
-  if (assistantCtx) {
-    const conclusions = extractConclusions(assistantCtx);
-    if (conclusions.length > 0) {
+  if (want("assistantContext")) {
+    const conclusions = assistantCtx ? extractConclusions(assistantCtx) : [];
+    if (!assistantCtx) {
+      unavailable("assistant context");
+    } else if (conclusions.length === 0) {
+      empty(`no conclusions about ${config.aiPeer} matched`);
+    } else {
       parts.push(`Conclusions about the assistant (${config.aiPeer}): ${conclusions.join("; ")}`);
       visLines.push(visInjectionMessage("user-prompt", { conclusions, queryLabel: `assistant ${config.aiPeer}`, showContents: show("assistantContext") }));
     }
   }
 
-  if (sessionCtx) {
-    parts.push(`Recent Honcho session messages:\n${sessionCtx.lines.join("\n")}`);
-    visLines.push(visSessionContextMessage("user-prompt", sessionCtx.lines, sessionCtx.tokenCount, show("sessionContext")));
+  if (want("sessionContext")) {
+    if (!sessionCtx) {
+      unavailable("session context");
+    } else if (sessionCtx.lines.length === 0) {
+      empty("no session messages yet");
+    } else {
+      parts.push(`Recent Honcho session messages:\n${sessionCtx.lines.join("\n")}`);
+      visLines.push(visSessionContextMessage("user-prompt", sessionCtx.lines, sessionCtx.tokenCount, show("sessionContext")));
+    }
   }
 
-  if (dialectic) {
-    parts.push(`Dialectic recall: ${dialectic.answer}`);
-    visLines.push(visDialecticMessage("user-prompt", dialectic.reasoning, dialectic.elapsedMs, dialectic.answer, show("dialectic")));
+  if (want("dialectic")) {
+    if (!dialectic) {
+      unavailable("dialectic");
+    } else if (!dialectic.answer) {
+      empty(`dialectic returned no answer (${dialectic.reasoning} · ${(dialectic.elapsedMs / 1000).toFixed(1)}s)`);
+    } else {
+      parts.push(`Dialectic recall: ${dialectic.answer}`);
+      visLines.push(visDialecticMessage("user-prompt", dialectic.reasoning, dialectic.elapsedMs, dialectic.answer, show("dialectic")));
+    }
   }
-
-  if (parts.length === 0) return;
 
   const visMsg = visLines.join("\n");
-  outputContext(config.peerName, parts, sessionLink ? `${sessionLink}\n${visMsg}` : visMsg);
+  const systemMessage = banner ? `${banner}\n${visMsg}` : visMsg;
+  if (parts.length === 0) {
+    console.log(JSON.stringify({ systemMessage }));
+    return;
+  }
+  outputContext(config.peerName, parts, systemMessage);
 }
 
 interface DialecticResult {
@@ -282,7 +308,7 @@ interface DialecticResult {
  * Per-turn "dialectic" component: a reasoned peer.chat() answer over the peer's
  * representation, seeded from `dialecticTemplate` (the prompt substituted into
  * %{user_query}). Unscoped by session so recall spans the peer's full history,
- * not just this conversation. Returns null on empty/failed answer.
+ * not just this conversation. Returns null on a failed call; an empty answer is "".
  */
 async function fetchDialectic(config: any, prompt: string, injection: InjectionConfig): Promise<DialecticResult | null> {
   const honcho = new Honcho(getHonchoClientOptions(config));
@@ -305,8 +331,7 @@ async function fetchDialectic(config: any, prompt: string, injection: InjectionC
     });
     const elapsedMs = Date.now() - startTime;
     logApiCall("peer.chat (dialectic)", "POST", `${reasoning}: ${query.slice(0, 60)}`, elapsedMs, true);
-    if (typeof answer !== "string" || !answer.trim()) return null;
-    return { answer: answer.trim(), reasoning, elapsedMs };
+    return { answer: typeof answer === "string" ? answer.trim() : "", reasoning, elapsedMs };
   } catch (e) {
     logHook("user-prompt", `Dialectic fetch failed: ${e}`);
     return null;
@@ -415,7 +440,7 @@ interface SessionContextResult {
  * or search query is passed, keeping this a plain message-window fetch rather
  * than another semantic retrieval. The value is turns from other instances
  * sharing the session name (per-directory strategy). Returns null when the
- * session has no messages.
+ * fetch fails; an empty session has no lines.
  */
 async function fetchSessionContext(config: any, sessionName: string, injection: InjectionConfig): Promise<SessionContextResult | null> {
   const honcho = new Honcho(getHonchoClientOptions(config));
@@ -428,7 +453,6 @@ async function fetchSessionContext(config: any, sessionName: string, injection: 
     });
     logApiCall("session.context", "GET", sessionName, Date.now() - startTime, true);
     const messages = context?.messages ?? [];
-    if (!messages.length) return null;
     const lines = messages.map((m: any) => `${m.peerId}: ${m.content}`);
     const tokenCount = messages.reduce((sum: number, m: any) => sum + (m.tokenCount ?? 0), 0);
     verboseApiResult("session.context() -> messages", lines.join("\n"));

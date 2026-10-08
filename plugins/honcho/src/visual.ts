@@ -114,13 +114,31 @@ export function visSessionContextMessage(hookName: string, lines: string[], toke
 
 /**
  * Build the systemMessage for the SessionStart composition: a single status
- * line naming which components were injected (e.g. "injected summary + peer
- * card (12 items)"). Session start is a once-per-session surface, so unlike the
- * per-turn line it stays terse — the payload itself goes to additionalContext.
+ * line naming which components were injected and which came back empty (e.g.
+ * "injected directives · summary none yet · peer card empty"). Session start is
+ * a once-per-session surface, so unlike the per-turn line it stays terse — the
+ * payload itself goes to additionalContext.
  */
-export function visComposedInjection(hookName: string, labels: string[]): string {
-  const summary = labels.length ? `injected ${labels.join(" + ")}` : "nothing to inject";
-  return formatLine("in", hookName, summary);
+export function visComposedInjection(hookName: string, labels: string[], notes: string[] = []): string {
+  const head = labels.length ? `injected ${labels.join(" + ")}` : "nothing injected";
+  return formatLine("in", hookName, [head, ...notes].join(" · "));
+}
+
+/**
+ * Build the per-turn line for a selected component that injected nothing.
+ * `unavailable` marks a fetch that failed or timed out.
+ */
+export function visEmptyComponent(hookName: string, message: string, unavailable = false): string {
+  return formatLine(unavailable ? "warn" : "info", hookName, message);
+}
+
+/**
+ * One-line PreCompact summary of what the memory anchor carries, e.g.
+ * "anchored peer card (12 items) · conclusions · 2 dialectic answers (3.1s)".
+ */
+export function visAnchorSummary(hookName: string, items: string[], elapsedMs: number): string {
+  const what = items.length ? items.join(" · ") : "session identity only";
+  return formatLine("in", hookName, `anchored ${what} (${(elapsedMs / 1000).toFixed(1)}s)`);
 }
 
 /**
@@ -131,10 +149,12 @@ export function visCapture(summary: string): void {
 }
 
 /**
- * Output skip as systemMessage (for hooks with no existing stdout)
+ * Output skip as systemMessage (for hooks with no existing stdout), below a
+ * one-off banner when one is due.
  */
-export function visSkipMessage(hookName: string, reason: string): void {
-  visMessage("info", hookName, `skipped (${reason})`);
+export function visSkipMessage(hookName: string, reason: string, banner?: string): void {
+  const line = formatLine("info", hookName, `skipped (${reason})`);
+  console.log(JSON.stringify({ systemMessage: banner ? `${banner}\n${line}` : line }));
 }
 
 /**
@@ -157,11 +177,8 @@ export function addSystemMessage(existingJson: any, message: string): any {
 // Verbose output — written to ~/.honcho/verbose.log
 // Tail with: tail -f ~/.honcho/verbose.log
 //
-// NOTE: This file-based verbose output is used by SessionStart and
-// UserPromptSubmit hooks, where stdout is always visible to Claude
-// (not just in Ctrl+O). For hooks where stdout is only shown in
-// Ctrl+O (PreCompact, PostToolUse, Stop, SessionEnd), prefer
-// printing verbose data to stdout instead — use formatVerboseBlock().
+// Hook stdout reaches the transcript (and often the model), so full API
+// payloads go here instead.
 // ============================================
 
 import { homedir } from "os";
@@ -221,36 +238,4 @@ export function clearVerboseLog(): void {
  */
 export function getVerboseLogPath(): string {
   return VERBOSE_LOG;
-}
-
-// ============================================
-// Stdout-based verbose output — for Ctrl+O visibility
-//
-// In Claude Code, Ctrl+O toggles visibility of hook stdout.
-// For hooks where stdout is only shown in Ctrl+O (PreCompact,
-// PostToolUse, Stop, SessionEnd), we can print verbose data
-// directly to stdout so it appears when the user presses Ctrl+O.
-// ============================================
-
-/**
- * Format verbose API response data as a plain-text block for stdout.
- * Use in hooks where stdout is only visible in Ctrl+O (PreCompact, Stop, etc.).
- * Returns empty string if data is null/undefined.
- */
-export function formatVerboseBlock(label: string, data: string | null | undefined): string {
-  if (!data) return "";
-  const separator = "─".repeat(60);
-  const content = data.length > 3000 ? data.slice(0, 3000) + `\n... (${data.length - 3000} more chars)` : data;
-  return `\n[verbose] ${label}\n${separator}\n${content}\n${separator}`;
-}
-
-/**
- * Format a list of items as a plain-text block for stdout.
- * Use in hooks where stdout is only visible in Ctrl+O (PreCompact, Stop, etc.).
- * Returns empty string if items is null/undefined/empty.
- */
-export function formatVerboseList(label: string, items: string[] | null | undefined): string {
-  if (!items || items.length === 0) return "";
-  const formatted = items.map(item => `  • ${item}`).join("\n");
-  return `\n[verbose] ${label} (${items.length} items)\n${formatted}`;
 }

@@ -109,14 +109,27 @@ function assertStagedPaths(relPath: string, text: string): void {
   }
 }
 
+// Shell commands must quote the plugin root, which can contain spaces. In
+// hooks.json the quote is JSON-escaped (\").
+function assertQuotedRoot(relPath: string, text: string): void {
+  for (const match of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}/g)) {
+    if (text[match.index - 1] !== '"') {
+      console.error(`${relPath} uses \${CLAUDE_PLUGIN_ROOT} unquoted at offset ${match.index}`);
+      process.exit(1);
+    }
+  }
+}
+
+// The opening quote (", \" or none) is captured and repeated after the path.
 function rewriteEntryPoints(text: string): string {
   return text
-    .replace(/bun run ("?)\$\{CLAUDE_PLUGIN_ROOT\}\/(hooks\/[\w-]+|mcp-server)\.ts\1/g, 'node $1${CLAUDE_PLUGIN_ROOT}/dist/$2.js$1')
-    .replace(/bun run ("?)\$\{CLAUDE_PLUGIN_ROOT\}\/src\/(skills\/[\w-]+)\.ts\1/g, 'node $1${CLAUDE_PLUGIN_ROOT}/dist/$2.js$1');
+    .replace(/bun run (\\?"|)\$\{CLAUDE_PLUGIN_ROOT\}\/(hooks\/[\w-]+|mcp-server)\.ts\1/g, 'node $1${CLAUDE_PLUGIN_ROOT}/dist/$2.js$1')
+    .replace(/bun run (\\?"|)\$\{CLAUDE_PLUGIN_ROOT\}\/src\/(skills\/[\w-]+)\.ts\1/g, 'node $1${CLAUDE_PLUGIN_ROOT}/dist/$2.js$1');
 }
 
 const hooksJson = rewriteEntryPoints(await Bun.file(join(ROOT, "hooks/hooks.json")).text());
 assertStagedPaths("hooks/hooks.json", hooksJson);
+assertQuotedRoot("hooks/hooks.json", hooksJson);
 await Bun.write(join(STAGE, "hooks/hooks.json"), hooksJson);
 
 const mcpServers = await Bun.file(join(ROOT, "mcp-servers.json")).json();
@@ -167,6 +180,7 @@ for (const skill of await readdir(join(STAGE, "skills"))) {
   if (!existsSync(skillMd)) continue;
   const text = rewriteEntryPoints(await Bun.file(skillMd).text());
   assertStagedPaths(`skills/${skill}/SKILL.md`, text);
+  assertQuotedRoot(`skills/${skill}/SKILL.md`, text);
   await Bun.write(skillMd, text);
 }
 

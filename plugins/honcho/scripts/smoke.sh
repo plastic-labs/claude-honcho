@@ -28,6 +28,18 @@ for hook in dist/hooks/*.js; do
     | bounded node "$hook"
 done
 
+# Every hooks.json command, run the way Claude Code runs it, from a plugin
+# root with a space in it.
+SPACED="$(mktemp -d)/plugin root"
+mkdir -p "$SPACED"
+cp -R . "$SPACED"
+node -e 'for (const groups of Object.values(require(process.argv[1]).hooks)) for (const g of groups) for (const h of g.hooks) console.log(h.command)' "$SPACED/hooks/hooks.json" |
+  while IFS= read -r cmd; do
+    echo "smoke: $cmd"
+    echo '{"session_id":"smoke","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup"}' \
+      | CLAUDE_PLUGIN_ROOT="$SPACED" bounded bash -c "$cmd"
+  done
+
 echo "smoke: dist/mcp-server.js"
 printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}\n' \
   | bounded node dist/mcp-server.js | grep -q '"serverInfo"'
@@ -49,5 +61,14 @@ echo "smoke: dist/skills/setup-runner.js"
 (bounded node dist/skills/setup-runner.js </dev/null || true) | grep -q "No API key found"
 echo "smoke: dist/skills/status-runner.js"
 bounded node dist/skills/status-runner.js </dev/null | grep -q "Not configured"
+
+# The MCP server must start without a key and answer tools with setup steps.
+echo "smoke: dist/mcp-server.js (no key)"
+{
+  printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_config","arguments":{}}}'
+  sleep 1
+} | bounded node dist/mcp-server.js 2>/dev/null | grep -q "run /honcho:setup"
 
 echo "smoke: all entry points OK"
