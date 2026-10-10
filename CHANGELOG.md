@@ -16,6 +16,7 @@ All notable changes to claude-honcho will be documented in this file.
 
 - Stop hook no longer drops the turn's final reply when it fires before Claude Code has flushed the assistant entry to the transcript. The payload's `last_assistant_message` fills in.
 - Prompts that arrive behind a harness `<system-reminder>` block (the desktop app's worktree notice, background-task status) are no longer treated as harness-injected. The hooks strip the leading reminders, then save the prompt, run recall on it, and use it as the Stop hook's turn boundary.
+- Messages relayed from another Claude Code session (`<cross-session-message …>` in the user slot) are treated as harness-injected: they are no longer saved as the user's own message or used as a recall query. Before, the deriver turned another agent's text into conclusions about the user. Supersedes #132, which no longer applies after the filters moved to `src/prompt-filters.ts`.
 
 ### Removed
 
