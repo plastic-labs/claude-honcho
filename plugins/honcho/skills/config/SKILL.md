@@ -82,7 +82,7 @@ AskUserQuestion:
 
 Then ask for the new value. Call `set_config` with `peerName` or `aiPeer`.
 
-### Simple fields (Logging, etc.)
+### Simple fields (Logging, Quiet, etc.)
 
 Use `AskUserQuestion` to ask for the new value if there are known options, otherwise ask the user to type it. Call `set_config` with the appropriate field. Show the result.
 
