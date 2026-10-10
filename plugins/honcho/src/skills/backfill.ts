@@ -224,6 +224,7 @@ export async function run(): Promise<void> {
             createdAt: m.timestamp || fallbackTs,
             metadata: {
               backfill: true,
+              source: "claude",
               source_transcript: m.sourceTranscript,
               session_affinity: g.name,
               type: m.role === "assistant"

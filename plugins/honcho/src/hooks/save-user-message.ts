@@ -87,6 +87,7 @@ async function postUserMessage(
     userPeer.message(chunk, {
       createdAt,
       metadata: {
+        source: "claude",
         instance_id: instanceId || undefined,
         session_affinity: sessionName,
       },
