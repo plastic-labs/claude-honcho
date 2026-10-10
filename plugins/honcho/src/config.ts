@@ -589,6 +589,9 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   if (process.env.HONCHO_LOGGING === "false") {
     config.logging = false;
   }
+  if (process.env.HONCHO_SAVE_MESSAGES === "false") {
+    config.saveMessages = false;
+  }
   if (process.env.HONCHO_SAVE_TOOL_USE !== undefined) {
     config.saveToolUse = process.env.HONCHO_SAVE_TOOL_USE === "true";
   }
@@ -659,19 +662,22 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   setHostIfExplicit("aiPeer", config.aiPeer, existing.aiPeer ?? DEFAULT_AI_PEER[host]);
 
   // Don't persist env-only overrides to the host block.
-  // mergeWithEnvVars() may have set enabled=false or logging=false from
-  // HONCHO_ENABLED / HONCHO_LOGGING env vars — those are runtime overrides
-  // that should not be materialized to disk.
+  // mergeWithEnvVars() may have set enabled, logging or saveMessages to false
+  // from HONCHO_ENABLED / HONCHO_LOGGING / HONCHO_SAVE_MESSAGES env vars —
+  // those are runtime overrides that should not be materialized to disk.
   const enabledForSave = process.env.HONCHO_ENABLED === "false" && config.enabled === false
     ? existingHost.enabled  // preserve what was on disk
     : config.enabled;
   const loggingForSave = process.env.HONCHO_LOGGING === "false" && config.logging === false
     ? existingHost.logging
     : config.logging;
+  const saveMessagesForSave = process.env.HONCHO_SAVE_MESSAGES === "false" && config.saveMessages === false
+    ? existingHost.saveMessages
+    : config.saveMessages;
 
   setHostIfExplicit("enabled", enabledForSave, existing.enabled);
   setHostIfExplicit("logging", loggingForSave, existing.logging);
-  setHostIfExplicit("saveMessages", config.saveMessages, existing.saveMessages);
+  setHostIfExplicit("saveMessages", saveMessagesForSave, existing.saveMessages);
   setHostIfExplicit("sessionStrategy", config.sessionStrategy, existing.sessionStrategy);
   setHostIfExplicit("sessionPeerPrefix", config.sessionPeerPrefix, existing.sessionPeerPrefix);
   setHostIfExplicit("reasoningLevel", config.reasoningLevel, existing.reasoningLevel);

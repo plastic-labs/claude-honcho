@@ -16,6 +16,7 @@ All notable changes to claude-honcho will be documented in this file.
 
 - Stop hook no longer drops the turn's final reply when it fires before Claude Code has flushed the assistant entry to the transcript. The payload's `last_assistant_message` fills in.
 - Prompts that arrive behind a harness `<system-reminder>` block (the desktop app's worktree notice, background-task status) are no longer treated as harness-injected. The hooks strip the leading reminders, then save the prompt, run recall on it, and use it as the Stop hook's turn boundary.
+- `HONCHO_SAVE_MESSAGES=false` now stops message uploads when `~/.honcho/config.json` exists. It was only honored in env-only setups, so installs with a config file kept uploading while `get_config` reported `saveMessages` as shadowed by the env var.
 
 ### Removed
 
