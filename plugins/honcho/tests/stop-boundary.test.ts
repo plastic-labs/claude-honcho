@@ -54,6 +54,29 @@ describe("getCurrentTurnAssistantMessages segment boundaries", () => {
     expect(getCurrentTurnAssistantMessages(path).map((b) => b.text)).toEqual(["narration A"]);
   });
 
+  test("slash command starts a new segment", () => {
+    const question = { type: "user", message: { content: "Which editor do I prefer?" } };
+    const reply = { type: "assistant", timestamp: "t1", message: { content: [{ type: "text", text: "You prefer Zed." }] } };
+    const command = {
+      type: "user",
+      message: { content: "<command-message>honcho:status</command-message>\n<command-name>/honcho:status</command-name>" },
+    };
+    const skillBody = { type: "user", isMeta: true, message: { content: [{ type: "text", text: "Show current Honcho memory status." }] } };
+    const status = { type: "assistant", timestamp: "t2", message: { content: [{ type: "text", text: "Honcho is connected." }] } };
+    const path = transcript([question, reply, command, skillBody, status]);
+    expect(getCurrentTurnAssistantMessages(path).map((b) => b.text)).toEqual(["Honcho is connected."]);
+  });
+
+  test("model-invoked skill (isMeta) does not end the segment", () => {
+    const skill = {
+      type: "user",
+      isMeta: true,
+      message: { content: "<command-message>workflow-authoring</command-message>\n<command-name>workflow-authoring</command-name>" },
+    };
+    const path = transcript([prompt, msgA, toolResult, skill, msgB]);
+    expect(getCurrentTurnAssistantMessages(path).map((b) => b.text)).toEqual(["narration A", "narration B"]);
+  });
+
   test("no prompt and no wakeup collects nothing", () => {
     const path = transcript([toolResult, msgA]);
     expect(getCurrentTurnAssistantMessages(path)).toEqual([]);

@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "fs";
 import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visStopMessage } from "../visual.js";
-import { stripLeadingReminders } from "../prompt-filters.js";
+import { isSlashCommand, stripLeadingReminders } from "../prompt-filters.js";
 
 interface HookInput {
   session_id?: string;
@@ -35,18 +35,25 @@ function isWakeupBoundary(entry: TranscriptEntry): boolean {
   return entry.promptSource === "system" || entry.origin?.kind === "task-notification";
 }
 
+function userText(entry: TranscriptEntry): string {
+  const mc = entry.message?.content ?? entry.content;
+  if (typeof mc === "string") return mc;
+  if (Array.isArray(mc)) return mc.filter((b) => b.type === "text" && b.text).map((b) => b.text!).join("");
+  return "";
+}
+
 /** True for a real user-typed prompt. Excludes tool_results, isMeta entries, and `<...>` command caveats. */
 function isRealUserPrompt(entry: TranscriptEntry): boolean {
   if (entry.isMeta) return false;
-  const mc = entry.message?.content ?? entry.content;
-  const text =
-    typeof mc === "string"
-      ? mc
-      : Array.isArray(mc)
-        ? mc.filter((b) => b.type === "text" && b.text).map((b) => b.text!).join("")
-        : "";
-  const trimmed = stripLeadingReminders(text).trim();
+  const trimmed = stripLeadingReminders(userText(entry)).trim();
   return trimmed.length > 0 && !trimmed.startsWith("<");
+}
+
+/** Typed slash command or skill invocation. Not prompt text to upload, but it starts
+ *  a turn, so the previous turn's reply must not be collected again. Model-invoked
+ *  skills record the same tags with isMeta set and stay inside the current turn. */
+function isSlashCommandBoundary(entry: TranscriptEntry): boolean {
+  return !entry.isMeta && isSlashCommand(userText(entry));
 }
 
 function assistantText(entry: TranscriptEntry): string {
@@ -61,7 +68,7 @@ function assistantText(entry: TranscriptEntry): string {
 type TurnBlock = { text: string; timestamp?: string };
 
 /** Assistant text blocks of the just-completed segment: everything since the last
- *  real user prompt OR wakeup boundary. Wakeup firings would otherwise re-collect
+ *  real user prompt, slash command, or wakeup boundary. Wakeup firings would otherwise re-collect
  *  the whole accumulated turn, duplicating blocks already uploaded. Stop can fire
  *  before the final assistant entry is flushed, so the payload's copy of it fills in. */
 export function getCurrentTurnAssistantMessages(transcriptPath: string, lastAssistantMessage?: string): TurnBlock[] {
@@ -81,12 +88,15 @@ function readTranscriptTurnBlocks(transcriptPath: string): TurnBlock[] {
     return [];
   }
 
-  // Walk back to the last real user prompt or wakeup — the start of the current segment.
+  // Walk back to the last real user prompt, slash command, or wakeup — the start of the current segment.
   let lastPromptIdx = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
       const entry: TranscriptEntry = JSON.parse(lines[i]);
-      if ((entry.type || entry.role) === "user" && (isRealUserPrompt(entry) || isWakeupBoundary(entry))) {
+      if (
+        (entry.type || entry.role) === "user" &&
+        (isRealUserPrompt(entry) || isSlashCommandBoundary(entry) || isWakeupBoundary(entry))
+      ) {
         lastPromptIdx = i;
         break;
       }

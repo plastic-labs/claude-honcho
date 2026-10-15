@@ -30,6 +30,14 @@ export function stripLeadingReminders(prompt: string): string {
   return prompt.replace(LEADING_REMINDERS, "");
 }
 
+// A typed slash command or skill invocation, recorded as
+// `<command-message>…</command-message> <command-name>/…</command-name>` (either tag first).
+const SLASH_COMMAND = /^<command-(name|message)>/;
+
+export function isSlashCommand(prompt: string): boolean {
+  return SLASH_COMMAND.test(stripLeadingReminders(prompt).trim());
+}
+
 export function isHarnessInjected(prompt: string): boolean {
   const trimmed = stripLeadingReminders(prompt).trim();
   return !trimmed || HARNESS_INJECTED_PATTERNS.some((p) => p.test(trimmed));

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isHarnessInjected, stripLeadingReminders } from "../src/prompt-filters";
+import { isHarnessInjected, isSlashCommand, stripLeadingReminders } from "../src/prompt-filters";
 
 const worktreeNotice =
   "<system-reminder>\nYou are operating in a git worktree.\nWorktree path: /tmp/wt\n</system-reminder>\n\n";
@@ -39,5 +39,21 @@ describe("isHarnessInjected", () => {
 
   test("plain prompt is user input", () => {
     expect(isHarnessInjected("do the thing")).toBe(false);
+  });
+});
+
+describe("isSlashCommand", () => {
+  test("matches either tag order", () => {
+    expect(isSlashCommand("<command-message>honcho:status</command-message>\n<command-name>/honcho:status</command-name>")).toBe(true);
+    expect(isSlashCommand("<command-name>/model</command-name>\n<command-message>model</command-message>")).toBe(true);
+  });
+
+  test("matches behind a leading reminder", () => {
+    expect(isSlashCommand(worktreeNotice + "<command-name>/honcho</command-name>")).toBe(true);
+  });
+
+  test("does not match command output or typed text", () => {
+    expect(isSlashCommand("<local-command-stdout>ok</local-command-stdout>")).toBe(false);
+    expect(isSlashCommand("what does <command-name> mean?")).toBe(false);
   });
 });
