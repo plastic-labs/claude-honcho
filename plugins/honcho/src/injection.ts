@@ -35,11 +35,12 @@ ${recall}
 
 /**
  * Data the session-start components render from. Every field is optional: a
- * component's data is only fetched when that component is selected, so an
- * unselected component simply has nothing to render.
+ * component's data is only fetched when that component is selected. null or
+ * undefined means the fetch failed or timed out; an empty string or array
+ * means it came back empty.
  */
 export interface SessionStartData {
-  /** SDK `session.summaries().long` narrative (null on a fresh session). */
+  /** SDK `session.summaries().long` narrative ("" on a fresh session). */
   summary?: string | null;
   /** `context().peerCard` — structured identity/attribute list, full length. */
   peerCard?: string[] | null;
@@ -57,12 +58,14 @@ export interface RenderedInjection {
   content: string;
   /** Short labels of the emitted components, in injection order. */
   labels: string[];
+  /** Selected components that rendered nothing, e.g. "summary none yet". */
+  notes: string[];
 }
 
 /**
  * Render the SessionStart components, in the configured order, into one payload.
- * Components whose data is missing/empty are silently skipped (e.g. no summary
- * yet on a fresh session), so the labels reflect what was *actually* injected.
+ * Components whose data is empty or unavailable are skipped and named in
+ * `notes`, so the labels reflect what was *actually* injected.
  */
 export function renderSessionStart(
   components: SessionStartComponent[],
@@ -70,6 +73,9 @@ export function renderSessionStart(
 ): RenderedInjection {
   const parts: string[] = [];
   const labels: string[] = [];
+  const notes: string[] = [];
+  const missing = (data: unknown, name: string, empty: string) =>
+    notes.push(data == null ? `${name} unavailable` : `${name} ${empty}`);
 
   for (const component of components) {
     switch (component) {
@@ -83,6 +89,8 @@ export function renderSessionStart(
         if (summary) {
           parts.push(`Session summary: ${summary}`);
           labels.push("summary");
+        } else {
+          missing(data.summary, "summary", "none yet");
         }
         break;
       }
@@ -91,6 +99,8 @@ export function renderSessionStart(
         if (rep) {
           parts.push(`Honcho stored representation of the user:\n${rep}`);
           labels.push("representation");
+        } else {
+          missing(data.representation, "representation", "empty");
         }
         break;
       }
@@ -106,11 +116,13 @@ export function renderSessionStart(
         if (card.length) {
           parts.push(`Profile: ${card.join("; ")}`);
           labels.push(`peer card (${card.length} items)`);
+        } else {
+          missing(data.peerCard, "peer card", "empty");
         }
         break;
       }
     }
   }
 
-  return { content: parts.join("\n\n"), labels };
+  return { content: parts.join("\n\n"), labels, notes };
 }

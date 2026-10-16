@@ -41,8 +41,8 @@ function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
 export async function handleSessionStart(): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    console.error("[honcho] Not configured. Run: honcho init");
-    process.exit(1);
+    console.log(JSON.stringify({ systemMessage: "[honcho] Not configured. Run /honcho:setup to connect Honcho memory." }));
+    process.exit(0);
   }
 
   // Early exit if plugin is disabled
@@ -73,11 +73,22 @@ export async function handleSessionStart(): Promise<void> {
   const sessionName = getSessionName(cwd, claudeInstanceId);
   setLogContext(cwd, sessionName);
 
-  // Clear verbose log for fresh session
-  clearVerboseLog();
+  // A resumed conversation already carries its session-start injection; only
+  // the local session bookkeeping is refreshed.
+  const source = hookInput.source ?? "startup";
+  if (source === "resume") {
+    setCachedSessionId(cwd, sessionName, sessionName, claudeInstanceId);
+    setSessionLink(honchoSessionUrl(config, sessionName), sessionName, claudeInstanceId);
+    logHook("session-start", "Resumed conversation; skipping injection");
+    process.exit(0);
+  }
 
-  // Reset message count for this session (for threshold-based knowledge graph refresh)
-  resetMessageCount();
+  // Compaction continues the same conversation: keep the verbose log and the
+  // first-prompt counter. Startup and clear begin a new one.
+  if (source !== "compact") {
+    clearVerboseLog();
+    resetMessageCount();
+  }
 
   // Capture git state (before any API calls for speed)
   const previousGitState = getCachedGitState(cwd);
@@ -93,7 +104,7 @@ export async function handleSessionStart(): Promise<void> {
   const spinner = new Spinner({ style: "neural" });
   spinner.start(`${sessionName} · loading memory`);
   setMemoryState("loading", sessionName, claudeInstanceId);
-  setSessionLink(honchoSessionUrl(config.workspace, sessionName), sessionName, claudeInstanceId);
+  setSessionLink(honchoSessionUrl(config, sessionName), sessionName, claudeInstanceId);
 
   try {
     logHook("session-start", `Starting session in ${cwd}`, { branch: currentGitState?.branch });
@@ -211,9 +222,9 @@ export async function handleSessionStart(): Promise<void> {
     const contextValue = userContextResult.status === "fulfilled" ? (userContextResult.value as any) : null;
     const summaryValue = summaryResult.status === "fulfilled" ? (summaryResult.value as any) : null;
     const rendered = renderSessionStart(startComponents, {
-      summary: summaryValue?.longSummary?.content ?? null,
-      peerCard: contextValue?.peerCard ?? null,
-      representation: contextValue?.representation ?? null,
+      summary: summaryValue ? (summaryValue.longSummary?.content ?? "") : null,
+      peerCard: contextValue ? (contextValue.peerCard ?? []) : null,
+      representation: contextValue ? (contextValue.representation ?? "") : null,
       remember: config.rememberTool === true,
     });
 
@@ -222,14 +233,17 @@ export async function handleSessionStart(): Promise<void> {
     spinner.stop();
     setMemoryState("idle", undefined, claudeInstanceId);
 
+    const systemMessage = visComposedInjection("session-start", rendered.labels, rendered.notes);
     if (rendered.content) {
       console.log(JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "SessionStart",
           additionalContext: `[Honcho Memory for ${config.peerName}]: ${rendered.content}`,
         },
-        systemMessage: visComposedInjection("session-start", rendered.labels),
+        systemMessage,
       }));
+    } else if (rendered.notes.length) {
+      console.log(JSON.stringify({ systemMessage }));
     }
 
     logFlow("complete", `Cache warmed: ${successCount}/1 context · injected: ${rendered.labels.join(", ") || "none"}`);

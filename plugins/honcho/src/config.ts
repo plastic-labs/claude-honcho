@@ -1,7 +1,7 @@
 import { homedir } from "os";
 import { join, basename, dirname, resolve, sep } from "path";
 import { fileURLToPath } from "url";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { captureGitState } from "./git.js";
 import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
 import { telemetryHeaders } from "@honcho-ai/harness-plugin-core";
@@ -598,6 +598,13 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   return config;
 }
 
+// config.json can hold an API key, so it is kept owner-only. The mode option
+// applies only on creation, so an existing file is restricted before the write.
+function writeConfigFile(data: unknown): void {
+  if (existsSync(CONFIG_FILE)) chmodSync(CONFIG_FILE, 0o600);
+  writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+}
+
 /**
  * Write-back: read-merge-write to avoid clobbering other hosts' config.
  *
@@ -692,7 +699,7 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
 
   existing.hosts[host] = hostEntry;
 
-  writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
+  writeConfigFile(existing);
 }
 
 /**
@@ -714,7 +721,7 @@ export function saveRootField(field: string, value: unknown): void {
   }
 
   existing[field] = value;
-  writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
+  writeConfigFile(existing);
 }
 
 export function getClaudeSettingsPath(): string {
@@ -998,6 +1005,11 @@ export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClient
     maxRetries: 1,
     defaultHeaders: getTelemetryHeaders(),
   };
+}
+
+/** Whether the config targets the hosted production API. */
+export function isProductionEndpoint(config: HonchoCLAUDEConfig): boolean {
+  return getHonchoBaseUrl(config) === HONCHO_BASE_URLS.production;
 }
 
 export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url: string } {
