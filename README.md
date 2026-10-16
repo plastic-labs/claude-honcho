@@ -464,7 +464,7 @@ Environment variables work for initial bootstrap (before a config file exists). 
 | `HONCHO_API_KEY`       | **Yes**  | —             | Your Honcho API key from [app.honcho.dev](https://app.honcho.dev) |
 | `HONCHO_PEER_NAME`     | No       | `$USER`       | Your identity in the memory system                                |
 | `HONCHO_WORKSPACE`     | No       | `claude_code` | Workspace name (used only when no config file exists)             |
-| `HONCHO_AI_PEER`       | No       | `claude`      | AI peer name                                                      |
+| `HONCHO_AI_PEER`       | No       | `claude`      | AI peer name for this session; overrides the config file          |
 | `HONCHO_HOST`          | No       | auto-detected | Force host detection: `claude_code`, `cursor`, or `obsidian`      |
 | `HONCHO_ENDPOINT`      | No       | `production`  | `production`, `local`, or a full URL                              |
 | `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
