@@ -14,6 +14,7 @@ All notable changes to claude-honcho will be documented in this file.
 
 ### Fixed
 
+- `HONCHO_AI_PEER` now overrides the AI peer when `~/.honcho/config.json` exists, matching `HONCHO_PEER_NAME` and the README. It was only read when no config file existed, so a session could not be launched under a different AI peer.
 - Stop hook no longer drops the turn's final reply when it fires before Claude Code has flushed the assistant entry to the transcript. The payload's `last_assistant_message` fills in.
 - Prompts that arrive behind a harness `<system-reminder>` block (the desktop app's worktree notice, background-task status) are no longer treated as harness-injected. The hooks strip the leading reminders, then save the prompt, run recall on it, and use it as the Stop hook's turn boundary.
 
