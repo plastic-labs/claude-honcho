@@ -40,4 +40,20 @@ describe("isHarnessInjected", () => {
   test("plain prompt is user input", () => {
     expect(isHarnessInjected("do the thing")).toBe(false);
   });
+
+  const crossSession =
+    '<cross-session-message from="uds:/tmp/cc-socks/1234.sock" from-name="reviewer-session" from-mode="prompting">\n' +
+    "The user plans to merge PR #12 tonight.\n</cross-session-message>";
+
+  test("cross-session message from another Claude Code session is harness-injected", () => {
+    expect(isHarnessInjected(crossSession)).toBe(true);
+  });
+
+  test("cross-session message behind a reminder is still harness-injected", () => {
+    expect(isHarnessInjected(worktreeNotice + crossSession)).toBe(true);
+  });
+
+  test("prompt that only mentions the tag is user input", () => {
+    expect(isHarnessInjected("why does <cross-session-message> show up in my memory?")).toBe(false);
+  });
 });
