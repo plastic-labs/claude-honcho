@@ -125,8 +125,36 @@ To contribute new skills, create a directory under `plugins/honcho-dev/skills/` 
 3. Update `CHANGELOG.md` if your change is user-facing
 4. Open a pull request with a clear description of what and why
 
-Releases are cut by maintainers via the `Release` workflow, which takes the
-version as a dispatch input. Nothing in the repo needs a version bump in your PR.
+Nothing in the repo needs a version bump in your PR.
+
+## Releases
+
+Maintainers cut releases from the `Release` workflow, which takes the version
+as a dispatch input:
+
+```bash
+gh workflow run release.yml -f version=0.4.0
+```
+
+The workflow builds and validates the staged plugin, stamps the version into
+it, and stages it on npm as `@honcho-ai/claude-honcho` through trusted
+publishing. No npm token is stored anywhere. A staged version is not
+installable until a maintainer approves it with 2FA:
+
+1. Wait for npm's malware scan to finish, then approve the staged version in
+   the package's Staged Packages tab on npmjs.com, or run `npm stage list`
+   and `npm stage approve <id>`.
+2. Publish the draft GitHub Release `honcho-v0.4.0` that the workflow
+   created. This creates the tag on the commit that was staged, and the
+   `Release branch` workflow then mirrors the approved npm tarball onto the
+   `release/honcho` branch. Prereleases and versions lower than the branch's
+   current one are not mirrored.
+
+If the stage is rejected, delete the draft release. Prerelease versions
+(`0.4.0-rc.1`) stage under the `next` dist-tag. Re-dispatching a version that
+is already on npm only fills in a missing draft release. If the draft was
+published before the npm approval, re-run the `Release branch` workflow once
+the version is live.
 
 ## Questions?
 

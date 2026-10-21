@@ -26,5 +26,5 @@ After running the script, present a concise status card echoing the runner outpu
 ## Implementation
 
 ```bash
-bun run ${CLAUDE_PLUGIN_ROOT}/src/skills/status-runner.ts
+bun run "${CLAUDE_PLUGIN_ROOT}/src/skills/status-runner.ts"
 ```

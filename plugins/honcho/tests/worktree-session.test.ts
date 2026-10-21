@@ -2,21 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-
-// getSessionForPath/getSessionName read ~/.honcho/config.json via a
-// module-level homedir() const, so the integration path runs in a child
-// process with HOME pointed at a fixture.
-function runInSandbox(home: string, script: string): string {
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(([k]) => !k.startsWith("HONCHO_"))
-  ) as Record<string, string>;
-  const proc = Bun.spawnSync(["bun", "-e", script], {
-    env: { ...env, HOME: home },
-    cwd: join(import.meta.dir, ".."),
-  });
-  if (proc.exitCode !== 0) throw new Error(proc.stderr.toString());
-  return proc.stdout.toString().trim();
-}
+import { runInSandbox } from "./sandbox";
 
 describe("worktree session sharing (integration)", () => {
   test("worktrees share the main repo's mapping and derived name", () => {

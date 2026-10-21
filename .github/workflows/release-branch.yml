@@ -1,0 +1,85 @@
+name: Release branch
+
+# Mirrors an approved release onto the release/honcho orphan branch, the
+# standby distribution channel: marketplace.json can switch to a github
+# source with a one-line change if npm distribution ever becomes a problem.
+#
+# Runs when a maintainer publishes the draft release that release.yml
+# created, which they do only after approving the staged version on npm. The
+# branch gets the tarball npm serves, so it never carries an unapproved or
+# rejected build.
+#
+# The branch tracks what npm's latest tag serves: prereleases are skipped, and
+# so is any version lower than the one already on the branch. Roll back by
+# pushing the branch by hand.
+
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: release-branch
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  mirror:
+    if: startsWith(github.event.release.tag_name, 'honcho-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # release/honcho branch
+    steps:
+      - name: Mirror npm tarball
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${TAG#honcho-v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$TAG' does not name a valid semver version"
+            exit 1
+          fi
+          if [[ "$VERSION" == *-* ]]; then
+            echo "::notice::$VERSION is a prerelease; release/honcho tracks stable versions only"
+            exit 0
+          fi
+          # Fail closed: only a confirmed 404 (no branch yet) counts as absence.
+          set +e
+          BRANCH_OUT="$(gh api "repos/$GITHUB_REPOSITORY/contents/package.json?ref=release/honcho" --jq .content 2>&1)"
+          BRANCH_STATUS=$?
+          set -e
+          if [ "$BRANCH_STATUS" -eq 0 ]; then
+            CURRENT="$(echo "$BRANCH_OUT" | base64 -d | jq -r .version)"
+          elif echo "$BRANCH_OUT" | grep -q "HTTP 404"; then
+            CURRENT=""
+          else
+            echo "::error::release/honcho lookup failed: $BRANCH_OUT"
+            exit 1
+          fi
+          if [ -n "$CURRENT" ] && [ "$CURRENT" != "$VERSION" ]; then
+            HIGHEST="$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -n1)"
+            if [ "$HIGHEST" != "$VERSION" ]; then
+              echo "::notice::release/honcho already has $CURRENT; not moving it back to $VERSION"
+              exit 0
+            fi
+          fi
+          # Only an approved stage is visible to npm view.
+          if ! npm view "@honcho-ai/claude-honcho@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::$VERSION is not on npm. Approve the staged version, then re-run this workflow."
+            exit 1
+          fi
+          WORK="$(mktemp -d)"
+          cd "$WORK"
+          npm pack "@honcho-ai/claude-honcho@$VERSION"
+          tar -xzf ./*.tgz
+          cd package
+          git init -q -b release/honcho
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "honcho v$VERSION"
+          AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" \
+            push -f "https://github.com/$GITHUB_REPOSITORY.git" release/honcho
