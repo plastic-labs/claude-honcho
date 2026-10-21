@@ -570,11 +570,12 @@ export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null 
 
 /**
  * Merge file-based config with environment variable overrides.
- * Only merges global (non-host-specific) env vars. workspace and aiPeer
- * are host-specific fields already resolved by resolveConfig() from the
- * hosts block -- generic env vars like HONCHO_WORKSPACE must not override
- * them here, otherwise a value set for one host clobbers the other.
- * (HONCHO_WORKSPACE IS respected in loadConfigFromEnv when no file exists.)
+ * Only merges global (non-host-specific) env vars. workspace is a
+ * host-specific field already resolved by resolveConfig() from the hosts
+ * block -- HONCHO_WORKSPACE must not override it here, otherwise a value set
+ * for one host clobbers the other. (HONCHO_WORKSPACE IS respected in
+ * loadConfigFromEnv when no file exists.) HONCHO_AI_PEER is the exception:
+ * it is documented as an override and is only ever set for one launch.
  */
 function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   if (process.env.HONCHO_API_KEY) {
@@ -582,6 +583,13 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   }
   if (process.env.HONCHO_PEER_NAME) {
     config.peerName = process.env.HONCHO_PEER_NAME;
+  }
+  // HONCHO_AI_PEER is a per-process override, not a per-host default: a
+  // session launched with it names the AI peer for that session only, so it
+  // must win over the hosts block the way HONCHO_PEER_NAME does. The
+  // host-scoped defaults stay in the config file; nothing is written back.
+  if (process.env.HONCHO_AI_PEER) {
+    config.aiPeer = process.env.HONCHO_AI_PEER;
   }
   if (process.env.HONCHO_ENABLED === "false") {
     config.enabled = false;
