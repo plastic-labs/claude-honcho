@@ -124,6 +124,7 @@ function handleGetConfig(cwd: string) {
     rememberTool: cfg.rememberTool === true,
     enabled: cfg.enabled !== false,
     logging: cfg.logging !== false,
+    quiet: cfg.quiet === true,
     saveMessages: cfg.saveMessages !== false,
   } : null;
 
@@ -434,6 +435,11 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.logging = coerceBoolean(value);
       break;
 
+    case "quiet":
+      previousValue = cfg.quiet;
+      cfg.quiet = coerceBoolean(value);
+      break;
+
     case "saveMessages":
       previousValue = cfg.saveMessages;
       cfg.saveMessages = coerceBoolean(value);
@@ -685,6 +691,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     rememberTool: cfg.rememberTool === true,
     enabled: cfg.enabled !== false,
     logging: cfg.logging !== false,
+    quiet: cfg.quiet === true,
     saveMessages: cfg.saveMessages !== false,
   };
 
@@ -975,6 +982,7 @@ export async function runMcpServer(): Promise<void> {
                   "sessionPeerPrefix",
                   "enabled",
                   "logging",
+                  "quiet",
                   "saveMessages",
                   "messageUpload.maxUserTokens",
                   "messageUpload.maxAssistantTokens",
