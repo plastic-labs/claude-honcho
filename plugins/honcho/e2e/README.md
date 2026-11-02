@@ -12,7 +12,7 @@ From `plugins/honcho/`:
 ```bash
 bun run e2e                       # build .stage, start the sandbox, run, assert, tear down
 bun run e2e --variant unified     # one variant only
-bun run e2e --real                # a real model instead of the scripted mock (see below)
+bun run e2e --model real          # a real model instead of the scripted mock (see below)
 bun run e2e --keep                # leave the sandbox up and keep the run dirs
 bun run e2e --no-build            # reuse an existing .stage/
 ```
@@ -38,8 +38,9 @@ Honcho always runs its mock provider. Claude Code's model is chosen per run:
   Claude Code tools, `Bash` with `run_in_background` and `Read`, so the command output and the
   `<task-notification>` the plugin sees are produced by Claude Code itself. Free, deterministic,
   no credentials. Every request lands in `anthropic-mock.jsonl` in the run dir, and anything
-  unrecognised or unscripted is reported at the end of the run.
-- **real (`--real` or `E2E_MODEL=real`).** A real model, Haiku by default (`E2E_CLAUDE_MODEL`
+  unrecognised or unscripted is reported at the end of the run. The mock answers only to the
+  model id it pins (`MOCK_MODEL`), which is what `claude` is launched with in this mode.
+- **real (`--model real` or `E2E_MODEL=real`).** A real model, Haiku by default (`E2E_CLAUDE_MODEL`
   overrides it). It uses `ANTHROPIC_API_KEY` when set, otherwise your logged-in `claude` CLI.
   Use it to check that the scripted conversation still matches what a real model does with
   the same prompts. Each variant costs a few cents.
@@ -57,7 +58,8 @@ tree users install.
 In mock mode, `CLAUDE_CONFIG_DIR` is also a temporary dir and every inherited `ANTHROPIC_*`
 variable is replaced. With nothing to log in with, Claude Code can only reach the mock. If it
 reached the real API anyway, the Honcho checks would still pass, so the adapter refuses the run
-unless the mock served every scripted step and the replies are the scripted ones.
+unless the mock served each of the six scripted `/v1/messages` calls exactly once and the
+replies are the scripted ones. No keychain link is made in this mode.
 
 In real mode, credentials are carried across. `ANTHROPIC_API_KEY` needs nothing else. Without
 it, the run links only the CLI's credential store into the isolated HOME: the login keychain
@@ -154,6 +156,13 @@ lives in another repo, copy `e2e/` without `harnesses/claude-code.ts` and keep `
 step. CI needs a job like `e2e` in `.github/workflows/ci.yml`: Docker, `uv` and the harness CLI.
 
 ## CI
+
+The script is coupled to Claude Code's wire behaviour (which tools exist, how a background task
+reports back, the request shape), so CI pins `@anthropic-ai/claude-code` in the `e2e` job to the
+version the mock was validated against. To bump it, change that version, run `bun run e2e`
+locally with the same CLI version, and fix the script if the mock log shows `unscripted` or
+`unrecognized` requests or the served-calls check fails. A `bun run e2e --model real` run with
+the new version confirms the script still matches what a real model does.
 
 The `e2e` job in `.github/workflows/ci.yml` runs after `build` on every push to `main` and every
 pull request, fork pull requests included. It runs in mock mode only and uses no secrets. On

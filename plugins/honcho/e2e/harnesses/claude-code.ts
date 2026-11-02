@@ -14,7 +14,7 @@ import { BACKGROUND_COMMAND, FOREGROUND_COMMAND } from "../scenario.js";
 // developer's ~/.honcho config nor their ~/.claude settings and plugins are
 // read.
 //
-// Model (E2E_MODEL):
+// Model (`--model mock|real`, or E2E_MODEL):
 // - "mock" (default): a scripted Anthropic API on localhost (claudeCodeScript
 //   below). CLAUDE_CONFIG_DIR is also isolated and ANTHROPIC_* are replaced, so
 //   no stored login can reach the real API; the run then checks that every
@@ -26,6 +26,8 @@ import { BACKGROUND_COMMAND, FOREGROUND_COMMAND } from "../scenario.js";
 
 const STAGE = join(import.meta.dir, "..", "..", ".stage");
 const MODEL = process.env.E2E_CLAUDE_MODEL || "claude-haiku-5-5";
+/** The only model id the mock answers to; claude is launched with it in mock mode. */
+const MOCK_MODEL = "claude-haiku-5-5";
 const modelMode = (): "mock" | "real" => (process.env.E2E_MODEL === "real" ? "real" : "mock");
 const AI_PEER = "claude"; // the plugin's default AI peer, deliberately left unset in config
 
@@ -110,6 +112,9 @@ function claudeCodeScript(turns: Turn[]): (body: any) => { blocks: Block[]; note
     if (!Array.isArray(body?.tools) || !body.tools.some((t: any) => t.name === "Bash")) {
       return { blocks: [{ type: "text", text: "ok" }], note: "side request" };
     }
+    if (body.model !== MOCK_MODEL) {
+      return { blocks: [{ type: "text", text: "ok" }], note: `unscripted model ${body.model}` };
+    }
     const messages: Msg[] = body.messages ?? [];
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role !== "user") continue;
@@ -134,21 +139,24 @@ function claudeCodeScript(turns: Turn[]): (body: any) => { blocks: Block[]; note
 const SCRIPTED_STEPS = ["turn1/0", "turn2/0", "turn2/1", "turn2/2", "wakeup/0", "wakeup/1"];
 
 /** A mock-mode run that reached the real API would still pass the Honcho
- *  checks, so refuse it unless the mock served every scripted step and the
- *  replies are the scripted ones. */
+ *  checks, so refuse it unless the mock served each scripted step exactly once
+ *  (six /v1/messages calls) and the replies are the scripted ones. */
 function verifyMockServed(mock: AnthropicMock, replies: string[], log: (msg: string) => void): void {
-  const served = new Set(mock.requests.map((r) => r.note));
-  const missing = SCRIPTED_STEPS.filter((s) => !served.has(s));
+  const odd = mock.requests.filter((r) => !SCRIPTED_STEPS.includes(r.note) && r.note !== "hello" && r.note !== "count_tokens");
+  for (const r of odd) log(`anthropic mock: ${r.note} ${r.method} ${r.path}`);
+
+  const scriptedCalls = mock.requests.filter((r) => r.path === "/v1/messages" && SCRIPTED_STEPS.includes(r.note)).map((r) => r.note);
+  const counts = SCRIPTED_STEPS.map((step) => `${step}x${scriptedCalls.filter((n) => n === step).length}`);
+  const servedOnce = scriptedCalls.length === SCRIPTED_STEPS.length && SCRIPTED_STEPS.every((step) => scriptedCalls.includes(step));
   const scripted =
     replies.length === 3 && replies[0] === MOCK_REPLY_1 && replies[1] === MOCK_REPLY_2 && replies[2].startsWith(MOCK_WAKEUP_PREFIX);
-  if (missing.length || !scripted) {
+  if (!servedOnce || !scripted) {
     throw new Error(
       `claude-code: mock mode, but the conversation did not come from the mock ` +
-        `(unserved steps: ${missing.join(", ") || "none"}; replies: ${JSON.stringify(replies)})`,
+        `(scripted /v1/messages calls: ${counts.join(" ")}; replies: ${JSON.stringify(replies)})`,
     );
   }
-  const odd = mock.requests.filter((r) => r.note === "unrecognized" || r.note === "unscripted" || r.note.endsWith("/exhausted"));
-  for (const r of odd) log(`anthropic mock: ${r.note} ${r.method} ${r.path}`);
+  log(`anthropic mock served ${scriptedCalls.length}/${SCRIPTED_STEPS.length} scripted /v1/messages calls`);
 }
 
 /** Line-buffered reader over claude's stream-json stdout. */
@@ -219,7 +227,7 @@ async function converse(ctx: RunContext, env: Record<string, string>, cwd: strin
       "--output-format", "stream-json",
       "--verbose",
       "--include-hook-events",
-      "--model", MODEL,
+      "--model", modelMode() === "mock" ? MOCK_MODEL : MODEL,
       "--plugin-dir", STAGE,
       "--permission-mode", "bypassPermissions",
     ],

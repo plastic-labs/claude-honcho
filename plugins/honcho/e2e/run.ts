@@ -2,7 +2,7 @@
 // Harness e2e: drive a real harness through a scripted conversation against
 // the Honcho sandbox and assert memory round-trips. See e2e/README.md.
 //
-//   bun run e2e [--harness claude-code] [--variant <name>] [--real] [--keep] [--no-build]
+//   bun run e2e [--harness claude-code] [--variant <name>] [--model mock|real] [--keep] [--no-build]
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -19,16 +19,17 @@ const { values: args } = parseArgs({
   options: {
     harness: { type: "string", default: "claude-code" },
     variant: { type: "string" },
-    real: { type: "boolean", default: false },
+    model: { type: "string" },
     keep: { type: "boolean", default: false },
     "no-build": { type: "boolean", default: false },
   },
 });
 
 const log = (msg: string) => console.log(`[e2e] ${msg}`);
-// Adapters default to a scripted mock model; --real (or E2E_MODEL=real) opts
-// into a real one.
-if (args.real) process.env.E2E_MODEL = "real";
+// Adapters default to a scripted mock model; --model real (or E2E_MODEL=real)
+// opts into a real one.
+if (args.model && args.model !== "mock" && args.model !== "real") throw new Error(`--model must be mock or real, not ${args.model}`);
+if (args.model) process.env.E2E_MODEL = args.model;
 const started = Date.now();
 
 const adapter = HARNESSES[args.harness!];
