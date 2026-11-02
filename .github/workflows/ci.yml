@@ -46,7 +46,9 @@ jobs:
         run: bash scripts/smoke.sh .stage
 
   # Claude Code + the staged plugin, driven through a scripted conversation
-  # against the Honcho sandbox (mock provider). See plugins/honcho/e2e/README.md.
+  # against the Honcho sandbox. Both the model (a local Anthropic API mock) and
+  # Honcho's provider are mocked, so the job needs no secrets and runs on fork
+  # pull requests too. See plugins/honcho/e2e/README.md.
   e2e:
     needs: build
     runs-on: ubuntu-latest
@@ -54,48 +56,19 @@ jobs:
     defaults:
       run:
         working-directory: plugins/honcho
-    env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
-      # Secrets are withheld from fork and Dependabot pull requests, so those
-      # skip with a warning. Anywhere else a missing key is a configuration
-      # error and fails the job rather than passing untested.
-      - name: Check for the Anthropic API key
-        id: key
-        working-directory: .
-        env:
-          EVENT: ${{ github.event_name }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          REPO: ${{ github.repository }}
-          ACTOR: ${{ github.actor }}
-        run: |
-          if [ -n "$ANTHROPIC_API_KEY" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ "$EVENT" = pull_request ] && { [ "$HEAD_REPO" != "$REPO" ] || [ "$ACTOR" = "dependabot[bot]" ]; }; then
-            echo "::warning title=Harness e2e skipped::ANTHROPIC_API_KEY is not available to this pull request, so the harness e2e did not run."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error title=Harness e2e cannot run::the ANTHROPIC_API_KEY repository secret is not set."
-            exit 1
-          fi
-
       - uses: actions/checkout@v4
-        if: steps.key.outputs.run == 'true'
 
       - uses: oven-sh/setup-bun@v2
-        if: steps.key.outputs.run == 'true'
 
       - uses: actions/setup-node@v4
-        if: steps.key.outputs.run == 'true'
         with:
           node-version: 22
 
       # The sandbox's seed step runs its Python seeder through uv.
       - uses: astral-sh/setup-uv@v6
-        if: steps.key.outputs.run == 'true'
 
       - name: Install dependencies
-        if: steps.key.outputs.run == 'true'
         run: |
           bun install --frozen-lockfile
           npm install -g @anthropic-ai/claude-code
@@ -103,19 +76,18 @@ jobs:
       # --keep leaves the sandbox and run dirs in place for the failure steps;
       # TMPDIR puts the run dirs where the artifact upload looks.
       - name: Harness e2e
-        if: steps.key.outputs.run == 'true'
         env:
           TMPDIR: ${{ runner.temp }}
         run: bun run e2e --keep
 
       - name: Collect sandbox logs
-        if: failure() && steps.key.outputs.run == 'true'
+        if: failure()
         run: docker compose -p honcho-sandbox logs --no-color > "$RUNNER_TEMP/sandbox.log" 2>&1 || true
 
       # Only logs and transcripts: the isolated HOME also holds Claude Code
       # state that is not uploaded.
       - uses: actions/upload-artifact@v4
-        if: failure() && steps.key.outputs.run == 'true'
+        if: failure()
         with:
           name: harness-e2e
           if-no-files-found: ignore
@@ -123,5 +95,6 @@ jobs:
             ${{ runner.temp }}/sandbox.log
             ${{ runner.temp }}/honcho-e2e-*/claude-stream.jsonl
             ${{ runner.temp }}/honcho-e2e-*/claude-stderr.txt
+            ${{ runner.temp }}/honcho-e2e-*/anthropic-mock.jsonl
             ${{ runner.temp }}/honcho-e2e-*/home/.honcho/*.log
-            ${{ runner.temp }}/honcho-e2e-*/home/.claude/projects/**/*.jsonl
+            ${{ runner.temp }}/honcho-e2e-*/claude-config/projects/**/*.jsonl
