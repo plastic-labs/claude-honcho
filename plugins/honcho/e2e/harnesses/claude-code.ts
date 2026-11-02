@@ -1,21 +1,32 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { startAnthropicMock, type AnthropicMock, type Block } from "../anthropic-mock.js";
 import type { Expectation, HarnessAdapter, HarnessRun, HarnessVariant, RunContext, Turn } from "../harness.js";
+import { BACKGROUND_COMMAND, FOREGROUND_COMMAND } from "../scenario.js";
 
 // Claude Code with this plugin loaded from the staged release build (.stage/,
 // what users install). Everything harness-specific lives here: the plugin's
-// config file, how `claude` is launched and driven, and where its transcript is.
+// config file, how `claude` is launched and driven, where its transcript is,
+// and the scripted model it talks to.
 //
 // Isolation: `claude` runs with HOME pointed at the run dir, so neither the
 // developer's ~/.honcho config nor their ~/.claude settings and plugins are
-// read. Auth is the one thing carried across: ANTHROPIC_API_KEY when set (CI);
-// otherwise the CLI's own login, by linking only its credential store into the
-// isolated HOME (the login keychain on macOS, ~/.claude/.credentials.json on
-// Linux). No credential is read or copied by this script.
+// read.
+//
+// Model (E2E_MODEL):
+// - "mock" (default): a scripted Anthropic API on localhost (claudeCodeScript
+//   below). CLAUDE_CONFIG_DIR is also isolated and ANTHROPIC_* are replaced, so
+//   no stored login can reach the real API; the run then checks that every
+//   scripted step was served by the mock.
+// - "real": a real model (Haiku by default). ANTHROPIC_API_KEY when set,
+//   otherwise the CLI's own login, by linking only its credential store into the
+//   isolated HOME (the login keychain on macOS, ~/.claude/.credentials.json on
+//   Linux). No credential is read or copied by this script.
 
 const STAGE = join(import.meta.dir, "..", "..", ".stage");
 const MODEL = process.env.E2E_CLAUDE_MODEL || "claude-haiku-5-5";
+const modelMode = (): "mock" | "real" => (process.env.E2E_MODEL === "real" ? "real" : "mock");
 const AI_PEER = "claude"; // the plugin's default AI peer, deliberately left unset in config
 
 const TURN_TIMEOUT_MS = 180_000;
@@ -33,16 +44,111 @@ function credentialLinks(): Array<[target: string, link: string]> {
 }
 
 /** The parent environment minus anything that would leak the caller's Claude
- *  Code session (nested-session markers) or Honcho config (HONCHO_* overrides). */
-function harnessEnv(home: string): Record<string, string> {
+ *  Code session (nested-session markers, provider switches) or Honcho config
+ *  (HONCHO_* overrides), plus `extra`. In mock mode ANTHROPIC_* are dropped too,
+ *  so only the mock's URL and key remain. */
+function harnessEnv(home: string, extra: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (v === undefined || k.startsWith("HONCHO_") || k.startsWith("CLAUDE_CODE_")) continue;
     if (k === "CLAUDECODE" || k === "CLAUDE_PID" || k === "CLAUDE_EFFORT" || k === "CLAUDE_CONFIG_DIR") continue;
+    if (modelMode() === "mock" && k.startsWith("ANTHROPIC_")) continue;
     env[k] = v;
   }
-  env.HOME = home;
-  return env;
+  return { ...env, ...extra, HOME: home };
+}
+
+// ---------------------------------------------------------------------------
+// The scripted model
+//
+// Stateless: each /v1/messages request carries the whole conversation, so the
+// reply is chosen from the latest user message that holds a scripted prompt or
+// a task notification, plus how many tool calls have been made since it. The
+// tools are real Claude Code tools, so the command output and the
+// <task-notification> the plugin sees are produced by Claude Code itself.
+// ---------------------------------------------------------------------------
+
+export const MOCK_REPLY_1 = "Noted: Quackenbush is on debugging duty.";
+export const MOCK_REPLY_2 = "Both commands are running; I will report the background output when it finishes.";
+export const MOCK_WAKEUP_PREFIX = "The background command printed:";
+
+type Msg = { role: string; content: string | Array<Record<string, any>> };
+
+function textOf(content: Msg["content"]): string {
+  if (typeof content === "string") return content;
+  return content.filter((b) => b.type === "text").map((b) => String(b.text)).join("\n");
+}
+
+// Claude Code may append non-user messages after the tool result, so search
+// back for it rather than reading the last message.
+function lastToolResultText(messages: Msg[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const content = messages[i].content;
+    const result = Array.isArray(content) ? content.find((b) => b.type === "tool_result") : undefined;
+    if (result) return typeof result.content === "string" ? result.content : textOf(result.content ?? []);
+  }
+  return "";
+}
+
+function claudeCodeScript(turns: Turn[]): (body: any) => { blocks: Block[]; note: string } {
+  const scripts: Record<string, (messages: Msg[], trigger: string) => Block[]> = {
+    turn1: () => [{ type: "text", text: MOCK_REPLY_1 }],
+    turn2: () => [
+      { type: "tool_use", name: "Bash", input: { command: FOREGROUND_COMMAND, description: "Print the foreground marker" } },
+      { type: "tool_use", name: "Bash", input: { command: BACKGROUND_COMMAND, description: "Print the background marker later", run_in_background: true } },
+      { type: "text", text: MOCK_REPLY_2 },
+    ],
+    // Read the output file the notification names, then repeat what it holds.
+    wakeup: (messages, trigger) => [
+      { type: "tool_use", name: "Read", input: { file_path: trigger.match(/<output-file>(.*?)<\/output-file>/)?.[1] ?? "" } },
+      { type: "text", text: `${MOCK_WAKEUP_PREFIX} ${lastToolResultText(messages).trim()}` },
+    ],
+  };
+
+  return (body) => {
+    // Side requests (titles, summaries) carry no tools.
+    if (!Array.isArray(body?.tools) || !body.tools.some((t: any) => t.name === "Bash")) {
+      return { blocks: [{ type: "text", text: "ok" }], note: "side request" };
+    }
+    const messages: Msg[] = body.messages ?? [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role !== "user") continue;
+      const text = textOf(messages[i].content);
+      const name = text.includes("<task-notification>") ? "wakeup"
+        : text.includes(turns[1].prompt) ? "turn2"
+        : text.includes(turns[0].prompt) ? "turn1"
+        : null;
+      if (!name) continue;
+      const step = messages.slice(i + 1)
+        .filter((m) => m.role === "assistant" && Array.isArray(m.content))
+        .reduce((n, m) => n + (m.content as Array<Record<string, any>>).filter((b) => b.type === "tool_use").length, 0);
+      // One block per response, so every step is its own request.
+      const block = scripts[name](messages, text)[step];
+      if (!block) return { blocks: [{ type: "text", text: "done" }], note: `${name}/exhausted` };
+      return { blocks: [block], note: `${name}/${step}` };
+    }
+    return { blocks: [{ type: "text", text: "ok" }], note: "unscripted" };
+  };
+}
+
+const SCRIPTED_STEPS = ["turn1/0", "turn2/0", "turn2/1", "turn2/2", "wakeup/0", "wakeup/1"];
+
+/** A mock-mode run that reached the real API would still pass the Honcho
+ *  checks, so refuse it unless the mock served every scripted step and the
+ *  replies are the scripted ones. */
+function verifyMockServed(mock: AnthropicMock, replies: string[], log: (msg: string) => void): void {
+  const served = new Set(mock.requests.map((r) => r.note));
+  const missing = SCRIPTED_STEPS.filter((s) => !served.has(s));
+  const scripted =
+    replies.length === 3 && replies[0] === MOCK_REPLY_1 && replies[1] === MOCK_REPLY_2 && replies[2].startsWith(MOCK_WAKEUP_PREFIX);
+  if (missing.length || !scripted) {
+    throw new Error(
+      `claude-code: mock mode, but the conversation did not come from the mock ` +
+        `(unserved steps: ${missing.join(", ") || "none"}; replies: ${JSON.stringify(replies)})`,
+    );
+  }
+  const odd = mock.requests.filter((r) => r.note === "unrecognized" || r.note === "unscripted" || r.note.endsWith("/exhausted"));
+  for (const r of odd) log(`anthropic mock: ${r.note} ${r.method} ${r.path}`);
 }
 
 /** Line-buffered reader over claude's stream-json stdout. */
@@ -103,7 +209,7 @@ class EventLog {
 const isResult = (e: Event) => e.type === "result";
 const isWakeup = (e: Event) => e.type === "system" && e.subtype === "task_notification";
 
-async function converse(ctx: RunContext, home: string, cwd: string): Promise<{ replies: string[]; sessionId: string; artifacts: string[] }> {
+async function converse(ctx: RunContext, env: Record<string, string>, cwd: string): Promise<{ replies: string[]; sessionId: string; artifacts: string[] }> {
   const streamFile = join(ctx.runDir, "claude-stream.jsonl");
   const stderrFile = join(ctx.runDir, "claude-stderr.txt");
   const proc = Bun.spawn(
@@ -117,7 +223,7 @@ async function converse(ctx: RunContext, home: string, cwd: string): Promise<{ r
       "--plugin-dir", STAGE,
       "--permission-mode", "bypassPermissions",
     ],
-    { cwd, env: harnessEnv(home), stdin: "pipe", stdout: "pipe", stderr: Bun.file(stderrFile) },
+    { cwd, env, stdin: "pipe", stdout: "pipe", stderr: Bun.file(stderrFile) },
   );
   const log = new EventLog(proc.stdout, streamFile);
   const replies: string[] = [];
@@ -157,8 +263,8 @@ async function converse(ctx: RunContext, home: string, cwd: string): Promise<{ r
 }
 
 /** User-role text entries in Claude Code's transcript, tool results excluded. */
-function transcriptUserTexts(home: string, sessionId: string): { texts: string[]; file?: string } {
-  const projects = join(home, ".claude", "projects");
+function transcriptUserTexts(configDir: string, sessionId: string): { texts: string[]; file?: string } {
+  const projects = join(configDir, "projects");
   const file = existsSync(projects)
     ? readdirSync(projects).map((d) => join(projects, d, `${sessionId}.jsonl`)).find((f) => existsSync(f))
     : undefined;
@@ -186,11 +292,32 @@ function variant(name: string, observationMode: "unified" | "directional"): Harn
       const cwd = join(ctx.runDir, "project");
       mkdirSync(join(home, ".honcho"), { recursive: true });
       mkdirSync(cwd, { recursive: true });
-      const links = credentialLinks().map(([target, link]) => {
-        mkdirSync(join(home, link, ".."), { recursive: true });
-        symlinkSync(target, join(home, link));
-        return join(home, link);
-      });
+      const mode = modelMode();
+
+      let env: Record<string, string>;
+      let configDir: string;
+      let mock: AnthropicMock | undefined;
+      let links: string[] = [];
+      if (mode === "mock") {
+        configDir = join(ctx.runDir, "claude-config");
+        mkdirSync(configDir, { recursive: true });
+        mock = startAnthropicMock(claudeCodeScript(ctx.turns), join(ctx.runDir, "anthropic-mock.jsonl"));
+        env = harnessEnv(home, {
+          CLAUDE_CONFIG_DIR: configDir,
+          ANTHROPIC_BASE_URL: mock.url,
+          ANTHROPIC_API_KEY: "sk-ant-e2e-mock",
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+        });
+      } else {
+        configDir = join(home, ".claude");
+        links = credentialLinks().map(([target, link]) => {
+          mkdirSync(join(home, link, ".."), { recursive: true });
+          symlinkSync(target, join(home, link));
+          return join(home, link);
+        });
+        env = harnessEnv(home, {});
+      }
+      ctx.log(`claude-code: model ${mode === "mock" ? `mock at ${mock!.url}` : MODEL}`);
 
       const userPeer = `e2e-user-${ctx.runId}`;
       writeFileSync(
@@ -207,12 +334,17 @@ function variant(name: string, observationMode: "unified" | "directional"): Harn
       // later cleans up or archives the run dir can reach the credential store.
       let conversation: Awaited<ReturnType<typeof converse>>;
       try {
-        conversation = await converse(ctx, home, cwd);
+        conversation = await converse(ctx, env, cwd);
       } finally {
         for (const link of links) unlinkSync(link);
+        mock?.stop();
       }
       const { replies, sessionId, artifacts } = conversation;
-      const transcript = transcriptUserTexts(home, sessionId);
+      if (mock) {
+        artifacts.push(join(ctx.runDir, "anthropic-mock.jsonl"));
+        verifyMockServed(mock, replies, ctx.log);
+      }
+      const transcript = transcriptUserTexts(configDir, sessionId);
       const honchoLogs = ["activity.log", "verbose.log"].map((f) => join(home, ".honcho", f)).filter((f) => existsSync(f));
       const result: HarnessRun = {
         assistantReplies: replies,
@@ -246,7 +378,7 @@ export const claudeCode: HarnessAdapter = {
     const version = Bun.spawnSync(["claude", "--version"], { stderr: "pipe" });
     if (version.exitCode !== 0) throw new Error("claude CLI not found on PATH (npm install -g @anthropic-ai/claude-code)");
     if (!existsSync(join(STAGE, ".claude-plugin", "plugin.json"))) throw new Error(`no staged build at ${STAGE}`);
-    if (!process.env.ANTHROPIC_API_KEY && credentialLinks().length === 0) {
+    if (modelMode() === "real" && !process.env.ANTHROPIC_API_KEY && credentialLinks().length === 0) {
       throw new Error("no Anthropic credentials: set ANTHROPIC_API_KEY or log in with `claude`");
     }
   },

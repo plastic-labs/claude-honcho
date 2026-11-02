@@ -12,15 +12,14 @@ From `plugins/honcho/`:
 ```bash
 bun run e2e                       # build .stage, start the sandbox, run, assert, tear down
 bun run e2e --variant unified     # one variant only
+bun run e2e --real                # a real model instead of the scripted mock (see below)
 bun run e2e --keep                # leave the sandbox up and keep the run dirs
 bun run e2e --no-build            # reuse an existing .stage/
 ```
 
-You need Docker, [`uv`](https://docs.astral.sh/uv/) (the sandbox seeds itself with it on a cold
-start), and Anthropic credentials: either `ANTHROPIC_API_KEY`, or a `claude` CLI that is logged
-in. A cold run, including pulling and seeding the sandbox, takes about 100 seconds. With the
-sandbox already up it takes about 30. Each variant costs a few cents of Haiku
-(`E2E_CLAUDE_MODEL` overrides the model).
+You need Docker and [`uv`](https://docs.astral.sh/uv/) (the sandbox seeds itself with it on a
+cold start). A cold run, including pulling and seeding the sandbox, takes about a minute. With
+the sandbox already up, it takes about 10 seconds.
 
 The sandbox comes from `plastic-labs/honcho` at the commit pinned in `sandbox.ts`
 (`HONCHO_REF`), sparse-fetched into `~/.cache/claude-honcho-e2e/`. Set `HONCHO_SANDBOX_DIR` to
@@ -28,26 +27,51 @@ a honcho checkout to run against local sandbox changes instead. If a sandbox is 
 on `127.0.0.1:18000`, the run reuses it and leaves it running. Every run writes to its own
 fresh workspace, so it never resets or disturbs existing state.
 
+### Model modes
+
+Honcho always runs its mock provider. Claude Code's model is chosen per run:
+
+- **mock (default, and the only mode CI uses).** `anthropic-mock.ts` serves a scripted Anthropic
+  Messages API on a free localhost port: streamed `/v1/messages` with text and `tool_use` blocks,
+  plus `count_tokens`. Claude Code reaches it through `ANTHROPIC_BASE_URL` and a dummy
+  `ANTHROPIC_API_KEY`. The script (`claudeCodeScript` in `harnesses/claude-code.ts`) calls real
+  Claude Code tools, `Bash` with `run_in_background` and `Read`, so the command output and the
+  `<task-notification>` the plugin sees are produced by Claude Code itself. Free, deterministic,
+  no credentials. Every request lands in `anthropic-mock.jsonl` in the run dir, and anything
+  unrecognised or unscripted is reported at the end of the run.
+- **real (`--real` or `E2E_MODEL=real`).** A real model, Haiku by default (`E2E_CLAUDE_MODEL`
+  overrides it). It uses `ANTHROPIC_API_KEY` when set, otherwise your logged-in `claude` CLI.
+  Use it to check that the scripted conversation still matches what a real model does with
+  the same prompts. Each variant costs a few cents.
+
+The assertions are the same in both modes, and none of them depends on what the model says.
+
 ### Isolation
 
 `claude` runs with `HOME` pointed at a temporary run dir, so your `~/.honcho/config.json`,
 `~/.claude` settings and installed plugins (including an installed copy of this plugin) are never
-read, and nothing is written to them. `HONCHO_*` and nested-session `CLAUDE_CODE_*` variables are
-stripped from its environment. The plugin is loaded from `.stage/` with `--plugin-dir`, which is
-the bundled tree users install.
+read, and nothing is written to them. `HONCHO_*` and `CLAUDE_CODE_*` variables are stripped from
+its environment. The plugin is loaded from `.stage/` with `--plugin-dir`, which is the bundled
+tree users install.
 
-Credentials are the one thing carried across. With `ANTHROPIC_API_KEY` set, nothing else is
-needed. Without it, the run links only the CLI's credential store into the isolated HOME: the
-login keychain directory on macOS (`security` locates it via `HOME`), or
-`~/.claude/.credentials.json` on Linux. The link is removed as soon as `claude` exits. No
-credential is read or copied by the script.
+In mock mode, `CLAUDE_CONFIG_DIR` is also a temporary dir and every inherited `ANTHROPIC_*`
+variable is replaced. With nothing to log in with, Claude Code can only reach the mock. If it
+reached the real API anyway, the Honcho checks would still pass, so the adapter refuses the run
+unless the mock served every scripted step and the replies are the scripted ones.
+
+In real mode, credentials are carried across. `ANTHROPIC_API_KEY` needs nothing else. Without
+it, the run links only the CLI's credential store into the isolated HOME: the login keychain
+directory on macOS (`security` locates it via `HOME`), or `~/.claude/.credentials.json` on
+Linux. The link is removed as soon as `claude` exits. No credential is read or copied by the
+script.
 
 ## What it asserts
 
-Turn 1 states a plain user fact. Turn 2 asks the model to run a foreground command and to start a
-background command, then to end its turn. The background command's completion comes back as a
-real harness-injected `<task-notification>` turn. The commands' outputs are computed by the shell
-(`TOOL$((40+2))OUT`), so they never appear literally in a prompt.
+Turn 1 states a plain user fact. Turn 2 asks for a foreground command and a background
+command, then ends the turn. The background command's completion comes back as a real
+harness-injected `<task-notification>` turn, in which the model reads the command's output
+and repeats it. The commands' outputs are computed by the shell (`TOOL$((40+2))OUT`), so they
+never appear literally in a prompt.
 
 Each variant then checks (`assert.ts`):
 
@@ -70,9 +94,10 @@ self-collection is the memory, and the AI must not build its own view of the use
 `directional`, the plugin sets `observe_others` on the AI peer, and the AI's view of the user
 must fill up.
 
-What it deliberately does not assert, because the sandbox runs the mock provider: the text or level
-of derived conclusions (they are synthetic placeholders, always `explicit`), and anything ranked by
-embeddings, including message search. Mock embeddings carry no similarity. See the sandbox README.
+What it deliberately does not assert, because the sandbox runs Honcho's mock provider: the text
+or level of derived conclusions (they are synthetic placeholders, always `explicit`), and
+anything ranked by embeddings, including message search. Mock embeddings carry no similarity.
+See the sandbox README.
 
 ### Waiting for asynchronous uploads
 
@@ -84,14 +109,15 @@ Honcho until the expected messages land.
 
 ## Layout
 
-| File                     | Harness-specific? | Purpose                                                   |
-| ------------------------ | ----------------- | --------------------------------------------------------- |
-| `run.ts`                 | no                | Entry point: build, sandbox lifecycle, variants, report    |
-| `sandbox.ts`             | no                | Pinned honcho checkout, `sandbox.sh up/down`, health check |
-| `scenario.ts`            | no                | The scripted turns and the command-output markers          |
-| `assert.ts`              | no                | Every assertion, against the Honcho API only               |
-| `harness.ts`             | no                | The adapter contract                                       |
-| `harnesses/claude-code.ts` | yes             | Configure, invoke and read back Claude Code                |
+| File                       | Harness-specific? | Purpose                                                       |
+| -------------------------- | ----------------- | ------------------------------------------------------------- |
+| `run.ts`                   | no                | Entry point: build, sandbox lifecycle, variants, report        |
+| `sandbox.ts`               | no                | Pinned honcho checkout, `sandbox.sh up/down`, health check     |
+| `scenario.ts`              | no                | The scripted turns, commands and output markers                |
+| `assert.ts`                | no                | Every assertion, against the Honcho API only                   |
+| `harness.ts`               | no                | The adapter contract                                           |
+| `anthropic-mock.ts`        | no                | Scripted Anthropic Messages API server, for any Anthropic client |
+| `harnesses/claude-code.ts` | yes               | Configure, invoke and read back Claude Code, plus its model script |
 
 ## Adopting it for a second integration
 
@@ -100,12 +126,16 @@ one (say an opencode or Cursor integration), write `harnesses/<name>.ts` exporti
 `HarnessAdapter` (see `harness.ts`) and register it in `HARNESSES` in `run.ts`. The adapter
 supplies:
 
-1. **`preflight()`**: fail fast if the harness binary or its model credentials are missing.
+1. **`preflight()`**: fail fast if the harness binary is missing, or the model credentials in
+   real mode.
 2. **One or more `variants`**, each with a `run(ctx)` that:
    - creates an isolated HOME and working dir under `ctx.runDir`, and writes the integration's
      config there, pointing it at `ctx.baseUrl` and `ctx.workspace` with a user peer derived from
      `ctx.runId`. Integrations that share `~/.honcho/config.json` use a `hosts.<host>` block, as
      the Claude Code adapter does;
+   - points the harness's model at a mock. A harness that speaks the Anthropic API can reuse
+     `anthropic-mock.ts` with its own script, written against that harness's tool names. One
+     on another provider needs an equivalent server;
    - sends each `ctx.turns[i].prompt` verbatim as a user turn, non-interactively. For a turn with
      `expectsWakeup`, it waits for the harness's own follow-up turn when the background command
      finishes. The scenario assumes the harness reports background-command completion back as
@@ -121,14 +151,11 @@ supplies:
 
 The scenario, sandbox handling and assertions are shared and need no changes. If the integration
 lives in another repo, copy `e2e/` without `harnesses/claude-code.ts` and keep `HONCHO_REF` in
-step. CI needs a job like `e2e` in `.github/workflows/ci.yml`: Docker, `uv`, the harness CLI, and
-its model key as a secret.
+step. CI needs a job like `e2e` in `.github/workflows/ci.yml`: Docker, `uv` and the harness CLI.
 
 ## CI
 
 The `e2e` job in `.github/workflows/ci.yml` runs after `build` on every push to `main` and every
-pull request, with the `ANTHROPIC_API_KEY` repository secret. Fork and Dependabot pull requests
-do not receive secrets, so they skip with a warning annotation. Anywhere else, a missing secret
-fails the job rather than passing untested. On failure, the job uploads the Claude event stream,
-the Claude transcript, the plugin's `~/.honcho` logs and the sandbox container logs as the
-`harness-e2e` artifact.
+pull request, fork pull requests included. It runs in mock mode only and uses no secrets. On
+failure, it uploads the `harness-e2e` artifact: the Claude event stream and transcript, the mock's
+request log, the plugin's `~/.honcho` logs and the sandbox container logs.

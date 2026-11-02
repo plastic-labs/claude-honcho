@@ -86,8 +86,8 @@ The smoke test runs the staged tree from a temporary directory with no
 `node_modules` on the resolution path, which is what catches an unbundled
 dependency or a leftover `.ts` reference.
 
-`bun run e2e` needs Docker, `uv`, and a logged-in `claude` CLI (or
-`ANTHROPIC_API_KEY`); see [`plugins/honcho/e2e/README.md`](plugins/honcho/e2e/README.md).
+`bun run e2e` needs Docker, `uv` and the `claude` CLI, but no credentials: the model
+is a local mock by default. See [`plugins/honcho/e2e/README.md`](plugins/honcho/e2e/README.md).
 
 ## Working on the `honcho` Plugin
 
