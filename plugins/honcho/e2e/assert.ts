@@ -1,6 +1,6 @@
 import { Honcho, type Message } from "@honcho-ai/sdk";
-import type { Expectation, HarnessRun, Turn } from "./harness.js";
-import { BACKGROUND_MARKER, commandOutputMarkers } from "./scenario.js";
+import { SANDBOX_API_KEY, type Expectation, type HarnessRun, type MockAttestation, type ModelMode, type RecallRun, type Turn } from "./harness.js";
+import { BACKGROUND_MARKER, commandOutputMarkers, RECALL_PROMPT, recallProbes } from "./scenario.js";
 
 // Harness-agnostic assertions over what a harness integration wrote to Honcho.
 //
@@ -8,8 +8,9 @@ import { BACKGROUND_MARKER, commandOutputMarkers } from "./scenario.js";
 // derived conclusion text is synthetic and always `explicit`, so conclusions are
 // asserted to exist for the right (observer, observed) pair, never on content
 // or level. Mock embeddings carry no similarity, so nothing here relies on
-// vector ranking: message search is not asserted, and recall is checked by
-// exact containment of conclusion text in the context the integration reads.
+// vector ranking: message search is not asserted, and recall is checked with
+// uniquely-texted conclusions written into two collections, by exact
+// containment in the context and in what the integration hands the model.
 
 const LAND_TIMEOUT_MS = 60_000;
 const DRAIN_TIMEOUT_MS = 180_000;
@@ -22,6 +23,40 @@ export interface CheckResult {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export interface AssertOptions {
+  baseUrl: string;
+  workspace: string;
+  runId: string;
+  turns: Turn[];
+  model: ModelMode;
+  log: (msg: string) => void;
+}
+
+type Check = (name: string, ok: boolean, detail?: string) => void;
+
+function collector(): { results: CheckResult[]; check: Check } {
+  const results: CheckResult[] = [];
+  return { results, check: (name, ok, detail) => results.push({ name, ok, detail: ok ? undefined : detail }) };
+}
+
+const client = (opts: AssertOptions) => new Honcho({ apiKey: SANDBOX_API_KEY, baseURL: opts.baseUrl, workspaceId: opts.workspace });
+
+/** Mock mode is only meaningful if the model really was the mock. */
+function checkMockAttestation(check: Check, model: ModelMode, what: string, mock?: MockAttestation): void {
+  if (model !== "mock") return;
+  check(
+    `mock model served every scripted call of the ${what}`,
+    !!mock && mock.expectedCalls > 0 && mock.servedCalls === mock.expectedCalls,
+    mock ? `served ${mock.servedCalls}/${mock.expectedCalls}` : "the adapter reported no mock attestation",
+  );
+}
+
+async function contextText(honcho: Honcho, [observer, observed]: [string, string]): Promise<string> {
+  const peer = await honcho.peer(observer);
+  const ctx = await peer.context({ ...(observer === observed ? {} : { target: observed }), maxConclusions: 100 });
+  return ctx.representation ?? "";
+}
 
 async function allMessages(honcho: Honcho, sessionId: string): Promise<Message[]> {
   const session = await honcho.session(sessionId);
@@ -74,23 +109,20 @@ async function waitForDeriver(honcho: Honcho): Promise<string> {
   return `did not drain in ${DRAIN_TIMEOUT_MS / 1000}s: ${JSON.stringify(last)}`;
 }
 
-export async function assertRoundTrip(
-  opts: { baseUrl: string; workspace: string; turns: Turn[]; log: (msg: string) => void },
-  expect: Expectation,
-  run: HarnessRun,
-): Promise<CheckResult[]> {
+export async function assertRoundTrip(opts: AssertOptions, expect: Expectation, run: HarnessRun): Promise<CheckResult[]> {
   const { turns, log } = opts;
-  const honcho = new Honcho({ apiKey: "e2e-sandbox", baseURL: opts.baseUrl, workspaceId: opts.workspace });
-  const results: CheckResult[] = [];
-  const check = (name: string, ok: boolean, detail?: string) => results.push({ name, ok, detail: ok ? undefined : detail });
+  const honcho = client(opts);
+  const { results, check } = collector();
   const prompts = turns.map((t) => t.prompt);
 
-  // The harness itself must have produced injected content, or the negative
-  // assertions below would pass vacuously.
+  checkMockAttestation(check, opts.model, "conversation", run.mock);
+
+  // The harness itself must have injected a task notification, or the
+  // negative assertions below would pass vacuously.
   const injected = run.transcriptUserTexts.filter((t) => !prompts.includes(t));
   check(
-    "harness injected content of its own into the conversation",
-    injected.length > 0,
+    "harness injected a <task-notification> into the conversation",
+    injected.some((t) => t.includes("<task-notification>")),
     `transcript user entries: ${JSON.stringify(run.transcriptUserTexts)}`,
   );
   check(
@@ -133,6 +165,13 @@ export async function assertRoundTrip(
   }
   const duplicated = aiMsgs.filter((c, i) => aiMsgs.indexOf(c) !== i);
   check("no assistant message was uploaded twice", duplicated.length === 0, `duplicates: ${JSON.stringify(duplicated)}`);
+  // The AI peer may legitimately describe a notification, but never carry the raw envelope.
+  const aiEnvelopes = aiMsgs.filter((c) => c.includes("<task-notification>"));
+  check(
+    "no <task-notification> envelope was uploaded as the AI peer",
+    aiEnvelopes.length === 0,
+    `found: ${JSON.stringify(aiEnvelopes)}`,
+  );
 
   // Negative: nothing the harness injected is stored as the user speaking.
   const unscripted = userMsgs.filter((c) => !prompts.includes(c));
@@ -181,16 +220,6 @@ export async function assertRoundTrip(
   for (const [observer, observed] of expect.derivedPairs) {
     const contents = await conclusionContents(honcho, observer, observed);
     check(`conclusions derived for ${observer} -> ${observed}`, contents.length > 0, "none");
-    if (contents.length === 0) continue;
-    const peer = await honcho.peer(observer);
-    const ctx = await peer.context({ ...(observer === observed ? {} : { target: observed }), maxConclusions: 100 });
-    const representation = ctx.representation ?? "";
-    const missing = contents.filter((c) => !representation.includes(c));
-    check(
-      `${observer} -> ${observed} context recalls every derived conclusion`,
-      missing.length === 0,
-      `missing ${missing.length}/${contents.length}; representation: ${JSON.stringify(representation.slice(0, 400))}`,
-    );
   }
   for (const [observer, observed] of expect.emptyPairs) {
     const contents = await conclusionContents(honcho, observer, observed);
@@ -198,4 +227,56 @@ export async function assertRoundTrip(
   }
 
   return results;
+}
+
+/**
+ * Recall, after the round trip: write a uniquely-texted conclusion into the
+ * collection the integration reads (`probe`) and another into a different
+ * collection about the same user (`decoy`). Mock-derived text is the same
+ * placeholder in every collection, so only unique text can show which
+ * collection a context came from. Checked twice: through the API, and through
+ * the integration itself, by starting a fresh harness session and looking at
+ * what it put in front of the model.
+ */
+export async function assertRecall(
+  opts: AssertOptions,
+  expect: Expectation,
+  recall: (prompt: string) => Promise<RecallRun>,
+): Promise<{ checks: CheckResult[]; artifacts: string[] }> {
+  const honcho = client(opts);
+  const { results, check } = collector();
+  const { probe, decoy } = recallProbes(opts.runId);
+  const [po, pd] = expect.recallPair;
+  const [dob, dd] = expect.decoyPair;
+
+  await (await honcho.peer(po)).conclusionsOf(pd).create({ content: probe, sessionId: expect.session });
+  await (await honcho.peer(dob)).conclusionsOf(dd).create({ content: decoy, sessionId: expect.session });
+
+  const probeCtx = await contextText(honcho, expect.recallPair);
+  const decoyCtx = await contextText(honcho, expect.decoyPair);
+  check(
+    `${po} -> ${pd} context holds its own probe and not the decoy`,
+    probeCtx.includes(probe) && !probeCtx.includes(decoy),
+    `context: ${JSON.stringify(probeCtx.slice(0, 600))}`,
+  );
+  check(
+    `${dob} -> ${dd} context holds the decoy and not the probe`,
+    decoyCtx.includes(decoy) && !decoyCtx.includes(probe),
+    `context: ${JSON.stringify(decoyCtx.slice(0, 600))}`,
+  );
+
+  opts.log("recall: starting a fresh harness session");
+  const run = await recall(RECALL_PROMPT);
+  checkMockAttestation(check, opts.model, "recall session", run.mock);
+  check(
+    `the integration put the ${po} -> ${pd} probe in front of the model`,
+    run.modelInput.includes(probe),
+    `probe ${JSON.stringify(probe)} not found in ${run.modelInput.length} chars of model input`,
+  );
+  check(
+    `the integration kept the ${dob} -> ${dd} decoy away from the model`,
+    !run.modelInput.includes(decoy),
+    `decoy ${JSON.stringify(decoy)} reached the model`,
+  );
+  return { checks: results, artifacts: run.artifacts };
 }

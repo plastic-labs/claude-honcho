@@ -23,6 +23,7 @@ export interface MockLogEntry {
   path: string;
   /** What `respond` decided, or why the request was not answered normally. */
   note: string;
+  body?: unknown;
 }
 
 export interface AnthropicMock {
@@ -85,7 +86,7 @@ export function startAnthropicMock(
 ): AnthropicMock {
   const requests: MockLogEntry[] = [];
   const record = (entry: MockLogEntry, body?: unknown) => {
-    requests.push(entry);
+    requests.push({ ...entry, body });
     appendFileSync(logFile, JSON.stringify({ ...entry, body }) + "\n");
   };
 

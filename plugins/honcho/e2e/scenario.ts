@@ -12,7 +12,8 @@ import type { Turn } from "./harness.js";
 export const FOREGROUND_MARKER = "TOOL42OUT";
 export const BACKGROUND_MARKER = "BG63DONE";
 export const FOREGROUND_COMMAND = "echo TOOL$((40+2))OUT";
-export const BACKGROUND_COMMAND = "sleep 3; echo BG$((60+3))DONE";
+// Long enough that the completion cannot race into turn 2 on a slow runner.
+export const BACKGROUND_COMMAND = "sleep 10; echo BG$((60+3))DONE";
 
 export const turns: Turn[] = [
   {
@@ -28,3 +29,16 @@ export const turns: Turn[] = [
 ];
 
 export const commandOutputMarkers = [FOREGROUND_MARKER, BACKGROUND_MARKER];
+
+/** The only turn of the follow-up session that checks memory is read back
+ *  into the model's context. Long enough not to be skipped as a terse reply. */
+export const RECALL_PROMPT = "Before we continue, what do you remember about me and my desk setup?";
+
+/** Unique conclusion texts written straight into two collections about the
+ *  same user, so recall can tell which collection the context came from. */
+export function recallProbes(runId: string): { probe: string; decoy: string } {
+  return {
+    probe: `Recall probe ${runId}: the user keeps a teal stapler named Ferdinand in drawer three.`,
+    decoy: `Decoy probe ${runId}: the user owns a crimson kettle called Ottoline.`,
+  };
+}

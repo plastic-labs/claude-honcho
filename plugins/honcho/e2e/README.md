@@ -18,14 +18,23 @@ bun run e2e --no-build            # reuse an existing .stage/
 ```
 
 You need Docker and [`uv`](https://docs.astral.sh/uv/) (the sandbox seeds itself with it on a
-cold start). A cold run, including pulling and seeding the sandbox, takes about a minute. With
-the sandbox already up, it takes about 10 seconds.
+cold start). A cold run, including pulling and seeding the sandbox, takes about 100 seconds.
+With the sandbox already up, it takes about 35.
 
 The sandbox comes from `plastic-labs/honcho` at the commit pinned in `sandbox.ts`
 (`HONCHO_REF`), sparse-fetched into `~/.cache/claude-honcho-e2e/`. Set `HONCHO_SANDBOX_DIR` to
-a honcho checkout to run against local sandbox changes instead. If a sandbox is already running
-on `127.0.0.1:18000`, the run reuses it and leaves it running. Every run writes to its own
-fresh workspace, so it never resets or disturbs existing state.
+a honcho checkout to run against local sandbox changes instead.
+
+The sandbox is a single fixed-name Compose project (`honcho-sandbox`), so the run only removes a
+sandbox it created itself:
+
+- **Nothing there:** the run starts one and runs `sandbox.sh down` at the end, including when
+  `up` fails partway, when a check fails, or on Ctrl-C/SIGTERM. `--keep` leaves it up.
+- **Running and answering on `127.0.0.1:18000`:** the run reuses it and leaves it running. Every
+  run writes to its own fresh workspace, so it never resets or disturbs existing state.
+- **Present but not answering** (stopped, still starting, mid-restart, or a real-provider stack
+  from your own honcho checkout): the run refuses and touches nothing. Run `sandbox.sh up` or
+  `sandbox.sh down` yourself, then rerun.
 
 ### Model modes
 
@@ -57,15 +66,21 @@ tree users install.
 
 In mock mode, `CLAUDE_CONFIG_DIR` is also a temporary dir and every inherited `ANTHROPIC_*`
 variable is replaced. With nothing to log in with, Claude Code can only reach the mock. If it
-reached the real API anyway, the Honcho checks would still pass, so the adapter refuses the run
-unless the mock served each of the six scripted `/v1/messages` calls exactly once and the
-replies are the scripted ones. No keychain link is made in this mode.
+reached the real API anyway, the Honcho checks would still pass. So the adapter reports a mock
+attestation (scripted calls the mock served, against how many the script has), and the driver
+fails any mock-mode run whose attestation is missing or short. The Claude Code adapter counts
+each of its six conversation calls and its one recall call only if it was served exactly once,
+and only when the replies are the scripted texts. No credential store is linked in this mode.
 
 In real mode, credentials are carried across. `ANTHROPIC_API_KEY` needs nothing else. Without
 it, the run links only the CLI's credential store into the isolated HOME: the login keychain
 directory on macOS (`security` locates it via `HOME`), or `~/.claude/.credentials.json` on
-Linux. The link is removed as soon as `claude` exits. No credential is read or copied by the
-script.
+Linux. The link exists only while a `claude` process runs. It is removed when that process
+exits, or on Ctrl-C/SIGTERM. No credential is read or copied by the script.
+
+On Linux, prefer `ANTHROPIC_API_KEY`. If the CLI refreshes its token with an atomic rename while
+the run is going, the link turns into a plain file inside the run dir, the new token lands there
+and is deleted with the run dir, and your real credentials file is left holding the old token.
 
 ## What it asserts
 
@@ -83,13 +98,24 @@ Each variant then checks (`assert.ts`):
   on the AI peer. No assistant message was uploaded twice.
 - **Negative.** User messages are exactly the scripted prompts. Nothing the harness injected (the
   task notification, or anything else in its transcript that is not a scripted prompt) and no
-  command output is stored as the user speaking. The run first asserts that the harness really did
-  inject something and that the model saw the background output, so this can't pass vacuously.
+  command output is stored as the user speaking. No AI-peer message carries a raw
+  `<task-notification>` envelope (describing the notification is fine). The run first asserts
+  that a `<task-notification>` really is in the harness transcript and that the model saw the
+  background output, so these checks can't pass vacuously.
 - **Topology.** The session's peers are exactly the user and AI peers, with the expected effective
   `observe_me` / `observe_others` as the server reports them.
-- **Derivation and recall.** After the deriver queue drains, conclusions exist for every expected
-  `(observer, observed)` pair. Every conclusion is present in that observer's `context()`, the
-  call the plugin reads memory back through. Pairs the topology rules out must stay empty.
+- **Derivation.** After the deriver queue drains, conclusions exist for every expected
+  `(observer, observed)` pair, and pairs the topology rules out stay empty.
+- **Recall.** Mock-derived text is the same placeholder in every collection, so it can't show
+  where a context came from. The run therefore writes one uniquely-texted conclusion into the
+  collection the integration reads (the probe) and another into a different collection about
+  the same user (the decoy):
+  - Through the API, each collection's `context()` holds its own text and not the other's.
+  - Through the integration, a fresh harness session in the same workspace gets one prompt,
+    and the probe must reach the model while the decoy must not. In mock mode that is checked
+    against the model request the mock received. In real mode it is checked against what the
+    plugin's hooks emitted. For Claude Code, the probe arrives through the plugin's
+    `UserPromptSubmit` context injection.
 
 The `claude-code` adapter runs two variants. Under `unified` (the default), the user's
 self-collection is the memory, and the AI must not build its own view of the user. Under
@@ -104,8 +130,9 @@ See the sandbox README.
 ### Waiting for asynchronous uploads
 
 The plugin uploads from `async` hooks. `claude -p` cancels async hooks that are still running when
-it exits, which can drop a session's final assistant message. The adapter keeps one
-`--input-format stream-json` session open and waits until every started hook has reported back
+it exits, which can drop a session's final assistant message. This is a known limitation of
+running the plugin headless. The adapter keeps one `--input-format stream-json` session open and
+waits until every started hook has reported back, with no new hook started for 1.5 seconds,
 before it sends the next turn or closes stdin (`--include-hook-events`). The driver also polls
 Honcho until the expected messages land.
 
@@ -116,7 +143,7 @@ Honcho until the expected messages land.
 | `run.ts`                   | no                | Entry point: build, sandbox lifecycle, variants, report        |
 | `sandbox.ts`               | no                | Pinned honcho checkout, `sandbox.sh up/down`, health check     |
 | `scenario.ts`              | no                | The scripted turns, commands and output markers                |
-| `assert.ts`                | no                | Every assertion, against the Honcho API only                   |
+| `assert.ts`                | no                | Every assertion: Honcho API state plus what reached the model  |
 | `harness.ts`               | no                | The adapter contract                                           |
 | `anthropic-mock.ts`        | no                | Scripted Anthropic Messages API server, for any Anthropic client |
 | `harnesses/claude-code.ts` | yes               | Configure, invoke and read back Claude Code, plus its model script |
@@ -128,16 +155,19 @@ one (say an opencode or Cursor integration), write `harnesses/<name>.ts` exporti
 `HarnessAdapter` (see `harness.ts`) and register it in `HARNESSES` in `run.ts`. The adapter
 supplies:
 
-1. **`preflight()`**: fail fast if the harness binary is missing, or the model credentials in
-   real mode.
+1. **`preflight(model)`**: fail fast if the harness binary is missing, or the model credentials
+   in real mode.
 2. **One or more `variants`**, each with a `run(ctx)` that:
    - creates an isolated HOME and working dir under `ctx.runDir`, and writes the integration's
      config there, pointing it at `ctx.baseUrl` and `ctx.workspace` with a user peer derived from
      `ctx.runId`. Integrations that share `~/.honcho/config.json` use a `hosts.<host>` block, as
      the Claude Code adapter does;
-   - points the harness's model at a mock. A harness that speaks the Anthropic API can reuse
-     `anthropic-mock.ts` with its own script, written against that harness's tool names. One
-     on another provider needs an equivalent server;
+   - when `ctx.model` is `"mock"`, points the harness's model at a mock and makes sure it cannot
+     reach a real one. A harness that speaks the Anthropic API can reuse `anthropic-mock.ts` with
+     its own script, written against that harness's tool names. One on another provider needs
+     an equivalent server;
+   - registers teardown (child processes, the mock, credential links) with `ctx.onCleanup`, so
+     it also runs on failure and on Ctrl-C;
    - sends each `ctx.turns[i].prompt` verbatim as a user turn, non-interactively. For a turn with
      `expectsWakeup`, it waits for the harness's own follow-up turn when the background command
      finishes. The scenario assumes the harness reports background-command completion back as
@@ -146,10 +176,15 @@ supplies:
    - waits until the harness's asynchronous uploads have finished;
    - returns `assistantReplies` (the final reply of every model turn), `transcriptUserTexts`
      (every user-role text in the harness's own transcript, which is what the injected-content
-     checks are built from), and `artifacts` (log paths for failures);
+     checks are built from), `artifacts` (log paths for failures), and in mock mode `mock`, a
+     `MockAttestation`. The driver fails a mock-mode run without a full one;
    - returns the `Expectation`: the session name the integration should use, the user and AI
-     peer ids, the effective topology per peer, and which `(observer, observed)` pairs must and
-     must not get conclusions under its observation mode.
+     peer ids, the effective topology per peer, which `(observer, observed)` pairs must and
+     must not get conclusions, and which collection it reads memory from (`recallPair`) versus
+     one it must not read (`decoyPair`);
+   - returns `recall(prompt)`: start a fresh harness session with the same config, send that one
+     prompt, and report what reached the model (`modelInput`), plus a mock attestation in mock
+     mode.
 
 The scenario, sandbox handling and assertions are shared and need no changes. If the integration
 lives in another repo, copy `e2e/` without `harnesses/claude-code.ts` and keep `HONCHO_REF` in
@@ -166,5 +201,5 @@ the new version confirms the script still matches what a real model does.
 
 The `e2e` job in `.github/workflows/ci.yml` runs after `build` on every push to `main` and every
 pull request, fork pull requests included. It runs in mock mode only and uses no secrets. On
-failure, it uploads the `harness-e2e` artifact: the Claude event stream and transcript, the mock's
-request log, the plugin's `~/.honcho` logs and the sandbox container logs.
+failure, it uploads the `harness-e2e` artifact: the Claude event streams and transcripts, the
+mock's request log, the plugin's `~/.honcho` logs and the sandbox container logs.

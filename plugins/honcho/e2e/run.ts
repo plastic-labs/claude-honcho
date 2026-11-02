@@ -7,10 +7,10 @@ import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { parseArgs } from "util";
-import { assertRoundTrip } from "./assert.js";
-import type { HarnessAdapter } from "./harness.js";
+import { assertRecall, assertRoundTrip, type CheckResult } from "./assert.js";
+import type { HarnessAdapter, ModelMode } from "./harness.js";
 import { claudeCode } from "./harnesses/claude-code.js";
-import { ensureSandboxCheckout, isSandboxUp, sandbox, SANDBOX_URL } from "./sandbox.js";
+import { ensureSandboxCheckout, sandbox, sandboxState, SANDBOX_URL } from "./sandbox.js";
 import { turns } from "./scenario.js";
 
 const HARNESSES: Record<string, HarnessAdapter> = { [claudeCode.name]: claudeCode };
@@ -19,18 +19,19 @@ const { values: args } = parseArgs({
   options: {
     harness: { type: "string", default: "claude-code" },
     variant: { type: "string" },
-    model: { type: "string" },
+    model: { type: "string", default: process.env.E2E_MODEL || "mock" },
     keep: { type: "boolean", default: false },
     "no-build": { type: "boolean", default: false },
   },
 });
 
 const log = (msg: string) => console.log(`[e2e] ${msg}`);
-// Adapters default to a scripted mock model; --model real (or E2E_MODEL=real)
-// opts into a real one.
-if (args.model && args.model !== "mock" && args.model !== "real") throw new Error(`--model must be mock or real, not ${args.model}`);
-if (args.model) process.env.E2E_MODEL = args.model;
 const started = Date.now();
+
+// Harnesses default to a scripted mock model; --model real (or E2E_MODEL=real)
+// opts into a real one.
+if (args.model !== "mock" && args.model !== "real") throw new Error(`--model must be mock or real, not ${args.model}`);
+const model = args.model as ModelMode;
 
 const adapter = HARNESSES[args.harness!];
 if (!adapter) throw new Error(`unknown harness ${args.harness}; known: ${Object.keys(HARNESSES).join(", ")}`);
@@ -42,18 +43,66 @@ if (!args["no-build"]) {
   const build = Bun.spawnSync(["bun", "run", "scripts/build.ts"], { cwd: join(import.meta.dir, ".."), stdout: "inherit", stderr: "inherit" });
   if (build.exitCode !== 0) process.exit(build.exitCode ?? 1);
 }
-await adapter.preflight();
+await adapter.preflight(model);
 
-// A sandbox that is already running is reused and left running: every run
-// writes to its own fresh workspace, so it never disturbs existing state.
+// Teardown registered by adapters (child processes, the model mock, credential
+// links), run newest first when a variant ends or the run is interrupted.
+const cleanups: Array<() => void> = [];
+const runCleanups = () => {
+  while (cleanups.length) {
+    try {
+      cleanups.pop()!();
+    } catch {
+      // Best effort: keep tearing down the rest.
+    }
+  }
+};
+
+// The sandbox is a shared, fixed-name Compose project. Only a sandbox this run
+// created is ever stopped; one that exists but is not answering may hold
+// someone's state (a paid real-provider template, say), so it is left alone.
 const script = ensureSandboxCheckout(log);
-const startedSandbox = !(await isSandboxUp());
-if (startedSandbox) {
-  log("starting the Honcho sandbox (mock provider)");
-  sandbox(script, "up");
-} else {
-  log(`reusing the sandbox already running at ${SANDBOX_URL}`);
+let ownsSandbox = false;
+const stopOwnedSandbox = () => {
+  if (ownsSandbox && !args.keep) {
+    log("stopping the sandbox");
+    ownsSandbox = false;
+    sandbox(script, "down");
+  }
+};
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    log(`${signal}: cleaning up`);
+    runCleanups();
+    stopOwnedSandbox();
+    process.exit(130);
+  });
 }
+
+const state = await sandboxState();
+if (state === "healthy") {
+  log(`reusing the sandbox already running at ${SANDBOX_URL}; it is left running`);
+} else if (state === "present") {
+  console.error(
+    `[e2e] a honcho-sandbox Compose project exists but ${SANDBOX_URL} is not answering.\n` +
+      `      It is left untouched. Bring it up with \`${script} up\`, or remove it with \`${script} down\`, then rerun.`,
+  );
+  process.exit(1);
+} else {
+  log("starting the Honcho sandbox (mock provider)");
+  ownsSandbox = true;
+  try {
+    sandbox(script, "up");
+  } catch (e) {
+    stopOwnedSandbox();
+    throw e;
+  }
+}
+
+const print = (checks: CheckResult[]) => {
+  for (const c of checks) console.log(`  ${c.ok ? "PASS" : "FAIL"}  ${c.name}${c.detail ? `\n        ${c.detail}` : ""}`);
+};
 
 let failed = 0;
 try {
@@ -65,31 +114,34 @@ try {
 
     const t0 = Date.now();
     let ok = false;
-    let artifacts: string[] = [];
+    const artifacts: string[] = [];
     try {
-      const ctx = { baseUrl: SANDBOX_URL, workspace, runId, runDir, turns, log };
-      const { expect, result } = await variant.run(ctx);
-      artifacts = result.artifacts;
-      const checks = await assertRoundTrip(ctx, expect, result);
-      for (const c of checks) console.log(`  ${c.ok ? "PASS" : "FAIL"}  ${c.name}${c.detail ? `\n        ${c.detail}` : ""}`);
-      ok = checks.every((c) => c.ok);
+      const ctx = { baseUrl: SANDBOX_URL, workspace, runId, runDir, turns, model, log, onCleanup: (fn: () => void) => cleanups.push(fn) };
+      const { expect, result, recall } = await variant.run(ctx);
+      artifacts.push(...result.artifacts);
+      const roundTrip = await assertRoundTrip(ctx, expect, result);
+      print(roundTrip);
+      const recalled = await assertRecall(ctx, expect, recall);
+      artifacts.push(...recalled.artifacts);
+      print(recalled.checks);
+      ok = [...roundTrip, ...recalled.checks].every((c) => c.ok);
     } catch (e) {
       console.log(`  FAIL  ${e instanceof Error ? e.message : e}`);
+    } finally {
+      runCleanups();
     }
     log(`${adapter.name}/${variant.name}: ${ok ? "passed" : "FAILED"} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
     if (ok && !args.keep) {
       rmSync(runDir, { recursive: true, force: true });
     } else {
-      log(`kept ${runDir}${artifacts.length ? `; artifacts:\n  ${artifacts.join("\n  ")}` : ""}`);
+      log(`kept ${runDir}${artifacts.length ? `; artifacts:\n  ${[...new Set(artifacts)].join("\n  ")}` : ""}`);
     }
     if (!ok) failed++;
   }
 } finally {
-  if (startedSandbox && !args.keep) {
-    log("stopping the sandbox");
-    sandbox(script, "down");
-  }
+  runCleanups();
+  stopOwnedSandbox();
 }
 
 log(`${variants.length - failed}/${variants.length} variant(s) passed in ${((Date.now() - started) / 1000).toFixed(1)}s`);

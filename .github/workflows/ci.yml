@@ -95,8 +95,8 @@ jobs:
           if-no-files-found: ignore
           path: |
             ${{ runner.temp }}/sandbox.log
-            ${{ runner.temp }}/honcho-e2e-*/claude-stream.jsonl
-            ${{ runner.temp }}/honcho-e2e-*/claude-stderr.txt
+            ${{ runner.temp }}/honcho-e2e-*/claude-*-stream.jsonl
+            ${{ runner.temp }}/honcho-e2e-*/claude-*-stderr.txt
             ${{ runner.temp }}/honcho-e2e-*/anthropic-mock.jsonl
             ${{ runner.temp }}/honcho-e2e-*/home/.honcho/*.log
             ${{ runner.temp }}/honcho-e2e-*/claude-config/projects/**/*.jsonl
