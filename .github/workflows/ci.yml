@@ -68,10 +68,12 @@ jobs:
       # The sandbox's seed step runs its Python seeder through uv.
       - uses: astral-sh/setup-uv@v6
 
+      # Pinned: the e2e's mock model is scripted against this version's wire
+      # behaviour. See "CI" in plugins/honcho/e2e/README.md before bumping.
       - name: Install dependencies
         run: |
           bun install --frozen-lockfile
-          npm install -g @anthropic-ai/claude-code
+          npm install -g @anthropic-ai/claude-code@2.1.316
 
       # --keep leaves the sandbox and run dirs in place for the failure steps;
       # TMPDIR puts the run dirs where the artifact upload looks.
