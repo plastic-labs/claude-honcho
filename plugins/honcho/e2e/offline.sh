@@ -37,9 +37,13 @@ zero() {
   sudo iptables -Z E2E_CONTAINERS
 }
 
+# The runner's sudo resets the environment and refuses -E, so the caller's
+# environment (HOME, PATH, TMPDIR, ...) is passed through as `env -i` arguments.
 in_lock() {
-  sudo -E setpriv --reuid "$(id -u)" --regid "$(getent group "$GROUP" | cut -d: -f3)" --init-groups \
-    -- env "PATH=$PATH" "$@"
+  local vars
+  mapfile -d '' vars < <(env -0)
+  sudo setpriv --reuid "$(id -u)" --regid "$(getent group "$GROUP" | cut -d: -f3)" --init-groups \
+    -- env -i "${vars[@]}" "$@"
 }
 
 lock() {
