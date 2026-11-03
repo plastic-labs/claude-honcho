@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
 
+# Every job only reads the repo; artifact uploads use the runtime token, not
+# GITHUB_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
