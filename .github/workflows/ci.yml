@@ -80,12 +80,28 @@ jobs:
           bun install --frozen-lockfile
           npm install -g @anthropic-ai/claude-code@2.1.316
 
-      # --keep leaves the sandbox and run dirs in place for the failure steps;
-      # TMPDIR puts the run dirs where the artifact upload looks.
-      - name: Harness e2e
+      # Everything that needs the network: build the stage, fetch the pinned
+      # sandbox, pull its images and seed it.
+      - name: Set up the sandbox
+        run: bun run e2e --setup-only
+
+      # From here the e2e has no external network access: only loopback and the
+      # sandbox's Docker network. See e2e/offline.sh.
+      - name: Cut external traffic
+        run: bash e2e/offline.sh lock
+
+      # --keep leaves the run dirs in place for the failure steps; TMPDIR puts
+      # them where the artifact upload looks.
+      - name: Harness e2e (offline)
         env:
           TMPDIR: ${{ runner.temp }}
-        run: bun run e2e --keep
+        run: bash e2e/offline.sh exec bun run e2e --no-build --keep
+
+      # A blocked call can fail silently, so a green e2e is not enough: fail on
+      # any rejected packet.
+      - name: Check nothing tried to leave
+        if: ${{ !cancelled() }}
+        run: bash e2e/offline.sh check
 
       - name: Collect sandbox logs
         if: failure()

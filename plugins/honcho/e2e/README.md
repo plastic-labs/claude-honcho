@@ -203,3 +203,31 @@ The `e2e` job in `.github/workflows/ci.yml` runs after `build` on every push to 
 pull request, fork pull requests included. It runs in mock mode only and uses no secrets. On
 failure, it uploads the `harness-e2e` artifact: the Claude event streams and transcripts, the
 mock's request log, the plugin's `~/.honcho` logs and the sandbox container logs.
+
+### No external traffic
+
+In CI the test phase has no internet access, and the job proves it.
+
+1. `bun run e2e --setup-only` does everything that needs the network first: it builds the stage,
+   fetches the pinned sandbox, pulls the images and seeds the sandbox. It then exits, leaving the
+   sandbox up.
+2. `e2e/offline.sh lock` installs firewall rules on the runner:
+   - processes started through `offline.sh exec` may only send packets via loopback or a Docker
+     bridge, which is the sandbox;
+   - the sandbox's containers may only talk to each other.
+
+   The runner's own connection to GitHub is unaffected. Before the test starts, the script checks
+   that the sandbox is reachable from inside the lock, and that both a locked process and a
+   container are refused when they try to reach the internet.
+3. The e2e runs through `offline.sh exec`.
+4. `offline.sh check` fails the job if any packet was rejected during the run, and prints the
+   kernel log lines showing what tried to leave. A rejected call can fail without failing the
+   test (the plugin's update check, for one, gives up silently), so a green e2e alone would not
+   prove there was no traffic.
+
+The e2e itself avoids the one call it would otherwise make: the plugin's SessionStart update
+check, which asks the npm registry for the latest release. The adapter pre-creates the check's
+once-a-day stamp in the plugin's data dir, so the check is skipped.
+
+`offline.sh` is CI-only (it uses `sudo` and iptables on a disposable Linux runner). Local runs
+are not locked.

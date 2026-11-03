@@ -364,6 +364,14 @@ function variant(name: string, observationMode: "unified" | "directional"): Harn
         ctx.log(`claude-code: model ${MODEL}`);
       }
 
+      // The plugin's SessionStart version check asks the npm registry for the
+      // latest release at most once a day, skipping while this stamp is fresh.
+      // A fresh config dir has no stamp, so without it every session would
+      // reach the network, which the run is meant not to do.
+      const pluginData = join(configDir, "plugins", "data", "honcho-inline");
+      mkdirSync(pluginData, { recursive: true });
+      writeFileSync(join(pluginData, ".version-check"), "");
+
       // Each harness session gets the credential links only while it runs.
       // They are removed when it exits (or by cleanup on a signal), so nothing
       // that later cleans up or archives the run dir can reach the store.
