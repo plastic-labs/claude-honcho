@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig } from "../config.js";
+import { initHook, loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig, isQuiet } from "../config.js";
 import { renderSessionStart } from "../injection.js";
 import {
   setCachedSessionId,
@@ -14,7 +14,7 @@ import { setMemoryState, setSessionLink } from "../state.js";
 import { honchoSessionUrl } from "../styles.js";
 import { captureGitState } from "../git.js";
 import { logHook, logApiCall, logFlow, logAsync, setLogContext } from "../log.js";
-import { verboseApiResult, verboseList, clearVerboseLog, visComposedInjection } from "../visual.js";
+import { verboseApiResult, verboseList, clearVerboseLog, visComposedInjection, addSystemMessage } from "../visual.js";
 
 
 interface HookInput {
@@ -235,14 +235,13 @@ export async function handleSessionStart(): Promise<void> {
 
     const systemMessage = visComposedInjection("session-start", rendered.labels, rendered.notes);
     if (rendered.content) {
-      console.log(JSON.stringify({
+      console.log(JSON.stringify(addSystemMessage({
         hookSpecificOutput: {
           hookEventName: "SessionStart",
           additionalContext: `[Honcho Memory for ${config.peerName}]: ${rendered.content}`,
         },
-        systemMessage,
-      }));
-    } else if (rendered.notes.length) {
+      }, systemMessage)));
+    } else if (rendered.notes.length && !isQuiet()) {
       console.log(JSON.stringify({ systemMessage }));
     }
 

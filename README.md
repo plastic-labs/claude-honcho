@@ -229,6 +229,7 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
   "statusline": "on",                 // Memory statusline visibility: "on" | "off"
   "enabled": true,
   "logging": true,
+  "quiet": false,                     // true hides the inline [honcho] hook messages in the UI
 
   // Advanced: force all hosts to use the same workspace
   "globalOverride": false
