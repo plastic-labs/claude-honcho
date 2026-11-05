@@ -1,12 +1,13 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
-import { getClaudeInstanceId } from "../cache.js";
+import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { createHonchoClient } from "../honcho-client.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { redactSecrets } from "../redact.js";
 import { visCapture } from "../visual.js";
 
 
 interface HookInput {
+  session_id?: string;
   tool_name?: string;
   tool_input?: Record<string, any>;
   tool_response?: Record<string, any>;
@@ -228,8 +229,12 @@ export async function handlePostToolUse(): Promise<void> {
   const toolResponse = hookInput.tool_response || {};
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
 
-  // Set log context
-  setLogContext(cwd, getSessionName(cwd));
+  const sessionName = getSessionName(hookInput.session_id);
+  setLogContext(cwd, sessionName ?? undefined);
+  if (!sessionName) {
+    logHook("post-tool-use", "No Claude Code session id; skipping");
+    process.exit(0);
+  }
 
   if (!shouldLogTool(toolName, toolInput)) {
     process.exit(0);
@@ -243,7 +248,7 @@ export async function handlePostToolUse(): Promise<void> {
 
   // Upload to Honcho and wait for completion
   try {
-    await logToHonchoAsync(config, cwd, summary);
+    await logToHonchoAsync(config, sessionName, summary);
     visCapture(summary);
   } catch (e) {
     logHook("post-tool-use", `Upload failed: ${e}`, { error: String(e) });
@@ -252,25 +257,16 @@ export async function handlePostToolUse(): Promise<void> {
   process.exit(0);
 }
 
-async function logToHonchoAsync(config: any, cwd: string, summary: string): Promise<void> {
-  const honcho = new Honcho(getHonchoClientOptions(config));
-  const sessionName = getSessionName(cwd);
+async function logToHonchoAsync(config: any, sessionName: string, summary: string): Promise<void> {
+  const honcho = await createHonchoClient(config);
 
   // Get session and peer using new fluent API
   const session = await honcho.session(sessionName);
   const aiPeer = await honcho.peer(config.aiPeer);
 
-  // Log the tool use with instance_id and session_affinity for project-scoped fact extraction
   logApiCall("session.addMessages", "POST", `tool: ${summary.slice(0, 50)}`);
-  const instanceId = getClaudeInstanceId();
-
   await session.addMessages([
-    aiPeer.message(`[Tool] ${summary}`, {
-      metadata: {
-        instance_id: instanceId || undefined,
-        session_affinity: sessionName,
-      },
-    }),
+    aiPeer.message(`[Tool] ${summary}`),
   ]);
 }
 

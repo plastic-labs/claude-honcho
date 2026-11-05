@@ -1,6 +1,7 @@
 import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
-import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
+import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { createHonchoClient } from "../honcho-client.js";
+import { chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { isHarnessInjected, isSlashCommand, isTerseReply, stripLeadingReminders } from "../prompt-filters.js";
 
@@ -49,10 +50,13 @@ export async function handleSaveUserMessage(): Promise<void> {
   }
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
-  const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
-  const sessionName = getSessionName(cwd, instanceId || undefined);
+  const sessionName = getSessionName(hookInput.session_id);
 
-  setLogContext(cwd, sessionName);
+  setLogContext(cwd, sessionName ?? undefined);
+  if (!sessionName) {
+    logHook("save-user-message", "No Claude Code session id; skipping");
+    process.exit(0);
+  }
 
   if (isHarnessInjected(prompt) || isSlashCommand(prompt)) {
     logHook("save-user-message", "Skipping upload (slash command or harness-injected content)");
@@ -60,7 +64,7 @@ export async function handleSaveUserMessage(): Promise<void> {
   }
 
   try {
-    await postUserMessage(config, stripLeadingReminders(prompt), instanceId || undefined, sessionName);
+    await postUserMessage(config, stripLeadingReminders(prompt), sessionName);
   } catch (e) {
     logHook("save-user-message", `Upload failed: ${e}`);
   }
@@ -74,10 +78,9 @@ export async function handleSaveUserMessage(): Promise<void> {
 async function postUserMessage(
   config: any,
   prompt: string,
-  instanceId: string | undefined,
   sessionName: string,
 ): Promise<void> {
-  const honcho = new Honcho(getHonchoClientOptions(config));
+  const honcho = await createHonchoClient(config);
   const noEnsure = () => Promise.resolve();
 
   const userPeer = new Peer(config.peerName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
@@ -86,10 +89,6 @@ async function postUserMessage(
   const messages = chunkContent(prompt).map((chunk) =>
     userPeer.message(chunk, {
       createdAt,
-      metadata: {
-        instance_id: instanceId || undefined,
-        session_affinity: sessionName,
-      },
       ...(configuration ? { configuration } : {}),
     })
   );

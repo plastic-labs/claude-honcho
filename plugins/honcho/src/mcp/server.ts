@@ -13,6 +13,7 @@ import {
   coerceBoolean,
   getHonchoClientOptions,
   getSessionName,
+  getInjectionConfig,
   getConfigPath,
   configExists,
   getDetectedHost,
@@ -20,24 +21,21 @@ import {
   getKnownHosts,
   setDetectedHost,
   type HonchoCLAUDEConfig,
-  type SessionStrategy,
   type ReasoningLevel,
   type HonchoEnvironment,
   type ObservationMode,
   type StatuslineMode,
   type SessionStartComponent,
-  type PerTurnComponent,
   SESSION_START_COMPONENTS,
-  PER_TURN_COMPONENTS,
-  normalizePerTurn,
   REASONING_LEVELS,
   getObservationMode,
   getPluginVersion,
+  refreshCredential,
 } from "../config.js";
+import { setClientApiKey } from "../honcho-client.js";
 import { validateRedactPattern } from "../redact.js";
 import { honchoSessionUrl } from "../styles.js";
 import {
-  getLastActiveCwd,
   clearIdCache,
   clearPeerCache,
   clearUserContextOnly,
@@ -64,7 +62,7 @@ const DANGEROUS_FIELDS = new Set(["workspace", "endpoint.environment", "endpoint
 
 // Fields that affect session identity/routing — stale sessions risk cross-contamination
 const SESSION_AFFECTING_FIELDS = new Set([
-  "workspace", "aiPeer", "peerName", "sessionStrategy", "sessionPeerPrefix",
+  "workspace", "aiPeer", "peerName",
   "endpoint.environment", "endpoint.baseUrl", "globalOverride", "observationMode",
 ]);
 
@@ -91,7 +89,7 @@ function renderCard(rows: [string, string][], title: string): string {
   return [top, blank, ...body, blank, bot].join("\n");
 }
 
-function handleGetConfig(cwd: string) {
+function handleGetConfig() {
   const cfg = loadConfig();
   const host = getDetectedHost();
   const cfgPath = getConfigPath();
@@ -111,16 +109,13 @@ function handleGetConfig(cwd: string) {
     workspace: cfg.workspace,
     endpoint: getEndpointInfo(cfg),
     globalOverride,
-    sessionStrategy: cfg.sessionStrategy ?? "per-directory",
-    sessionPeerPrefix: cfg.sessionPeerPrefix !== false,
-    sessions: cfg.sessions ?? {},
     messageUpload: cfg.messageUpload ?? {},
     contextRefresh: cfg.contextRefresh ?? {},
     reasoningLevel: cfg.reasoningLevel ?? "medium",
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
     redactPatterns: cfg.redactPatterns ?? [],
-    injection: cfg.injection ?? {},
+    injection: getInjectionConfig(cfg),
     rememberTool: cfg.rememberTool === true,
     enabled: cfg.enabled !== false,
     logging: cfg.logging !== false,
@@ -128,7 +123,7 @@ function handleGetConfig(cwd: string) {
   } : null;
 
   // Current status header values
-  const sessionName = cfg ? getSessionName(cwd) : null;
+  const sessionName = cfg ? getSessionName() : null;
   const endpointInfo = cfg ? getEndpointInfo(cfg) : null;
   const endpointLabel = endpointInfo
     ? endpointInfo.type === "production" ? "platform" : endpointInfo.type
@@ -209,11 +204,6 @@ function handleGetConfig(cwd: string) {
   }
 
   // Pre-render the status card
-  const strategyLabels: Record<string, string> = {
-    "per-directory": "per directory",
-    "git-branch": "per git branch",
-    "chat-instance": "per chat",
-  };
   const hostLabel = endpointInfo
     ? endpointInfo.type === "production"
       ? `platform (app.honcho.dev)`
@@ -226,7 +216,6 @@ function handleGetConfig(cwd: string) {
     ["workspace", cfg.workspace],
 
     ["session", sessionName ?? "unknown"],
-    ["mapping", strategyLabels[cfg.sessionStrategy ?? "per-directory"] ?? cfg.sessionStrategy ?? "per directory"],
     ["peer", `${cfg.peerName} / ${cfg.aiPeer}`],
     ["host", hostLabel],
     ["messages", cfg.saveMessages !== false ? "saving enabled" : "saving disabled"],
@@ -248,7 +237,7 @@ function handleGetConfig(cwd: string) {
 /**
  * Coerce a set_config `value` into a string array. The `value` field is
  * schema-less, so MCP clients may deliver an array as a real array OR as a
- * JSON-encoded string (e.g. '["summary","peerCard"]'); accept both. Returns
+ * JSON-encoded string (e.g. '["directives","peerCard"]'); accept both. Returns
  * null when the value is neither, so the caller can report a shape error.
  */
 function coerceStringArray(value: unknown): string[] | null {
@@ -261,7 +250,7 @@ function coerceStringArray(value: unknown): string[] | null {
 
 /**
  * Validate a component-array set_config value against the allowed component
- * names (the SESSION_START_COMPONENTS / PER_TURN_COMPONENTS tuples). Returns the
+ * names (the SESSION_START_COMPONENTS tuple). Returns the
  * validated array, or an isError tool result describing the shape/enum problem.
  */
 function validateComponentArray(
@@ -342,9 +331,6 @@ function handleSetConfig(args: Record<string, unknown>) {
       saveRootField("peerName", cfg.peerName);
       clearPeerCache();
       clearUserContextOnly();
-      if (String(value) !== String(previousValue) && Object.keys(cfg.sessions ?? {}).length > 0) {
-        warnings.push(`${Object.keys(cfg.sessions ?? {}).length} session override(s) kept under their existing names; only newly created sessions use the new naming. Use sessions.set/sessions.remove to adjust individual mappings.`);
-      }
       cacheInvalidation = { cleared: ["peer IDs", "user context"], reason: "Peer name changed" };
       break;
 
@@ -396,27 +382,6 @@ function handleSetConfig(args: Record<string, unknown>) {
       cacheInvalidation = { cleared: ["all IDs", "all context"], reason: "Endpoint URL changed" };
       break;
 
-    case "sessionStrategy": {
-      const prevStrategy = cfg.sessionStrategy ?? "per-directory";
-      previousValue = prevStrategy;
-      cfg.sessionStrategy = String(value) as SessionStrategy;
-      // Session overrides are kept: they only apply under per-directory (useless for chat-instance, and git-branch needs a different solution)
-      if (String(value) !== prevStrategy && String(value) !== "per-directory" && Object.keys(cfg.sessions ?? {}).length > 0) {
-        warnings.push(`${Object.keys(cfg.sessions ?? {}).length} session override(s) kept but inactive: overrides only apply under the per-directory strategy.`);
-      }
-      break;
-    }
-
-    case "sessionPeerPrefix": {
-      const prevPrefix = cfg.sessionPeerPrefix !== false;
-      previousValue = prevPrefix;
-      cfg.sessionPeerPrefix = coerceBoolean(value);
-      if (cfg.sessionPeerPrefix !== prevPrefix && Object.keys(cfg.sessions ?? {}).length > 0) {
-        warnings.push(`${Object.keys(cfg.sessions ?? {}).length} session override(s) kept under their existing names; only newly created sessions use the new naming. Use sessions.set/sessions.remove to adjust individual mappings.`);
-      }
-      break;
-    }
-
     case "globalOverride":
       previousValue = cfg.globalOverride ?? false;
       cfg.globalOverride = coerceBoolean(value);
@@ -467,12 +432,6 @@ function handleSetConfig(args: Record<string, unknown>) {
       previousValue = cfg.contextRefresh?.ttlSeconds;
       if (!cfg.contextRefresh) cfg.contextRefresh = {};
       cfg.contextRefresh.ttlSeconds = Number(value);
-      break;
-
-    case "contextRefresh.skipDialectic":
-      previousValue = cfg.contextRefresh?.skipDialectic;
-      if (!cfg.contextRefresh) cfg.contextRefresh = {};
-      cfg.contextRefresh.skipDialectic = coerceBoolean(value);
       break;
 
     case "reasoningLevel":
@@ -531,126 +490,10 @@ function handleSetConfig(args: Record<string, unknown>) {
       break;
     }
 
-    case "injection.perTurn": {
-      // Accept the pre-split "context" name and store its replacement.
-      const raw = coerceStringArray(value);
-      const arr = validateComponentArray(raw ? normalizePerTurn(raw) : value, PER_TURN_COMPONENTS, field);
-      if (!Array.isArray(arr)) return arr;
-      previousValue = cfg.injection?.perTurn;
-      if (!cfg.injection) cfg.injection = {};
-      cfg.injection.perTurn = arr as PerTurnComponent[];
-      break;
-    }
-
-    case "injection.showContents": {
-      const raw = coerceStringArray(value);
-      const arr = validateComponentArray(raw ? normalizePerTurn(raw) : value, PER_TURN_COMPONENTS, field);
-      if (!Array.isArray(arr)) return arr;
-      previousValue = cfg.injection?.showContents;
-      if (!cfg.injection) cfg.injection = {};
-      cfg.injection.showContents = arr as PerTurnComponent[];
-      break;
-    }
-
-    case "injection.searchTopK":
-      previousValue = cfg.injection?.searchTopK;
-      if (!cfg.injection) cfg.injection = {};
-      cfg.injection.searchTopK = Number(value);
-      break;
-
-    case "injection.maxConclusions":
-      previousValue = cfg.injection?.maxConclusions;
-      if (!cfg.injection) cfg.injection = {};
-      cfg.injection.maxConclusions = Number(value);
-      break;
-
-    case "injection.searchMaxDistance":
-      previousValue = cfg.injection?.searchMaxDistance;
-      if (!cfg.injection) cfg.injection = {};
-      cfg.injection.searchMaxDistance = Number(value);
-      break;
-
-    case "injection.sessionContextTokens": {
-      const tokens = Number(value);
-      if (!Number.isFinite(tokens) || tokens <= 0) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "injection.sessionContextTokens must be a positive number" }, null, 2) }],
-          isError: true,
-        };
-      }
-      previousValue = cfg.injection?.sessionContextTokens;
-      if (!cfg.injection) cfg.injection = {};
-      cfg.injection.sessionContextTokens = tokens;
-      break;
-    }
-
     case "rememberTool":
       previousValue = cfg.rememberTool;
       cfg.rememberTool = coerceBoolean(value);
       break;
-
-    case "injection.searchQuerySource":
-      if (value !== "topics" && value !== "prompt") {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: `injection.searchQuerySource must be "topics" or "prompt"` }, null, 2) }],
-          isError: true,
-        };
-      }
-      previousValue = cfg.injection?.searchQuerySource;
-      if (!cfg.injection) cfg.injection = {};
-      cfg.injection.searchQuerySource = value;
-      break;
-
-    case "injection.dialecticTemplate":
-      previousValue = cfg.injection?.dialecticTemplate;
-      if (!cfg.injection) cfg.injection = {};
-      cfg.injection.dialecticTemplate = String(value);
-      break;
-
-    case "injection.dialecticReasoning": {
-      const level = String(value);
-      if (!REASONING_LEVELS.includes(level as ReasoningLevel)) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: `injection.dialecticReasoning must be one of: ${REASONING_LEVELS.join(", ")}` }, null, 2) }],
-          isError: true,
-        };
-      }
-      previousValue = cfg.injection?.dialecticReasoning;
-      if (!cfg.injection) cfg.injection = {};
-      cfg.injection.dialecticReasoning = level as ReasoningLevel;
-      break;
-    }
-
-    case "sessions.set": {
-      const obj = value as Record<string, unknown>;
-      const path = obj?.path;
-      const sName = obj?.name;
-      if (typeof path !== "string" || !path || typeof sName !== "string" || !sName) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "sessions.set requires {path: string, name: string}" }, null, 2) }],
-          isError: true,
-        };
-      }
-      if (!cfg.sessions) cfg.sessions = {};
-      previousValue = cfg.sessions[path] ?? null;
-      cfg.sessions[path] = sName;
-      break;
-    }
-
-    case "sessions.remove": {
-      const obj = value as Record<string, unknown>;
-      const rPath = obj?.path;
-      if (typeof rPath !== "string" || !rPath) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "sessions.remove requires {path: string}" }, null, 2) }],
-          isError: true,
-        };
-      }
-      if (!cfg.sessions) cfg.sessions = {};
-      previousValue = cfg.sessions[rPath] ?? null;
-      delete cfg.sessions[rPath];
-      break;
-    }
 
     default:
       return {
@@ -672,16 +515,13 @@ function handleSetConfig(args: Record<string, unknown>) {
     aiPeer: cfg.aiPeer,
     workspace: cfg.workspace,
     endpoint: endpointInfo,
-    sessionStrategy: cfg.sessionStrategy ?? "per-directory",
-    sessionPeerPrefix: cfg.sessionPeerPrefix !== false,
-    sessions: cfg.sessions ?? {},
     messageUpload: cfg.messageUpload ?? {},
     contextRefresh: cfg.contextRefresh ?? {},
     reasoningLevel: cfg.reasoningLevel ?? "medium",
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
     redactPatterns: cfg.redactPatterns ?? [],
-    injection: cfg.injection ?? {},
+    injection: getInjectionConfig(cfg),
     rememberTool: cfg.rememberTool === true,
     enabled: cfg.enabled !== false,
     logging: cfg.logging !== false,
@@ -694,8 +534,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     : undefined;
 
   // Include session URL when session-affecting fields change
-  const cwd = getLastActiveCwd() || process.cwd();
-  const newSessionName = SESSION_AFFECTING_FIELDS.has(field) ? getSessionName(cwd) : undefined;
+  const newSessionName = SESSION_AFFECTING_FIELDS.has(field) ? getSessionName() : undefined;
   const sessionUrl = newSessionName ? honchoSessionUrl(cfg, newSessionName) ?? undefined : undefined;
 
   return {
@@ -751,6 +590,10 @@ const REMEMBER_TOOL = {
         maxItems: REMEMBER_MAX_QUERIES,
         description: `1–${REMEMBER_MAX_QUERIES} natural-language questions about the user, dispatched concurrently.`,
       },
+      scope: {
+        anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
+        description: "Optional scope name, or several, to limit every answer to (e.g. a repository or machine name).",
+      },
       reasoning_level: {
         type: "string",
         enum: [...REMEMBER_REASONING_LEVELS],
@@ -762,6 +605,20 @@ const REMEMBER_TOOL = {
     required: ["queries", "reasoning_level"],
   },
 };
+
+/** Conclusion reads skip explicit conclusions (facts restated from messages)
+ *  and return only what Honcho derived: deductive, inductive, contradiction. */
+// `in`, not `ne`: the conclusion query endpoint 500s on `ne`.
+const DERIVED_ONLY = { level: { in: ["deductive", "inductive", "contradiction"] } };
+
+/** The chat tools' `scope` argument: one name or several, blanks dropped. */
+function parseScope(value: unknown): string | string[] | undefined {
+  const names = (Array.isArray(value) ? value : [value])
+    .filter((v): v is string => typeof v === "string" && v.trim() !== "")
+    .map((v) => v.trim());
+  if (names.length === 0) return undefined;
+  return names.length === 1 ? names[0] : names;
+}
 
 const NOT_CONFIGURED_RESULT = {
   content: [{ type: "text", text: "Honcho isn't configured; run /honcho:setup to connect it, then try again." }],
@@ -825,7 +682,7 @@ export async function runMcpServer(): Promise<void> {
         ...(rememberEnabled ? [REMEMBER_TOOL] : []),
         {
           name: "search",
-          description: "Semantic search across messages and saved conclusions. Messages default to the current session; use scope='workspace' to search across all sessions. Conclusions are always searched workspace-wide.",
+          description: "Semantic search across messages and derived conclusions. Messages default to the current session; use scope='workspace' to search across all sessions. Conclusions are always searched workspace-wide.",
           inputSchema: {
             type: "object",
             properties: {
@@ -850,18 +707,30 @@ export async function runMcpServer(): Promise<void> {
         },
         {
           name: "chat",
-          description: "Query Honcho's knowledge about the user using dialectic reasoning",
+          description:
+            "Ask Honcho a question and get a reasoned answer from memory. By default it answers about the user from everything Honcho knows about them. " +
+            "Pass `scope` to answer only from the sessions in one or more scopes (each Claude Code chat is in a scope for its git repository and one for its machine). " +
+            "Pass `workspace: true` to ask about the whole workspace — every peer, not just the user.",
           inputSchema: {
             type: "object",
             properties: {
               query: {
                 type: "string",
-                description: "Natural language question about the user",
+                description: "Natural language question",
+              },
+              scope: {
+                anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
+                description: "Scope name, or several, to limit the answer to (e.g. a repository or machine name).",
+              },
+              workspace: {
+                type: "boolean",
+                description: "Ask across the whole workspace instead of about the user. Combine with `scope` to limit it.",
+                default: false,
               },
               reasoning_level: {
                 type: "string",
                 enum: ["minimal", "low", "medium", "high", "max"],
-                description: "Reasoning budget for this query. Use 'low' for simple lookups, 'medium' for general questions, 'high'/'max' for complex reasoning about the user's context. Defaults to config value or 'medium'.",
+                description: "Reasoning budget for this query. Use 'low' for simple lookups, 'medium' for general questions, 'high'/'max' for complex reasoning. Defaults to config value or 'medium'.",
               },
             },
             required: ["query"],
@@ -883,7 +752,7 @@ export async function runMcpServer(): Promise<void> {
         },
         {
           name: "list_conclusions",
-          description: "List conclusions Honcho has saved about the user. Use this to review what is remembered before creating duplicates, or to find IDs for deletion.",
+          description: "List conclusions Honcho has derived about the user (explicit conclusions are excluded). Use this to review what is remembered before creating duplicates, or to find IDs for deletion.",
           inputSchema: {
             type: "object",
             properties: {
@@ -902,7 +771,7 @@ export async function runMcpServer(): Promise<void> {
         },
         {
           name: "query_conclusions",
-          description: "Semantically search conclusions Honcho has saved about the user. Returns IDs usable with delete_conclusion — much faster than paging list_conclusions when looking for something specific.",
+          description: "Semantically search conclusions Honcho has derived about the user (explicit conclusions are excluded). Returns IDs usable with delete_conclusion — much faster than paging list_conclusions when looking for something specific.",
           inputSchema: {
             type: "object",
             properties: {
@@ -934,38 +803,6 @@ export async function runMcpServer(): Promise<void> {
           },
         },
         {
-          name: "get_briefing",
-          description:
-            "Load the session briefing: the stored long summary of this session plus the user's peer card (identity/attribute profile). " +
-            "Call this once at the start of a session when the session-start directives ask for it, or any time you need to catch up on where the session left off.",
-          inputSchema: {
-            type: "object",
-            properties: {},
-          },
-        },
-        {
-          name: "get_context",
-          description: "Retrieve the full context object (representation + peer card) from Honcho for the current user. Scoped by observation mode.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              max_conclusions: {
-                type: "number",
-                description: "Max conclusions to include (default: 25)",
-                default: 25,
-              },
-            },
-          },
-        },
-        {
-          name: "get_representation",
-          description: "Retrieve the user's representation string from Honcho. Lighter-weight than get_context.",
-          inputSchema: {
-            type: "object",
-            properties: {},
-          },
-        },
-        {
           name: "get_config",
           description: "Get the current Honcho plugin configuration, cache state, and diagnostic warnings",
           inputSchema: {
@@ -989,8 +826,6 @@ export async function runMcpServer(): Promise<void> {
                   "globalOverride",
                   "endpoint.environment",
                   "endpoint.baseUrl",
-                  "sessionStrategy",
-                  "sessionPeerPrefix",
                   "enabled",
                   "logging",
                   "saveMessages",
@@ -999,27 +834,15 @@ export async function runMcpServer(): Promise<void> {
                   "messageUpload.summarizeAssistant",
                   "contextRefresh.messageThreshold",
                   "contextRefresh.ttlSeconds",
-                  "contextRefresh.skipDialectic",
                   "reasoningLevel",
                   "observationMode",
                   "redactPatterns",
                   "injection.sessionStart",
-                  "injection.perTurn",
-                  "injection.showContents",
-                  "injection.searchTopK",
-                  "injection.maxConclusions",
-                  "injection.searchMaxDistance",
-                  "injection.searchQuerySource",
-                  "injection.sessionContextTokens",
-                  "injection.dialecticTemplate",
-                  "injection.dialecticReasoning",
                   "rememberTool",
-                  "sessions.set",
-                  "sessions.remove",
                 ],
               },
               value: {
-                description: "New value. For sessions.set: {path, name}. For sessions.remove: {path}. For injection.sessionStart / injection.perTurn / injection.showContents: a string array of component names (e.g. [\"summary\",\"peerCard\"]). For redactPatterns: a string array of regexes redacted from tool summaries in addition to the built-in secret patterns.",
+                description: "New value. For injection.sessionStart: a string array of component names (e.g. [\"directives\",\"peerCard\"]). For redactPatterns: a string array of regexes redacted from tool summaries in addition to the built-in secret patterns.",
               },
               confirm: {
                 type: "boolean",
@@ -1036,18 +859,22 @@ export async function runMcpServer(): Promise<void> {
   // Handle tool calls
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const cwd = getLastActiveCwd() || process.cwd();
 
     clients ??= createClients();
     if (!clients) {
       return NOT_CONFIGURED_RESULT;
     }
     const { config, honcho, honchoDialectic } = clients;
+    // A hook may have refreshed the OAuth grant since the last call, which
+    // supersedes our token; re-read it and swap it in place on both clients.
+    await refreshCredential(config);
+    setClientApiKey(honcho, config.apiKey);
+    setClientApiKey(honchoDialectic, config.apiKey);
 
     // ── Config tools (no Honcho session needed) ──
 
     if (name === "get_config") {
-      return handleGetConfig(cwd);
+      return handleGetConfig();
     }
 
     if (name === "set_config") {
@@ -1068,7 +895,7 @@ export async function runMcpServer(): Promise<void> {
         if (name === "list_conclusions") {
           const page = (args?.page as number) ?? 1;
           const size = Math.min((args?.size as number) ?? 20, 100);
-          const result = await conclusionScope.list({ page, size });
+          const result = await conclusionScope.list({ page, size, filters: DERIVED_ONLY });
           const items = result.items.map((c: any) => ({
             id: c.id,
             content: c.content,
@@ -1085,7 +912,7 @@ export async function runMcpServer(): Promise<void> {
         if (name === "query_conclusions") {
           const query = args?.query as string;
           const topK = Math.min((args?.top_k as number) ?? 10, 50);
-          const conclusions = await conclusionScope.query(query, topK);
+          const conclusions = await conclusionScope.query(query, topK, undefined, DERIVED_ONLY);
           const items = conclusions.map((c) => ({
             id: c.id,
             content: c.content,
@@ -1112,10 +939,18 @@ export async function runMcpServer(): Promise<void> {
 
     // ── Honcho session tools ──
 
-    const sessionName = getSessionName(cwd);
+    // Only create_conclusion and a session-scoped search need this chat's session.
+    const sessionName = getSessionName();
+    const needsSession = name === "create_conclusion" || (name === "search" && ((args?.scope as string) ?? "session") === "session");
+    if (!sessionName && needsSession) {
+      return {
+        content: [{ type: "text", text: "Error: no Claude Code session id available" }],
+        isError: true,
+      };
+    }
 
     try {
-      const session = await honcho.session(sessionName);
+      const session = needsSession && sessionName ? await honcho.session(sessionName) : undefined;
       const observationMode = getObservationMode(config);
 
       // unified: user observes self — all ops go through userPeer.
@@ -1124,7 +959,7 @@ export async function runMcpServer(): Promise<void> {
       const aiPeer = observationMode === "directional" ? await honcho.peer(config.aiPeer) : null;
       const activePeer = observationMode === "unified" ? userPeer : aiPeer!;
       const chatTarget = observationMode === "unified" ? undefined : config.peerName;
-      const contextTarget = observationMode === "unified" ? undefined : config.peerName;
+      const scope = parseScope(args?.scope);
 
       switch (name) {
         case "search": {
@@ -1134,8 +969,8 @@ export async function runMcpServer(): Promise<void> {
           const [messages, conclusions] = await Promise.all([
             scope === "workspace"
               ? honcho.search(query, { limit })
-              : session.search(query, { limit }),
-            activePeer.conclusionsOf(config.peerName).query(query, limit).catch(() => []),
+              : session!.search(query, { limit }),
+            activePeer.conclusionsOf(config.peerName).query(query, limit, undefined, DERIVED_ONLY).catch(() => []),
           ]);
 
           const results = {
@@ -1176,10 +1011,16 @@ export async function runMcpServer(): Promise<void> {
           });
 
           const chatFlow = (async () => {
+            if (args?.workspace === true) {
+              return honchoDialectic.chat(query, {
+                ...(scope ? { scope } : {}),
+                reasoningLevel: reasoningLevel as ReasoningLevel,
+              });
+            }
             const dialecticPeer = await honchoDialectic.peer(activePeer.id);
             return dialecticPeer.chat(query, {
               ...(chatTarget ? { target: chatTarget } : {}),
-              session,
+              ...(scope ? { scope } : {}),
               reasoningLevel,
             });
           })();
@@ -1245,7 +1086,7 @@ export async function runMcpServer(): Promise<void> {
                 const qStart = Date.now();
                 const answer = await dialecticPeer.chat(q, {
                   ...(chatTarget ? { target: chatTarget } : {}),
-                  session,
+                  ...(scope ? { scope } : {}),
                   reasoningLevel,
                 });
                 return { answer, ms: Date.now() - qStart };
@@ -1291,7 +1132,7 @@ export async function runMcpServer(): Promise<void> {
 
           const conclusions = await activePeer.conclusionsOf(config.peerName).create({
             content,
-            sessionId: session.id,
+            sessionId: session!.id,
           });
 
           return {
@@ -1301,58 +1142,6 @@ export async function runMcpServer(): Promise<void> {
                 text: `Saved conclusion: ${conclusions[0]?.content || content}`,
               },
             ],
-          };
-        }
-
-        case "get_briefing": {
-          // Fetches at sessionStart "summary"/"peerCard" components
-          const [summariesResult, ctxResult] = await Promise.allSettled([
-            session.summaries(),
-            activePeer.context({
-              ...(contextTarget ? { target: contextTarget } : {}),
-              maxConclusions: 25,
-              includeMostFrequent: true,
-            }),
-          ]);
-
-          const summary = summariesResult.status === "fulfilled"
-            ? (summariesResult.value as any)?.longSummary?.content?.trim()
-            : null;
-          const card: string[] = ctxResult.status === "fulfilled"
-            ? ((ctxResult.value as any)?.peerCard ?? []).filter((item: string) => item?.trim())
-            : [];
-
-          const parts: string[] = [];
-          if (summary) parts.push(`## Session summary\n${summary}`);
-          if (card.length) parts.push(`## Peer card (${card.length} items)\n${card.map((item) => `- ${item}`).join("\n")}`);
-          if (parts.length === 0) parts.push("No briefing available yet — no stored session summary or peer card.");
-
-          return {
-            content: [{ type: "text", text: parts.join("\n\n") }],
-          };
-        }
-
-        case "get_context": {
-          const maxConclusions = (args?.max_conclusions as number) ?? 25;
-
-          const ctx = await activePeer.context({
-            ...(contextTarget ? { target: contextTarget } : {}),
-            maxConclusions,
-            includeMostFrequent: true,
-          });
-
-          return {
-            content: [{ type: "text", text: JSON.stringify(ctx, null, 2) }],
-          };
-        }
-
-        case "get_representation": {
-          const rep = await activePeer.representation(
-            contextTarget ? { target: contextTarget } : undefined
-          );
-
-          return {
-            content: [{ type: "text", text: typeof rep === "string" ? rep : JSON.stringify(rep, null, 2) }],
           };
         }
 

@@ -22,6 +22,7 @@ All notable changes to claude-honcho will be documented in this file.
 
 ### Removed
 
+- The PreCompact hook. Claude Code writes PreCompact stdout only to its debug log, so the "memory anchor" never reached the model or the compaction summary. SessionStart already re-injects memory after compaction (`source: "compact"`).
 - `install-local.sh` / `install-local.ps1`. Develop against a working tree with `claude --plugin-dir plugins/honcho` instead.
 - Vendored `node_modules` are no longer committed.
 

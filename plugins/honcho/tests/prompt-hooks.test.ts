@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { injectedPrompts, userPrompts } from "./harness-fixtures";
 
 describe("UserPromptSubmit hooks", () => {
-  test("save and recall only genuine user text", async () => {
+  test("save only genuine user text, and recall nothing per turn", async () => {
     const home = mkdtempSync(join(tmpdir(), "honcho-prompt-hooks-"));
     const uploads: Array<{ peer_id: string; content: string }> = [];
     const searches: string[] = [];
@@ -35,7 +35,6 @@ describe("UserPromptSubmit hooks", () => {
         peerName: "human",
         workspace: "test",
         endpoint: { baseUrl: `http://127.0.0.1:${server.port}` },
-        injection: { perTurn: ["userContext"], searchQuerySource: "prompt" },
       }));
       const base = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("HONCHO_") && !key.startsWith("CLAUDE_")));
       const invoke = async (hook: string, prompt: string) => {
@@ -61,7 +60,9 @@ describe("UserPromptSubmit hooks", () => {
       expect(uploads).toHaveLength(userPrompts.length);
       expect(uploads.map((m) => m.peer_id)).toEqual(userPrompts.map(() => "human"));
       expect(uploads.map((m) => m.content)).toEqual(userPrompts.map((p) => p.text));
-      expect(searches).toEqual(userPrompts.map((p) => p.text));
+      // Nothing is recalled per turn: no context() or chat() calls.
+      expect(searches).toEqual([]);
+      expect(requests.filter((p) => p.endsWith("/chat"))).toEqual([]);
     } finally {
       server.stop(true);
       rmSync(home, { recursive: true, force: true });

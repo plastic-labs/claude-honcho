@@ -19,8 +19,8 @@
     "e2e": "bun e2e/run.ts"
   },
   "dependencies": {
-    "@honcho-ai/harness-plugin-core": "^0.1.0",
-    "@honcho-ai/sdk": "^2.1.0",
+    "@honcho-ai/harness-plugin-core": "^0.2.0",
+    "@honcho-ai/sdk": "^2.8.0",
     "@modelcontextprotocol/sdk": "^1.26.0"
   },
   "devDependencies": {

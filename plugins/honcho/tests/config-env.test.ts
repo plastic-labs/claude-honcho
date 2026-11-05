@@ -45,12 +45,11 @@ describe("HONCHO_SAVE_MESSAGES over a config file", () => {
       writeFileSync(configPath, JSON.stringify({ apiKey: "k", peerName: "t", saveMessages: true }));
       runInSandbox(
         home,
-        `import { setSessionForPath } from "./src/config.ts";
-         setSessionForPath("/tmp/project", "project-session");`,
+        `import { loadConfig, saveConfig } from "./src/config.ts";
+         saveConfig(loadConfig("claude_code")!);`,
         { HONCHO_SAVE_MESSAGES: "false" },
       );
       const written = JSON.parse(readFileSync(configPath, "utf-8"));
-      expect(written.sessions["/tmp/project"]).toBe("project-session");
       expect(written.saveMessages).toBe(true);
       expect(written.hosts?.claude_code?.saveMessages).toBeUndefined();
     } finally {

@@ -6,8 +6,6 @@ import { setMemoryState } from "../state.js";
 const LABELS: Record<string, string> = {
   search: "searching",
   chat: "asking",
-  get_context: "context",
-  get_representation: "recall",
   create_conclusion: "writing",
   list_conclusions: "listing",
   delete_conclusion: "writing",

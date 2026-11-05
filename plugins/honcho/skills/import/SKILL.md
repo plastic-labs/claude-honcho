@@ -10,8 +10,8 @@ past work becomes apart of Honcho's memory. It uploads real conversation content
 always previews first and requires explicit confirmation.
 
 Transcripts live at `~/.claude/projects/<cwd-as-dashes>/<session-uuid>.jsonl`. The
-importer reconstructs each conversation, names sessions using the user's configured
-`sessionStrategy`, and uploads with the original message timestamps into the user's
+importer reconstructs each conversation, names each Honcho session after its Claude
+Code session id, and uploads with the original message timestamps into the user's
 configured workspace.
 
 ## Prerequisite
@@ -69,5 +69,6 @@ Notes to relay if relevant:
 - Idempotent: already-imported transcripts are recorded in
   `~/.honcho/backfill-state.json` and skipped on re-run, so it's safe to run again
   (e.g. with a wider `--days` window) to pull in more history later.
-- Sessions are named by the configured `sessionStrategy`, so imported history lines
-  up with future live sessions.
+- Each transcript becomes one Honcho session named after its Claude Code session id,
+  the same mapping the live hooks use, and joins the same repo and hostname scopes
+  (repo taken from the transcript's working directory).

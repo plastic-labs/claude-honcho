@@ -7,8 +7,10 @@
 
 import { execSync } from "child_process";
 import { existsSync } from "fs";
-import { join } from "path";
+import { hostname } from "os";
+import { basename, dirname, join, resolve } from "path";
 import type { GitState, GitFeatureContext } from "./cache.js";
+import { sanitizeForSessionName } from "./config.js";
 
 /**
  * Check if a directory is a git repository
@@ -26,6 +28,23 @@ function gitCommand(cwd: string, args: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** Repository name for cwd, shared by every linked worktree (and bare-hub
+ *  layouts); the directory name when cwd isn't in a git repository. */
+export function getRepoName(cwd: string): string {
+  const common = gitCommand(cwd, "rev-parse --git-common-dir");
+  if (!common) return basename(resolve(cwd));
+  const dir = resolve(cwd, common);
+  return basename(dir) === ".git" ? basename(dirname(dir)) : basename(dir).replace(/\.git$/, "");
+}
+
+/** Honcho scopes a new session joins: its repository and this machine. */
+export function getSessionScopes(cwd: string): string[] {
+  const scopes = [getRepoName(cwd), hostname().split(".")[0]]
+    .map(sanitizeForSessionName)
+    .filter((s) => /[a-z0-9]/.test(s));
+  return [...new Set(scopes)];
 }
 
 /**

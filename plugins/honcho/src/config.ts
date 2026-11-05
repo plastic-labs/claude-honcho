@@ -1,12 +1,10 @@
 import { homedir } from "os";
-import { join, basename, dirname, resolve, sep } from "path";
+import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
-import { captureGitState } from "./git.js";
-import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
-import { telemetryHeaders } from "@honcho-ai/harness-plugin-core";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
+import { ensureFreshCredential, pickCredential, telemetryHeaders, type Credential, type OAuthTokens } from "@honcho-ai/harness-plugin-core";
 
-function sanitizeForSessionName(s: string): string {
+export function sanitizeForSessionName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
@@ -24,8 +22,6 @@ export interface ContextRefreshConfig {
   messageThreshold?: number;
   /** Cache TTL in seconds (default: 300) */
   ttlSeconds?: number;
-  /** Skip dialectic chat() calls in user-prompt hook (default: false) */
-  skipDialectic?: boolean;
 }
 
 // ============================================
@@ -38,105 +34,36 @@ export interface ContextRefreshConfig {
  * validation builds its allow-set and error text from the same array — so
  * adding a component is a one-line edit with no drift between layers.
  * - "directives": static memory-usage guidance (treat injected memory as
- *   background, use chat/search, save insights) — formerly a manual "paste
+ *   background, recall with the chat tool) — formerly a manual "paste
  *   this into your CLAUDE.md" README step; now shipped every session instead.
- * - "summary": the SDK `session.summaries().long` narrative.
- * - "peerCard" / "peerRepresentation": the two fields of a single context() call,
- *   each injected at full length (no per-field caps — inclusion is the only lever).
- * - "briefing": a static nudge to call the `get_briefing` MCP tool instead of
- *   injecting summary/peerCard inline — the tool call renders as an expandable
- *   row in the UI, making the briefing user-visible. Use in place of
- *   "summary"/"peerCard", not alongside them (the content would land twice).
+ * - "peerCard": the user's peer card (getCard), injected at full length.
+ *
+ * Nothing is injected per turn: recall happens when the model calls the
+ * `chat` tool.
  */
-export const SESSION_START_COMPONENTS = ["directives", "summary", "peerCard", "peerRepresentation", "briefing"] as const;
+export const SESSION_START_COMPONENTS = ["directives", "peerCard"] as const;
 export type SessionStartComponent = (typeof SESSION_START_COMPONENTS)[number];
 
-/**
- * Components the UserPromptSubmit hook may emit per non-trivial prompt.
- * - "userContext": a fresh, prompt-scoped peer.context() blob for the user
- *   peer, whose semantic retrieval is shaped by the searchTopK/
- *   searchMaxDistance/maxConclusions knobs below.
- * - "assistantContext": the same peer.context() fetch, but for the AI peer —
- *   what Honcho has derived about the assistant itself.
- * - "sessionContext": recent raw messages from the currently mapped Honcho
- *   session via session.context() (summary off, no search), which can span
- *   other Claude instances sharing the session name.
- * - "dialectic": a reasoned peer.chat() answer over the representation, seeded
- *   from `dialecticTemplate` (the prompt substituted into %{user_query}) at the
- *   `dialecticReasoning` tier. Off by default — chat() is far slower than
- *   context() (~12s at medium), so it runs on its own budget, not the 4s
- *   context race, and stays under the 30s UserPromptSubmit harness ceiling.
- *
- * A "search" component (filtered semantic search over inductive conclusions)
- * was scoped out: `level` is not filterable through the API, so it needs a
- * honcho-backend + SDK change before it can ship. See the plan.
- */
-export const PER_TURN_COMPONENTS = ["userContext", "assistantContext", "sessionContext", "dialectic"] as const;
-export type PerTurnComponent = (typeof PER_TURN_COMPONENTS)[number];
-
-/** Pre-split configs stored `"context"` for what is now "userContext". */
-export function normalizePerTurn(components: string[]): PerTurnComponent[] {
-  return components.map((c) => (c === "context" ? "userContext" : c)) as PerTurnComponent[];
+/** Removed components: "briefing" carried the peer card, so it maps to
+ *  "peerCard"; "summary" and "peerRepresentation" are dropped. */
+export function normalizeSessionStart(components: string[]): SessionStartComponent[] {
+  const out = components.map((c) => (c === "briefing" ? "peerCard" : c));
+  return [...new Set(out)].filter((c): c is SessionStartComponent =>
+    (SESSION_START_COMPONENTS as readonly string[]).includes(c));
 }
 
-/**
- * The `injection` config block: turns the two hardcoded injection surfaces
- * into a composable, config-driven menu. Each surface selects zero or more
- * components; the retrieval knobs shape whatever those components emit.
- */
+/** The `injection` config block: which components are emitted at session start. */
 export interface InjectionConfig {
-  /** Components emitted once at session open (default: ["directives", "summary", "peerCard"]). */
+  /** Components emitted once at session open (default: ["directives", "peerCard"]). */
   sessionStart?: SessionStartComponent[];
-  /** Components emitted per non-trivial prompt (default: ["userContext"]). */
-  perTurn?: PerTurnComponent[];
-  /** Per-turn components whose full injected payload is printed to the terminal.
-   *  Components not listed still inject; they just report a one-line summary
-   *  instead of their contents (default: [] — summaries only). */
-  showContents?: PerTurnComponent[];
-  /** Top-K conclusions pulled by context()'s semantic search (default: 10). */
-  searchTopK?: number;
-  /** Max conclusions injected per context() call (default: 15). */
-  maxConclusions?: number;
-  /** Max cosine distance for context()'s semantic search — lower is stricter
-   *  (default: 0.6). */
-  searchMaxDistance?: number;
-  /** What drives the per-turn semantic search: the raw "prompt" (default)
-   *  or extracted "topics". */
-  searchQuerySource?: "topics" | "prompt";
-  /** Token budget for the per-turn "sessionContext" message fetch (default: 1500). */
-  sessionContextTokens?: number;
-  /** Query template for the per-turn "dialectic" component. The user's prompt
-   *  is substituted into every `%{user_query}` (default: surface anything from
-   *  the user's history relevant to the prompt). */
-  dialecticTemplate?: string;
-  /** Reasoning tier for the per-turn "dialectic" chat() call (default: "low").
-   *  Kept separate from the top-level `reasoningLevel` so per-turn dialectic can
-   *  stay cheap on the hot path without lowering the tier used elsewhere. */
-  dialecticReasoning?: ReasoningLevel;
 }
 
-/** Resolved injection defaults: memory-usage directives + session summary +
- *  peer card at session start, a fresh user-peer context() per turn. Retrieval knobs
- *  are tuned for a lean per-turn block — topK 10 for recall, a 0.6 cosine
- *  distance, searching on the raw prompt. No component prints its contents. */
 export const DEFAULT_INJECTION: Required<InjectionConfig> = {
-  sessionStart: ["directives", "summary", "peerCard"],
-  perTurn: ["userContext"],
-  showContents: [],
-  searchTopK: 10,
-  maxConclusions: 15,
-  searchMaxDistance: 0.6,
-  searchQuerySource: "prompt",
-  sessionContextTokens: 1500,
-  dialecticTemplate:
-    "Return a compact, factual list of anything from the user's history — preferences, prior decisions, relevant past work — that would help with the following. Write in the third person as background notes; do not address the user, ask questions, or offer next steps. If nothing relevant exists, say so in one line. Relevant to: %{user_query}",
-  dialecticReasoning: "medium",
+  sessionStart: ["directives", "peerCard"],
 };
 
 export const REASONING_LEVELS = ["minimal", "low", "medium", "high", "max"] as const;
 export type ReasoningLevel = (typeof REASONING_LEVELS)[number];
-
-export type SessionStrategy = "per-directory" | "git-branch" | "chat-instance";
 
 export type StatuslineMode = "on" | "off";
 
@@ -174,6 +101,8 @@ export interface HostConfig {
    * against different Honcho orgs or workspaces.
    */
   apiKey?: string;
+  /** OAuth grant from this plugin's device sign-in (/honcho:setup). */
+  oauth?: OAuthTokens;
 
   /** Per-host overrides for settings that may differ across tools */
   enabled?: boolean;
@@ -181,8 +110,6 @@ export interface HostConfig {
   saveMessages?: boolean;
   saveToolUse?: boolean;
   saveGitEvents?: boolean;
-  sessionStrategy?: SessionStrategy;
-  sessionPeerPrefix?: boolean;
   /** Default reasoning level for Honcho dialectic calls (default: "medium") */
   reasoningLevel?: ReasoningLevel;
   /**
@@ -295,7 +222,6 @@ interface HonchoFileConfig {
   peerName?: string;
   workspace?: string;
   aiPeer?: string;
-  sessions?: Record<string, string>;
   saveMessages?: boolean;
   /** Save [Tool] action summaries to Honcho (default: false) */
   saveToolUse?: boolean;
@@ -308,9 +234,6 @@ interface HonchoFileConfig {
   redactPatterns?: string[];
   enabled?: boolean;
   logging?: boolean;
-  sessionStrategy?: SessionStrategy;
-  /** Prefix session names with peerName (default: true, disable for solo use) */
-  sessionPeerPrefix?: boolean;
   /** Default reasoning level for Honcho dialectic calls (default: "medium") */
   reasoningLevel?: ReasoningLevel;
   /** Observation mode (default: "unified") */
@@ -337,19 +260,15 @@ interface HonchoFileConfig {
 export interface HonchoCLAUDEConfig {
   /** The user's peer name */
   peerName: string;
-  /** Honcho API key */
+  /** Honcho API key or OAuth access token, whichever pickCredential chose */
   apiKey: string;
+  /** Where apiKey came from, and the state of an OAuth grant */
+  auth?: Omit<Credential, "token"> & { host: string };
   /** Honcho workspace name (resolved per-host) */
   workspace: string;
   /** AI peer name (resolved per-host, e.g. "claude" for claude-code) */
   aiPeer: string;
 
-  /** How sessions are named: per-directory, git-branch, or chat-instance */
-  sessionStrategy?: SessionStrategy;
-  /** Prefix session names with peerName (default: true, disable for solo use) */
-  sessionPeerPrefix?: boolean;
-  /** Map of directory path -> session name overrides */
-  sessions?: Record<string, string>;
   /** Save messages to Honcho (default: true) */
   saveMessages?: boolean;
   /** Save [Tool] action summaries to Honcho (default: false — low signal, redundant with assistant reasoning) */
@@ -464,9 +383,16 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     ?? raw.hosts?.[host.replace(/_/g, "-")]
     ?? raw.hosts?.[host.replace(/-/g, "_")];
 
-  // Resolution order: env var > host-scoped apiKey > root apiKey.
-  const apiKey = process.env.HONCHO_API_KEY || hostBlock?.apiKey || raw.apiKey;
-  if (!apiKey) return null;
+  // Resolution order: env var > this plugin's OAuth grant > apiKey
+  // (host-scoped, then root) > an expired grant. OAuth only on Honcho cloud.
+  const hostKey = [host, host.replace(/_/g, "-"), host.replace(/-/g, "_")].find((k) => raw.hosts?.[k]) ?? host;
+  const cred = pickCredential(raw, {
+    host: hostKey,
+    baseUrl: honchoOrigin(hostBlock?.endpoint ?? raw.endpoint),
+    env: process.env,
+  });
+  if (!cred) return null;
+  const { token: apiKey, ...authState } = cred;
 
   const peerName = raw.peerName || process.env.HONCHO_PEER_NAME || process.env.USER || process.env.USERNAME || "user";
 
@@ -500,12 +426,10 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
   // individual integrations can override per-host without touching root.
   const config: HonchoCLAUDEConfig = {
     apiKey,
+    auth: { ...authState, host: hostKey },
     peerName,
     workspace,
     aiPeer,
-    sessionStrategy: hostBlock?.sessionStrategy ?? raw.sessionStrategy,
-    sessionPeerPrefix: hostBlock?.sessionPeerPrefix ?? raw.sessionPeerPrefix,
-    sessions: raw.sessions,
     saveMessages: hostBlock?.saveMessages ?? raw.saveMessages,
     saveToolUse: hostBlock?.saveToolUse ?? raw.saveToolUse,
     saveGitEvents: hostBlock?.saveGitEvents ?? raw.saveGitEvents,
@@ -601,11 +525,32 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   return config;
 }
 
-// config.json can hold an API key, so it is kept owner-only. The mode option
-// applies only on creation, so an existing file is restricted before the write.
-function writeConfigFile(data: unknown): void {
-  if (existsSync(CONFIG_FILE)) chmodSync(CONFIG_FILE, 0o600);
-  writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+// OAuth grants rotate on every refresh, possibly in another process since this
+// writer read the file. Take them from disk at write time so a settings save
+// never puts back a superseded refresh token.
+function carryOAuthFromDisk(data: Record<string, any>): void {
+  let disk: Record<string, any>;
+  try {
+    disk = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+  } catch {
+    return;
+  }
+  if (disk.oauth) data.oauth = disk.oauth;
+  for (const [name, block] of Object.entries<any>(disk.hosts ?? {})) {
+    if (!block?.oauth) continue;
+    data.hosts ??= {};
+    data.hosts[name] = { ...(data.hosts[name] ?? {}), oauth: block.oauth };
+  }
+}
+
+// config.json can hold an API key, so it is kept owner-only. Written to a temp
+// file and renamed so a concurrent reader never sees a half-written file.
+function writeConfigFile(data: Record<string, any>): void {
+  carryOAuthFromDisk(data);
+  const tmp = `${CONFIG_FILE}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+  chmodSync(tmp, 0o600);
+  renameSync(tmp, CONFIG_FILE);
 }
 
 /**
@@ -616,7 +561,6 @@ function writeConfigFile(data: unknown): void {
  *     the user or the honcho CLI.  This integration NEVER writes them.
  *   - hosts.<this-host> is owned by this integration and carries all
  *     per-host settings (workspace, aiPeer, enabled, logging, ...).
- *   - sessions is shared across hosts -- written at root.
  *
  * resolveConfig() reads host block first, falls back to root, so the
  * user's root-level defaults still apply until overridden per-host.
@@ -634,11 +578,6 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
     } catch {
       // Start fresh if corrupt
     }
-  }
-
-  // Sessions are shared across hosts -- write at root
-  if (config.sessions !== undefined) {
-    existing.sessions = config.sessions;
   }
 
   // Everything else goes in the host block.
@@ -685,8 +624,6 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   setHostIfExplicit("enabled", enabledForSave, existing.enabled);
   setHostIfExplicit("logging", loggingForSave, existing.logging);
   setHostIfExplicit("saveMessages", saveMessagesForSave, existing.saveMessages);
-  setHostIfExplicit("sessionStrategy", config.sessionStrategy, existing.sessionStrategy);
-  setHostIfExplicit("sessionPeerPrefix", config.sessionPeerPrefix, existing.sessionPeerPrefix);
   setHostIfExplicit("reasoningLevel", config.reasoningLevel, existing.reasoningLevel);
   setHostIfExplicit("observationMode", config.observationMode, existing.observationMode);
   setHostIfExplicit("messageUpload", config.messageUpload, existing.messageUpload);
@@ -701,6 +638,9 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   // materialized here), but must not drop hosts.<host>.apiKey on rewrite.
   if (existingHost.apiKey !== undefined) {
     hostEntry.apiKey = existingHost.apiKey;
+  }
+  if (existingHost.oauth !== undefined) {
+    hostEntry.oauth = existingHost.oauth;
   }
 
   existing.hosts[host] = hostEntry;
@@ -738,147 +678,12 @@ export function getClaudeSettingsDir(): string {
   return join(homedir(), ".claude");
 }
 
-/** Main repository root for a linked worktree, parsed from dir's `.git`
- *  pointer file. Handles standard (`<repo>/.git/worktrees/<n>`) and bare-hub
- *  (`<hub>.git/worktrees/<n>`) layouts; null for regular repositories and
- *  anything else (submodules, separate-git-dir). */
-export function resolveWorktreeMainRoot(dir: string): string | null {
-  try {
-    const gitPath = join(dir, ".git");
-    if (!statSync(gitPath).isFile()) return null;
-    const match = readFileSync(gitPath, "utf-8").match(/^gitdir:\s*(.+?)\s*$/m);
-    if (!match) return null;
-    const gitdir = resolve(dir, match[1]);
-    const idx = gitdir.lastIndexOf(`${sep}worktrees${sep}`);
-    if (idx === -1) return null;
-    const gitContainer = gitdir.slice(0, idx);
-    if (basename(gitContainer) === ".git") return dirname(gitContainer);
-    if (gitContainer.endsWith(".git")) return gitContainer;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-// Bound on the .git lookup walk; cwds nested deeper keep per-directory naming.
-const MAX_GIT_WALK_UP = 12;
-
-/** Main repository root when cwd is inside a linked git worktree, else null. */
-export function worktreeMainRootFor(cwd: string): string | null {
-  try {
-    let dir = resolve(cwd);
-    for (let i = 0; i < MAX_GIT_WALK_UP; i++) {
-      if (existsSync(join(dir, ".git"))) return resolveWorktreeMainRoot(dir);
-      const parent = dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-export function getSessionForPath(cwd: string, mainRoot?: string | null): string | null {
-  const config = loadConfig();
-  if (!config?.sessions) return null;
-  if (config.sessions[cwd]) return config.sessions[cwd];
-  // Worktrees without a mapping of their own share the main repo's session.
-  const mr = mainRoot === undefined ? worktreeMainRootFor(cwd) : mainRoot;
-  if (mr && config.sessions[mr]) return config.sessions[mr];
-  return null;
-}
-
-export function deriveSessionName(
-  strategy: SessionStrategy,
-  cwd: string,
-  opts: { peerName?: string; sessionPeerPrefix?: boolean; branch?: string; instanceId?: string } = {}
-): string {
-  const usePrefix = opts.sessionPeerPrefix !== false; // default true
-  const peerPart = opts.peerName ? sanitizeForSessionName(opts.peerName) : "user";
-  const repoPart = sanitizeForSessionName(basename(cwd));
-  const base = usePrefix ? `${peerPart}-${repoPart}` : repoPart;
-
-  switch (strategy) {
-    case "git-branch": {
-      if (opts.branch) {
-        const branchPart = sanitizeForSessionName(opts.branch);
-        return `${base}-${branchPart}`;
-      }
-      return base;
-    }
-    case "chat-instance": {
-      if (opts.instanceId) {
-        return usePrefix ? `${peerPart}-chat-${opts.instanceId}` : `chat-${opts.instanceId}`;
-      }
-      return base;
-    }
-    case "per-directory":
-    default:
-      return base;
-  }
-}
-
-/** Session name derived from strategy. Manual overrides only apply to per-directory.
- *  @param instanceId - Explicit instance ID for chat-instance strategy. Falls back to
- *                      per-cwd cache, then global cache. Callers should pass hookInput.session_id
- *                      when available to avoid cross-session collision from the global cache.
- */
-export function getSessionName(cwd: string, instanceId?: string): string {
-  const config = loadConfig();
-  const strategy = config?.sessionStrategy ?? "per-directory";
-  const mainRoot = worktreeMainRootFor(cwd);
-
-  // Manual overrides only apply to per-directory strategy.
-  // For chat-instance and git-branch, the session name is always derived dynamically.
-  if (strategy === "per-directory") {
-    const configuredSession = getSessionForPath(cwd, mainRoot);
-    if (configuredSession) {
-      return configuredSession;
-    }
-  }
-
-  // Resolve live env state, then delegate to the pure deriver.
-  let branch: string | undefined;
-  if (strategy === "git-branch") {
-    branch = captureGitState(cwd)?.branch;
-  }
-  let resolvedInstanceId: string | undefined;
-  if (strategy === "chat-instance") {
-    // Prefer explicit instanceId > per-cwd cache > global cache (legacy)
-    resolvedInstanceId = instanceId || getInstanceIdForCwd(cwd) || getClaudeInstanceId() || undefined;
-  }
-
-  // Worktrees derive from the main repo's path; branch still comes from the
-  // worktree's own checkout above.
-  return deriveSessionName(strategy, mainRoot ?? cwd, {
-    peerName: config?.peerName,
-    sessionPeerPrefix: config?.sessionPeerPrefix,
-    branch,
-    instanceId: resolvedInstanceId,
-  });
-}
-
-export function setSessionForPath(cwd: string, sessionName: string): void {
-  const config = loadConfig();
-  if (!config) return;
-  if (!config.sessions) {
-    config.sessions = {};
-  }
-  config.sessions[cwd] = sessionName;
-  saveConfig(config);
-}
-
-export function getAllSessions(): Record<string, string> {
-  const config = loadConfig();
-  return config?.sessions || {};
-}
-
-export function removeSessionForPath(cwd: string): void {
-  const config = loadConfig();
-  if (!config?.sessions) return;
-  delete config.sessions[cwd];
-  saveConfig(config);
+/** Honcho session for a Claude Code chat: the Claude Code session id itself.
+ *  Hooks pass hookInput.session_id; the MCP server and skills read
+ *  CLAUDE_CODE_SESSION_ID, which Claude Code sets for its child processes. */
+export function getSessionName(sessionId?: string): string | null {
+  const id = sessionId || process.env.CLAUDE_CODE_SESSION_ID;
+  return id ? sanitizeForSessionName(id) : null;
 }
 
 export function getMessageUploadConfig(): MessageUploadConfig {
@@ -895,7 +700,6 @@ export function getContextRefreshConfig(): ContextRefreshConfig {
   return {
     messageThreshold: config?.contextRefresh?.messageThreshold ?? 30,
     ttlSeconds: config?.contextRefresh?.ttlSeconds ?? 300,
-    skipDialectic: config?.contextRefresh?.skipDialectic ?? false,
   };
 }
 
@@ -910,15 +714,12 @@ export function getContextRefreshConfig(): ContextRefreshConfig {
  */
 export function getInjectionConfig(config?: HonchoCLAUDEConfig | null): Required<InjectionConfig> {
   const injection = (config === undefined ? loadConfig() : config)?.injection;
-  const resolved = { ...DEFAULT_INJECTION, ...(injection ?? {}) };
+  const resolved = { ...DEFAULT_INJECTION, ...(injection ?? {}) } as Required<InjectionConfig>;
   // Guard hand-edited configs: a non-array component list falls back to the default.
-  resolved.perTurn = Array.isArray(resolved.perTurn)
-    ? normalizePerTurn(resolved.perTurn)
-    : DEFAULT_INJECTION.perTurn;
-  resolved.showContents = Array.isArray(resolved.showContents)
-    ? normalizePerTurn(resolved.showContents)
-    : DEFAULT_INJECTION.showContents;
-  return resolved;
+  resolved.sessionStart = Array.isArray(resolved.sessionStart)
+    ? normalizeSessionStart(resolved.sessionStart)
+    : DEFAULT_INJECTION.sessionStart;
+  return { sessionStart: resolved.sessionStart };
 }
 
 export function isLoggingEnabled(): boolean {
@@ -986,6 +787,66 @@ export function getHonchoBaseUrlForEndpoint(endpoint?: HonchoEndpointConfig): st
     return HONCHO_BASE_URLS.local;
   }
   return HONCHO_BASE_URLS.production;
+}
+
+/** API origin (no /v3), the form harness-plugin-core compares against Honcho cloud. */
+function honchoOrigin(endpoint?: HonchoEndpointConfig): string {
+  return getHonchoBaseUrlForEndpoint(endpoint).replace(/\/v3$/, "");
+}
+
+/** The API origin this plugin targets, even when no credential is configured yet. */
+export function getConfiguredOrigin(host: HonchoHost = getDetectedHost()): string {
+  const env = process.env.HONCHO_ENDPOINT;
+  if (env === "local") return honchoOrigin({ environment: "local" });
+  if (env?.startsWith("http")) return honchoOrigin({ baseUrl: env });
+  let raw: HonchoFileConfig = {};
+  try {
+    raw = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+  } catch {}
+  return honchoOrigin(raw.hosts?.[host]?.endpoint ?? raw.endpoint);
+}
+
+/**
+ * Refresh an OAuth access token that is near expiry and put the result in
+ * config.apiKey. A no-op for API keys. Every refresh supersedes the previous
+ * access token, so long-lived callers run this before each batch of requests
+ * instead of holding on to a token.
+ */
+export async function refreshCredential(config: HonchoCLAUDEConfig): Promise<void> {
+  const host = config.auth?.host ?? getDetectedHost();
+  const cred = await ensureFreshCredential({
+    path: CONFIG_FILE,
+    host,
+    baseUrl: honchoOrigin(config.endpoint),
+    env: process.env,
+  });
+  if (!cred) return;
+  const { token, ...authState } = cred;
+  config.apiKey = token;
+  config.auth = { ...authState, host };
+}
+
+/** One line describing which credential is in use, for status output. */
+export function describeAuth(config: HonchoCLAUDEConfig): string {
+  const a = config.auth;
+  const expiry = () => {
+    if (!a?.expiresAt) return "";
+    const mins = Math.round((a.expiresAt - Date.now() / 1000) / 60);
+    return mins > 0 ? ` (token refreshes in ${mins}m)` : " (token expired)";
+  };
+  switch (a?.source) {
+    case "env": return "HONCHO_API_KEY env var";
+    case "oauth": return `signed in with Honcho${expiry()}`;
+    default: return "API key";
+  }
+}
+
+/** A user-facing notice when the OAuth sign-in needs attention, else undefined. */
+export function getAuthNotice(config: HonchoCLAUDEConfig): string | undefined {
+  if (config.auth?.reauthRequired) {
+    return "[honcho] Your Honcho sign-in has expired. Run /honcho:setup to sign in again.";
+  }
+  return undefined;
 }
 
 /** Get the base URL for a resolved runtime config. */

@@ -13,9 +13,8 @@ export interface TranscriptEntry {
   timestamp?: string;
   isMeta?: boolean;
   isSidechain?: boolean;
-  cwd?: string;
-  gitBranch?: string;
   sessionId?: string;
+  cwd?: string;
   message?: {
     role?: string;
     content: string | Array<{ type: string; text?: string; name?: string; input?: unknown }>;
@@ -30,9 +29,6 @@ export interface ParsedMessage {
   timestamp?: string;
   /** Assistant only: last block of its turn (assistant_response vs assistant_intermediate). */
   isResponse?: boolean;
-  /** Entry's env, used for session mapping. */
-  cwd?: string;
-  gitBranch?: string;
 }
 
 function entryType(entry: TranscriptEntry): string | undefined {
@@ -71,19 +67,17 @@ function readLines(transcriptPath: string): string[] {
 
 /**
  * Full-conversation parse: user + assistant messages in order, each with its
- * timestamp and the cwd/gitBranch for session mapping. Skips isMeta / isSidechain
+ * timestamp, plus the Claude Code session id. Skips isMeta / isSidechain
  * / tool-result-only / harness-injected turns / slash commands.
  */
 export function parseTranscriptForBackfill(transcriptPath: string): {
   messages: ParsedMessage[];
-  cwd?: string;
-  gitBranch?: string;
   sessionId?: string;
+  cwd?: string;
 } {
   const messages: ParsedMessage[] = [];
-  let cwd: string | undefined;
-  let gitBranch: string | undefined;
   let sessionId: string | undefined;
+  let cwd: string | undefined;
 
   for (const line of readLines(transcriptPath)) {
     let entry: TranscriptEntry;
@@ -92,10 +86,8 @@ export function parseTranscriptForBackfill(transcriptPath: string): {
     } catch {
       continue;
     }
-    // Track the latest environment seen — used to name the session.
-    if (entry.cwd) cwd = entry.cwd;
-    if (entry.gitBranch) gitBranch = entry.gitBranch;
     if (entry.sessionId) sessionId = entry.sessionId;
+    if (!cwd && entry.cwd) cwd = entry.cwd;
 
     if (entry.isMeta || entry.isSidechain) continue;
     const type = entryType(entry);
@@ -104,12 +96,12 @@ export function parseTranscriptForBackfill(transcriptPath: string): {
       if (!isRealUserPrompt(entry)) continue;
       const content = stripLeadingReminders(userText(entry)).trim();
       if (content) {
-        messages.push({ role: "user", content, timestamp: entry.timestamp, cwd: entry.cwd, gitBranch: entry.gitBranch });
+        messages.push({ role: "user", content, timestamp: entry.timestamp });
       }
     } else if (type === "assistant") {
       const content = assistantText(entry).trim();
       if (content) {
-        messages.push({ role: "assistant", content, timestamp: entry.timestamp, cwd: entry.cwd, gitBranch: entry.gitBranch });
+        messages.push({ role: "assistant", content, timestamp: entry.timestamp });
       }
     }
   }
@@ -121,7 +113,7 @@ export function parseTranscriptForBackfill(transcriptPath: string): {
     messages[i].isResponse = !next || next.role === "user";
   }
 
-  return { messages, cwd, gitBranch, sessionId };
+  return { messages, sessionId, cwd };
 }
 
 const PROJECTS_DIR = join(homedir(), ".claude", "projects");

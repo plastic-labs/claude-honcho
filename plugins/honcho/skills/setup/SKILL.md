@@ -1,5 +1,5 @@
 ---
-description: First-time Honcho configuration -- set API key, validate connection, create config
+description: First-time Honcho configuration -- sign in or set an API key, validate connection, create config
 user-invocable: true
 ---
 
@@ -12,8 +12,9 @@ Walk the user through first-time Honcho configuration so persistent memory works
 ### 1. Validate the connection
 
 Run the setup runner. It's a committed script (`src/skills/setup-runner.ts`) that
-checks for an API key (env var, then `~/.honcho/config.json`), validates the
-connection, writes the config, and installs the memory statusLine:
+looks for a credential (the `HONCHO_API_KEY` env var, a Honcho sign-in, or an
+`apiKey` in `~/.honcho/config.json`), validates the connection, writes the config,
+and installs the memory statusLine:
 
 ```bash
 bun run "${CLAUDE_PLUGIN_ROOT}/src/skills/setup-runner.ts"
@@ -26,16 +27,27 @@ directory inside and run the runner from there):
 echo "$HOME/.claude/plugins/cache/honcho/honcho"
 ```
 
-**If the runner reports "No API key found"**, it prints how to set one and exits.
-Relay that to the user:
+**If it exits with code 2 ("Not connected to Honcho")**, ask the user how they want
+to connect using the AskUserQuestion tool (a picker), with one option for each
+connection method the runner printed:
 
-- Get a free key at https://app.honcho.dev
-- **macOS / Linux:** add to `~/.zshrc` (or `~/.bashrc`): `export HONCHO_API_KEY="your-key-here"`
-- **Windows (PowerShell):** `setx HONCHO_API_KEY "your-key-here"`
-- Then restart Claude Code and run `/honcho:setup` again.
+- **Sign in with your browser** (Honcho cloud): run the runner again with
+  `--sign-in`. It opens the browser, prints a link and code, and exits with code 3.
+  Give the user the link and code, ask them to approve, and wait for them to say
+  they have. Then run the runner again without `--sign-in` to finish.
+- **Use an API key**: relay how to set it:
+  - Get a free key at https://app.honcho.dev
+  - **macOS / Linux:** add to `~/.zshrc` (or `~/.bashrc`): `export HONCHO_API_KEY="your-key-here"`
+  - **Windows (PowerShell):** `setx HONCHO_API_KEY "your-key-here"`
+  - Then restart Claude Code and run `/honcho:setup` again.
 
-Do NOT ask the user to paste their key into the chat — it must be set as an
-environment variable outside Claude Code. Stop here and wait for them to come back.
+  Do NOT ask the user to paste their key into the chat — it must be set as an
+  environment variable outside Claude Code. Stop here and wait for them to come back.
+
+If the runner only lists the API key (self-hosted Honcho), relay that without asking.
+
+**If it exits with code 3 without `--sign-in`**, the sign-in isn't approved yet:
+relay the link and code it printed and ask the user to say when they've approved.
 
 **If the runner succeeds**, the key is valid and the config file has been created.
 The statusLine renderer is copied to `~/.honcho/honcho-statusline.sh` and registered
