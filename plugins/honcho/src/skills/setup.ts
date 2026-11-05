@@ -17,7 +17,8 @@ import {
   describeAuth,
   getConfiguredOrigin,
 } from "../config.js";
-import { signIn } from "./login.js";
+import { finishSignIn, hasPendingSignIn, startSignIn } from "./login.js";
+import { isCloud } from "@honcho-ai/harness-plugin-core";
 import { createHonchoClient } from "../honcho-client.js";
 import * as s from "../styles.js";
 import { findTranscripts } from "./transcript-parse.js";
@@ -126,22 +127,34 @@ export async function setup(): Promise<void> {
   const firstRun = !configExists() || configHasOnlyGrants();
 
   // Credential: HONCHO_API_KEY env, a Honcho sign-in, or an apiKey in the
-  // config file. With none, sign in through the browser (Honcho cloud only).
+  // config file. With none, the user picks: browser sign-in or an API key.
+  // Exit 2 = not connected (ask which), exit 3 = sign-in waiting for approval.
   let config = loadConfig() || loadConfigFromEnv();
-  if (!config && await signIn(getConfiguredOrigin())) {
+  if (!config && process.argv.includes("--sign-in")) {
+    process.exit(await startSignIn(getConfiguredOrigin()) ? 3 : 2);
+  }
+  if (!config && hasPendingSignIn()) {
+    if (!(await finishSignIn())) process.exit(3);
     config = loadConfig();
   }
   if (!config) {
+    const cloud = isCloud(getConfiguredOrigin());
     console.log(s.warn("Not connected to Honcho"));
     console.log("");
-    console.log("  Use an API key from https://app.honcho.dev:");
-    if (process.platform === "win32") {
-      console.log(s.dim('     setx HONCHO_API_KEY "your-key-here"'));
+    if (cloud) {
+      console.log("  Connect one of two ways:");
+      console.log("  - Sign in with your browser (Honcho cloud)");
     } else {
-      console.log(s.dim('     export HONCHO_API_KEY="your-key-here"   # in ~/.zshrc or ~/.bashrc'));
+      console.log("  This plugin points at a self-hosted Honcho, which uses an API key:");
     }
-    console.log("  Then restart Claude Code and run /honcho:setup again.");
-    process.exit(1);
+    console.log(`  ${cloud ? "- " : ""}Use an API key from https://app.honcho.dev, set in your shell:`);
+    if (process.platform === "win32") {
+      console.log(s.dim('       setx HONCHO_API_KEY "your-key-here"'));
+    } else {
+      console.log(s.dim('       export HONCHO_API_KEY="your-key-here"   # in ~/.zshrc or ~/.bashrc'));
+    }
+    console.log("    then restart Claude Code and run /honcho:setup again.");
+    process.exit(2);
   }
 
   console.log(s.success(`Credential found: ${describeAuth(config)}`));
