@@ -22,6 +22,7 @@ import {
   setDetectedHost,
 } from "../config.js";
 import { addMessagesBatched, chunkContent } from "../cache.js";
+import { createHonchoClient } from "../honcho-client.js";
 import { parseTranscriptForBackfill, findTranscripts, type ParsedMessage } from "./transcript-parse.js";
 import * as s from "../styles.js";
 import { homedir } from "os";
@@ -163,12 +164,8 @@ export async function run(): Promise<void> {
   }
 
   // Upload
-  const opts = getHonchoClientOptions(config);
-  opts.workspaceId = targetWorkspace;
   // Backfilling large histories: give the network more headroom than the hooks.
-  opts.timeout = 60_000;
-  opts.maxRetries = 3;
-  const honcho = new Honcho(opts);
+  const honcho = await createHonchoClient(config, { workspaceId: targetWorkspace, timeout: 60_000, maxRetries: 3 });
   const observationMode = getObservationMode(config);
 
   console.log(s.section(`Uploading to ${targetWorkspace}`));

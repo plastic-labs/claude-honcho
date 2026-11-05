@@ -1,7 +1,8 @@
 import { Honcho } from "@honcho-ai/sdk";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig, type InjectionConfig, type PerTurnComponent } from "../config.js";
+import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig, type InjectionConfig, type PerTurnComponent } from "../config.js";
+import { createHonchoClient } from "../honcho-client.js";
 import {
   getMessageCount,
   incrementMessageCount,
@@ -299,7 +300,7 @@ interface DialecticResult {
  * not just this conversation. Returns null on a failed call; an empty answer is "".
  */
 async function fetchDialectic(config: any, prompt: string, injection: InjectionConfig): Promise<DialecticResult | null> {
-  const honcho = new Honcho(getHonchoClientOptions(config));
+  const honcho = await createHonchoClient(config);
   const observationMode = getObservationMode(config);
 
   // unified: query the user peer directly; directional: the ai peer about the user.
@@ -331,7 +332,7 @@ async function fetchDialectic(config: any, prompt: string, injection: InjectionC
  * the user peer, observation-mode aware.
  */
 async function fetchUserContext(config: any, prompt: string, injection: InjectionConfig): Promise<{ context: any; matched: string[]; queryLabel?: string }> {
-  const honcho = new Honcho(getHonchoClientOptions(config));
+  const honcho = await createHonchoClient(config);
   const observationMode = getObservationMode(config);
 
   // unified: user self-observations — query via userPeer (no target).
@@ -390,7 +391,7 @@ async function fetchUserContext(config: any, prompt: string, injection: Injectio
  * collection to fall back to.
  */
 async function fetchAssistantContext(config: any, prompt: string, injection: InjectionConfig): Promise<{ context: any } | null> {
-  const honcho = new Honcho(getHonchoClientOptions(config));
+  const honcho = await createHonchoClient(config);
   const aiPeer = await honcho.peer(config.aiPeer);
 
   const usePrompt = injection.searchQuerySource === "prompt";

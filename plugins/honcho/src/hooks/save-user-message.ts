@@ -1,5 +1,6 @@
 import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { createHonchoClient } from "../honcho-client.js";
 import { chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { isHarnessInjected, isSlashCommand, isTerseReply, stripLeadingReminders } from "../prompt-filters.js";
@@ -79,7 +80,7 @@ async function postUserMessage(
   prompt: string,
   sessionName: string,
 ): Promise<void> {
-  const honcho = new Honcho(getHonchoClientOptions(config));
+  const honcho = await createHonchoClient(config);
   const noEnsure = () => Promise.resolve();
 
   const userPeer = new Peer(config.peerName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);

@@ -1,5 +1,5 @@
 ---
-description: First-time Honcho configuration -- set API key, validate connection, create config
+description: First-time Honcho configuration -- sign in or set an API key, validate connection, create config
 user-invocable: true
 ---
 
@@ -12,8 +12,10 @@ Walk the user through first-time Honcho configuration so persistent memory works
 ### 1. Validate the connection
 
 Run the setup runner. It's a committed script (`src/skills/setup-runner.ts`) that
-checks for an API key (env var, then `~/.honcho/config.json`), validates the
-connection, writes the config, and installs the memory statusLine:
+looks for a credential (the `HONCHO_API_KEY` env var, a Honcho sign-in, or an
+`apiKey` in `~/.honcho/config.json`). With none, it signs in through the browser
+like `honcho init`. It then validates the connection, writes the config, and
+installs the memory statusLine:
 
 ```bash
 bun run "${CLAUDE_PLUGIN_ROOT}/src/skills/setup-runner.ts"
@@ -26,8 +28,9 @@ directory inside and run the runner from there):
 echo "$HOME/.claude/plugins/cache/honcho/honcho"
 ```
 
-**If the runner reports "No API key found"**, it prints how to set one and exits.
-Relay that to the user:
+**If the runner reports "Not connected to Honcho"** (sign-in was not approved, or
+Honcho is self-hosted), it prints how to set an API key and exits. Relay that to
+the user, along with the option to run `/honcho:setup` again to sign in:
 
 - Get a free key at https://app.honcho.dev
 - **macOS / Linux:** add to `~/.zshrc` (or `~/.bashrc`): `export HONCHO_API_KEY="your-key-here"`

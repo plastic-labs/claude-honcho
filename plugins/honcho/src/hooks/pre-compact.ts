@@ -1,5 +1,6 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode } from "../config.js";
+import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode } from "../config.js";
+import { createHonchoClient } from "../honcho-client.js";
 import { Spinner } from "../spinner.js";
 import { setMemoryState } from "../state.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -143,7 +144,7 @@ export async function handlePreCompact(): Promise<void> {
   setMemoryState("compacting", undefined, hookInput.session_id);
 
   try {
-    const honcho = new Honcho(getHonchoClientOptions(config));
+    const honcho = await createHonchoClient(config);
     const observationMode = getObservationMode(config);
 
     // Get session and peers using new fluent API

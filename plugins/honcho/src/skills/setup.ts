@@ -14,7 +14,11 @@ import {
   getClaudeSettingsPath,
   getClaudeSettingsDir,
   saveRootField,
+  describeAuth,
+  getConfiguredOrigin,
 } from "../config.js";
+import { signIn } from "./login.js";
+import { createHonchoClient } from "../honcho-client.js";
 import * as s from "../styles.js";
 import { findTranscripts } from "./transcript-parse.js";
 import { copyFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -99,6 +103,18 @@ function installStatusline(): void {
   }
 }
 
+/** True when the config file holds nothing but sign-in grants (login ran before setup). */
+function configHasOnlyGrants(): boolean {
+  try {
+    const file = JSON.parse(readFileSync(getConfigPath(), "utf-8"));
+    const hosts = file.hosts ?? {};
+    return Object.keys(file).every((k) => k === "hosts" || k === "oauth")
+      && Object.values<any>(hosts).every((b) => Object.keys(b ?? {}).every((k) => k === "oauth"));
+  } catch {
+    return false;
+  }
+}
+
 export async function setup(): Promise<void> {
   // Default to claude_code for this runner
   setDetectedHost("claude_code");
@@ -107,50 +123,34 @@ export async function setup(): Promise<void> {
   console.log(s.header("honcho setup"));
   console.log("");
 
-  // Check for API key — env var takes precedence, then config file
-  let apiKey = process.env.HONCHO_API_KEY;
-  let keySource = "environment";
+  const firstRun = !configExists() || configHasOnlyGrants();
 
-  if (!apiKey) {
-    // Try reading from config file
-    try {
-      const configRaw = readFileSync(getConfigPath(), "utf-8");
-      const configData = JSON.parse(configRaw);
-      apiKey = configData.apiKey;
-      keySource = "config";
-    } catch {
-      // No config file or no apiKey in it
-    }
+  // Credential: HONCHO_API_KEY env, a Honcho sign-in, or an apiKey in the
+  // config file. With none, sign in through the browser (Honcho cloud only).
+  let config = loadConfig() || loadConfigFromEnv();
+  if (!config && await signIn(getConfiguredOrigin())) {
+    config = loadConfig();
   }
-
-  if (!apiKey) {
-    console.log(s.warn("No API key found (checked env and config)"));
+  if (!config) {
+    console.log(s.warn("Not connected to Honcho"));
     console.log("");
-    console.log("  1. Get a free key at https://app.honcho.dev");
+    console.log("  Use an API key from https://app.honcho.dev:");
     if (process.platform === "win32") {
-      console.log("  2. Set it in PowerShell:");
       console.log(s.dim('     setx HONCHO_API_KEY "your-key-here"'));
     } else {
-      console.log("  2. Add to ~/.zshrc or ~/.bashrc:");
-      console.log(s.dim('     export HONCHO_API_KEY="your-key-here"'));
+      console.log(s.dim('     export HONCHO_API_KEY="your-key-here"   # in ~/.zshrc or ~/.bashrc'));
     }
-    console.log("  3. Restart Claude Code and run /honcho:setup");
+    console.log("  Then restart Claude Code and run /honcho:setup again.");
     process.exit(1);
   }
 
-  console.log(s.success(`API key found (${keySource})`));
+  console.log(s.success(`Credential found: ${describeAuth(config)}`));
   console.log("");
 
   // Validate connection
   console.log(s.section("Validating connection"));
-  const config = loadConfig() || loadConfigFromEnv();
-  if (!config) {
-    console.log(s.warn("Failed to build config from environment"));
-    process.exit(1);
-  }
-
   try {
-    const honcho = new Honcho(getHonchoClientOptions(config));
+    const honcho = await createHonchoClient(config);
     await honcho.workspaces();
     console.log(s.success("Connected to Honcho API"));
     console.log(`  ${s.label("Workspace")}: ${config.workspace}`);
@@ -161,17 +161,23 @@ export async function setup(): Promise<void> {
     const msg = error instanceof Error ? error.message : String(error);
     console.log(s.warn(`Connection failed: ${msg}`));
     if (msg.includes("401") || msg.includes("auth")) {
-      console.log(s.dim("  API key may be invalid. Get a new one at https://app.honcho.dev"));
+      const oauth = config.auth?.source === "oauth";
+      console.log(s.dim(oauth
+        ? "  Your Honcho sign-in was rejected. Run /honcho:setup to sign in again."
+        : "  API key may be invalid. Get a new one at https://app.honcho.dev"));
     }
     process.exit(1);
   }
 
   // Write config if it doesn't exist
-  if (!configExists()) {
+  if (firstRun) {
     console.log(s.section("Creating config"));
     try {
-      // Root-level globals (owned by user/CLI, written only at initial setup)
-      saveRootField("apiKey", config.apiKey);
+      // Root-level globals (owned by user/CLI, written only at initial setup).
+      // An OAuth access token is never written as apiKey; it lives in its grant.
+      if (config.auth?.source === "env" || config.auth?.source === "apiKey") {
+        saveRootField("apiKey", config.apiKey);
+      }
       saveRootField("peerName", config.peerName);
       // Per-host config goes in hosts.claude_code via saveConfig
       saveConfig({

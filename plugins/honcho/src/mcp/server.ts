@@ -33,7 +33,9 @@ import {
   REASONING_LEVELS,
   getObservationMode,
   getPluginVersion,
+  refreshCredential,
 } from "../config.js";
+import { setClientApiKey } from "../honcho-client.js";
 import { validateRedactPattern } from "../redact.js";
 import { honchoSessionUrl } from "../styles.js";
 import {
@@ -944,6 +946,11 @@ export async function runMcpServer(): Promise<void> {
       return NOT_CONFIGURED_RESULT;
     }
     const { config, honcho, honchoDialectic } = clients;
+    // A hook may have refreshed the OAuth grant since the last call, which
+    // supersedes our token; re-read it and swap it in place on both clients.
+    await refreshCredential(config);
+    setClientApiKey(honcho, config.apiKey);
+    setClientApiKey(honchoDialectic, config.apiKey);
 
     // ── Config tools (no Honcho session needed) ──
 

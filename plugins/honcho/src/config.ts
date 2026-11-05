@@ -1,8 +1,8 @@
 import { homedir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { telemetryHeaders } from "@honcho-ai/harness-plugin-core";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
+import { ensureFreshCredential, pickCredential, telemetryHeaders, type Credential, type OAuthTokens } from "@honcho-ai/harness-plugin-core";
 
 export function sanitizeForSessionName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
@@ -170,6 +170,8 @@ export interface HostConfig {
    * against different Honcho orgs or workspaces.
    */
   apiKey?: string;
+  /** OAuth grant from this plugin's device sign-in (/honcho:setup). */
+  oauth?: OAuthTokens;
 
   /** Per-host overrides for settings that may differ across tools */
   enabled?: boolean;
@@ -327,8 +329,10 @@ interface HonchoFileConfig {
 export interface HonchoCLAUDEConfig {
   /** The user's peer name */
   peerName: string;
-  /** Honcho API key */
+  /** Honcho API key or OAuth access token, whichever pickCredential chose */
   apiKey: string;
+  /** Where apiKey came from, and the state of an OAuth grant */
+  auth?: Omit<Credential, "token"> & { host: string };
   /** Honcho workspace name (resolved per-host) */
   workspace: string;
   /** AI peer name (resolved per-host, e.g. "claude" for claude-code) */
@@ -448,9 +452,16 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     ?? raw.hosts?.[host.replace(/_/g, "-")]
     ?? raw.hosts?.[host.replace(/-/g, "_")];
 
-  // Resolution order: env var > host-scoped apiKey > root apiKey.
-  const apiKey = process.env.HONCHO_API_KEY || hostBlock?.apiKey || raw.apiKey;
-  if (!apiKey) return null;
+  // Resolution order: env var > this plugin's OAuth grant > apiKey
+  // (host-scoped, then root) > an expired grant. OAuth only on Honcho cloud.
+  const hostKey = [host, host.replace(/_/g, "-"), host.replace(/-/g, "_")].find((k) => raw.hosts?.[k]) ?? host;
+  const cred = pickCredential(raw, {
+    host: hostKey,
+    baseUrl: honchoOrigin(hostBlock?.endpoint ?? raw.endpoint),
+    env: process.env,
+  });
+  if (!cred) return null;
+  const { token: apiKey, ...authState } = cred;
 
   const peerName = raw.peerName || process.env.HONCHO_PEER_NAME || process.env.USER || process.env.USERNAME || "user";
 
@@ -484,6 +495,7 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
   // individual integrations can override per-host without touching root.
   const config: HonchoCLAUDEConfig = {
     apiKey,
+    auth: { ...authState, host: hostKey },
     peerName,
     workspace,
     aiPeer,
@@ -582,11 +594,32 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   return config;
 }
 
-// config.json can hold an API key, so it is kept owner-only. The mode option
-// applies only on creation, so an existing file is restricted before the write.
-function writeConfigFile(data: unknown): void {
-  if (existsSync(CONFIG_FILE)) chmodSync(CONFIG_FILE, 0o600);
-  writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+// OAuth grants rotate on every refresh, possibly in another process since this
+// writer read the file. Take them from disk at write time so a settings save
+// never puts back a superseded refresh token.
+function carryOAuthFromDisk(data: Record<string, any>): void {
+  let disk: Record<string, any>;
+  try {
+    disk = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+  } catch {
+    return;
+  }
+  if (disk.oauth) data.oauth = disk.oauth;
+  for (const [name, block] of Object.entries<any>(disk.hosts ?? {})) {
+    if (!block?.oauth) continue;
+    data.hosts ??= {};
+    data.hosts[name] = { ...(data.hosts[name] ?? {}), oauth: block.oauth };
+  }
+}
+
+// config.json can hold an API key, so it is kept owner-only. Written to a temp
+// file and renamed so a concurrent reader never sees a half-written file.
+function writeConfigFile(data: Record<string, any>): void {
+  carryOAuthFromDisk(data);
+  const tmp = `${CONFIG_FILE}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+  chmodSync(tmp, 0o600);
+  renameSync(tmp, CONFIG_FILE);
 }
 
 /**
@@ -674,6 +707,9 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   // materialized here), but must not drop hosts.<host>.apiKey on rewrite.
   if (existingHost.apiKey !== undefined) {
     hostEntry.apiKey = existingHost.apiKey;
+  }
+  if (existingHost.oauth !== undefined) {
+    hostEntry.oauth = existingHost.oauth;
   }
 
   existing.hosts[host] = hostEntry;
@@ -827,6 +863,66 @@ export function getHonchoBaseUrlForEndpoint(endpoint?: HonchoEndpointConfig): st
     return HONCHO_BASE_URLS.local;
   }
   return HONCHO_BASE_URLS.production;
+}
+
+/** API origin (no /v3), the form harness-plugin-core compares against Honcho cloud. */
+function honchoOrigin(endpoint?: HonchoEndpointConfig): string {
+  return getHonchoBaseUrlForEndpoint(endpoint).replace(/\/v3$/, "");
+}
+
+/** The API origin this plugin targets, even when no credential is configured yet. */
+export function getConfiguredOrigin(host: HonchoHost = getDetectedHost()): string {
+  const env = process.env.HONCHO_ENDPOINT;
+  if (env === "local") return honchoOrigin({ environment: "local" });
+  if (env?.startsWith("http")) return honchoOrigin({ baseUrl: env });
+  let raw: HonchoFileConfig = {};
+  try {
+    raw = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+  } catch {}
+  return honchoOrigin(raw.hosts?.[host]?.endpoint ?? raw.endpoint);
+}
+
+/**
+ * Refresh an OAuth access token that is near expiry and put the result in
+ * config.apiKey. A no-op for API keys. Every refresh supersedes the previous
+ * access token, so long-lived callers run this before each batch of requests
+ * instead of holding on to a token.
+ */
+export async function refreshCredential(config: HonchoCLAUDEConfig): Promise<void> {
+  const host = config.auth?.host ?? getDetectedHost();
+  const cred = await ensureFreshCredential({
+    path: CONFIG_FILE,
+    host,
+    baseUrl: honchoOrigin(config.endpoint),
+    env: process.env,
+  });
+  if (!cred) return;
+  const { token, ...authState } = cred;
+  config.apiKey = token;
+  config.auth = { ...authState, host };
+}
+
+/** One line describing which credential is in use, for status output. */
+export function describeAuth(config: HonchoCLAUDEConfig): string {
+  const a = config.auth;
+  const expiry = () => {
+    if (!a?.expiresAt) return "";
+    const mins = Math.round((a.expiresAt - Date.now() / 1000) / 60);
+    return mins > 0 ? ` (token refreshes in ${mins}m)` : " (token expired)";
+  };
+  switch (a?.source) {
+    case "env": return "HONCHO_API_KEY env var";
+    case "oauth": return `signed in with Honcho${expiry()}`;
+    default: return "API key";
+  }
+}
+
+/** A user-facing notice when the OAuth sign-in needs attention, else undefined. */
+export function getAuthNotice(config: HonchoCLAUDEConfig): string | undefined {
+  if (config.auth?.reauthRequired) {
+    return "[honcho] Your Honcho sign-in has expired. Run /honcho:setup to sign in again.";
+  }
+  return undefined;
 }
 
 /** Get the base URL for a resolved runtime config. */

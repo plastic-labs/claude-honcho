@@ -1,5 +1,6 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { createHonchoClient } from "../honcho-client.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { redactSecrets } from "../redact.js";
 import { visCapture } from "../visual.js";
@@ -257,7 +258,7 @@ export async function handlePostToolUse(): Promise<void> {
 }
 
 async function logToHonchoAsync(config: any, sessionName: string, summary: string): Promise<void> {
-  const honcho = new Honcho(getHonchoClientOptions(config));
+  const honcho = await createHonchoClient(config);
 
   // Get session and peer using new fluent API
   const session = await honcho.session(sessionName);

@@ -1,5 +1,6 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig } from "../config.js";
+import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig, getAuthNotice } from "../config.js";
+import { createHonchoClient } from "../honcho-client.js";
 import { renderSessionStart } from "../injection.js";
 import {
   resetMessageCount,
@@ -106,7 +107,7 @@ export async function handleSessionStart(): Promise<void> {
     logFlow("init", `workspace: ${config.workspace}, peers: ${config.peerName}/${config.aiPeer}`);
 
     // New SDK: workspace is provided at construction time
-    const honcho = new Honcho(getHonchoClientOptions(config));
+    const honcho = await createHonchoClient(config);
 
     // Step 1-3: Get session and peers using new fluent API (lazily created)
     spinner.update(`${sessionName} · loading session`);
@@ -212,7 +213,10 @@ export async function handleSessionStart(): Promise<void> {
     spinner.stop();
     setMemoryState("idle", undefined, claudeInstanceId);
 
-    const systemMessage = visComposedInjection("session-start", rendered.labels, rendered.notes);
+    const authNotice = getAuthNotice(config);
+    const systemMessage = [authNotice, visComposedInjection("session-start", rendered.labels, rendered.notes)]
+      .filter(Boolean)
+      .join("\n") || undefined;
     if (rendered.content) {
       console.log(JSON.stringify({
         hookSpecificOutput: {
@@ -221,7 +225,7 @@ export async function handleSessionStart(): Promise<void> {
         },
         systemMessage,
       }));
-    } else if (rendered.notes.length) {
+    } else if (rendered.notes.length || authNotice) {
       console.log(JSON.stringify({ systemMessage }));
     }
 
@@ -231,6 +235,8 @@ export async function handleSessionStart(): Promise<void> {
     logHook("session-start", `Error: ${error}`, { error: String(error) });
     spinner.stop();
     setMemoryState("idle", undefined, claudeInstanceId);
+    const authNotice = getAuthNotice(config);
+    if (authNotice) console.log(JSON.stringify({ systemMessage: authNotice }));
     process.exit(0);
   }
 }

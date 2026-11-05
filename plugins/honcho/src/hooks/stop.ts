@@ -1,5 +1,6 @@
 import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, isLoggingEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionName, isPluginEnabled, isLoggingEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { createHonchoClient } from "../honcho-client.js";
 import { existsSync, readFileSync } from "fs";
 import { chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -173,7 +174,7 @@ export async function handleStop(): Promise<void> {
   logHook("stop", `Capturing ${turnMessages.length} assistant message(s) this turn`);
 
   try {
-    const honcho = new Honcho(getHonchoClientOptions(config));
+    const honcho = await createHonchoClient(config);
 
     // Local peer handle, no get-or-create hop (see postUserMessage in user-prompt.ts).
     const noEnsure = () => Promise.resolve();
