@@ -4,6 +4,7 @@ import { getConfigPath } from "../config.js";
 import * as s from "../styles.js";
 
 const HOST = "claude_code";
+const CLIENT_ID = "claude-honcho";
 const SOURCE = "claude-code";
 // Setup runs as one Bash call; stay under its default 2-minute timeout.
 const WAIT_SECONDS = 110;
@@ -27,7 +28,7 @@ export async function signIn(origin: string): Promise<boolean> {
 
   let device;
   try {
-    device = await requestDeviceCode({ source: SOURCE });
+    device = await requestDeviceCode({ clientId: CLIENT_ID, source: SOURCE });
   } catch (e) {
     console.log(s.warn(`Could not start sign-in: ${e instanceof Error ? e.message : String(e)}`));
     return false;
@@ -39,7 +40,7 @@ export async function signIn(origin: string): Promise<boolean> {
   openBrowser(device.verificationUriComplete);
 
   try {
-    const tokens = await pollForToken({ ...device, expiresIn: Math.min(device.expiresIn, WAIT_SECONDS) });
+    const tokens = await pollForToken({ ...device, expiresIn: Math.min(device.expiresIn, WAIT_SECONDS) }, { clientId: CLIENT_ID });
     await saveGrant(getConfigPath(), HOST, tokens);
   } catch (e) {
     const code = e instanceof OAuthError ? e.code : "";
