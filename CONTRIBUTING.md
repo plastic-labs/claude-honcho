@@ -15,6 +15,7 @@ claude-honcho/
 │   │   ├── skills/         # Plugin skills
 │   │   ├── scripts/        # build.ts, smoke.sh, and shell helpers
 │   │   ├── tests/
+│   │   ├── e2e/            # harness e2e against the Honcho sandbox
 │   │   ├── mcp-server.ts   # MCP server entry point
 │   │   └── mcp-servers.json
 │   └── honcho-dev/         # SDK skills plugin (no compiled code)
@@ -77,11 +78,16 @@ bunx tsc --noEmit             # type check
 bun test                      # unit tests
 bun run scripts/build.ts      # bundle into .stage/
 bash scripts/smoke.sh .stage  # every bundled entry point must run under node
+bunx tsc --noEmit -p e2e      # type check the e2e driver
+bun run e2e                   # Claude Code + this plugin against the Honcho sandbox
 ```
 
 The smoke test runs the staged tree from a temporary directory with no
 `node_modules` on the resolution path, which is what catches an unbundled
 dependency or a leftover `.ts` reference.
+
+`bun run e2e` needs Docker, `uv` and the `claude` CLI, but no credentials: the model
+is a local mock by default. See [`plugins/honcho/e2e/README.md`](plugins/honcho/e2e/README.md).
 
 ## Working on the `honcho` Plugin
 

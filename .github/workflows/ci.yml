@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
 
+# Every job only reads the repo; artifact uploads use the runtime token, not
+# GITHUB_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -24,7 +29,9 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Type check
-        run: bunx tsc --noEmit
+        run: |
+          bunx tsc --noEmit
+          bunx tsc --noEmit -p e2e
 
       - name: Unit tests
         run: bun test
@@ -42,3 +49,59 @@ jobs:
 
       - name: Smoke test bundled entry points
         run: bash scripts/smoke.sh .stage
+
+  # Claude Code + the staged plugin, driven through a scripted conversation
+  # against the Honcho sandbox. Both the model (a local Anthropic API mock) and
+  # Honcho's provider are mocked, so the job needs no secrets and runs on fork
+  # pull requests too. See plugins/honcho/e2e/README.md.
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: plugins/honcho
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The sandbox's seed step runs its Python seeder through uv.
+      - uses: astral-sh/setup-uv@v6
+
+      # Pinned: the e2e's mock model is scripted against this version's wire
+      # behaviour. See "CI" in plugins/honcho/e2e/README.md before bumping.
+      - name: Install dependencies
+        run: |
+          bun install --frozen-lockfile
+          npm install -g @anthropic-ai/claude-code@2.1.316
+
+      # --keep leaves the run dirs in place for the failure steps; TMPDIR puts
+      # them where the artifact upload looks.
+      - name: Harness e2e
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: bun run e2e --keep
+
+      - name: Collect sandbox logs
+        if: failure()
+        run: docker compose -p honcho-sandbox logs --no-color > "$RUNNER_TEMP/sandbox.log" 2>&1 || true
+
+      # Only logs and transcripts: the isolated HOME also holds Claude Code
+      # state that is not uploaded.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: harness-e2e
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/sandbox.log
+            ${{ runner.temp }}/honcho-e2e-*/claude-*-stream.jsonl
+            ${{ runner.temp }}/honcho-e2e-*/claude-*-stderr.txt
+            ${{ runner.temp }}/honcho-e2e-*/anthropic-mock.jsonl
+            ${{ runner.temp }}/honcho-e2e-*/home/.honcho/*.log
+            ${{ runner.temp }}/honcho-e2e-*/claude-config/projects/**/*.jsonl
