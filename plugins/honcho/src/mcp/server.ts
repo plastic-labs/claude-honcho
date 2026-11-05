@@ -1013,8 +1013,9 @@ export async function runMcpServer(): Promise<void> {
 
     // ── Honcho session tools ──
 
+    // get_context and get_representation read only the peer; the rest need this chat's session.
     const sessionName = getSessionName();
-    if (!sessionName) {
+    if (!sessionName && name !== "get_context" && name !== "get_representation") {
       return {
         content: [{ type: "text", text: "Error: no Claude Code session id available" }],
         isError: true,
@@ -1022,7 +1023,7 @@ export async function runMcpServer(): Promise<void> {
     }
 
     try {
-      const session = await honcho.session(sessionName);
+      const session = sessionName ? await honcho.session(sessionName) : undefined;
       const observationMode = getObservationMode(config);
 
       // unified: user observes self — all ops go through userPeer.
@@ -1041,7 +1042,7 @@ export async function runMcpServer(): Promise<void> {
           const [messages, conclusions] = await Promise.all([
             scope === "workspace"
               ? honcho.search(query, { limit })
-              : session.search(query, { limit }),
+              : session!.search(query, { limit }),
             activePeer.conclusionsOf(config.peerName).query(query, limit).catch(() => []),
           ]);
 
@@ -1198,7 +1199,7 @@ export async function runMcpServer(): Promise<void> {
 
           const conclusions = await activePeer.conclusionsOf(config.peerName).create({
             content,
-            sessionId: session.id,
+            sessionId: session!.id,
           });
 
           return {
