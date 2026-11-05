@@ -2,10 +2,7 @@
 // Harness e2e: drive a real harness through a scripted conversation against
 // the Honcho sandbox and assert memory round-trips. See e2e/README.md.
 //
-//   bun run e2e [--harness claude-code] [--variant <name>] [--model mock|real] [--keep] [--no-build] [--setup-only]
-//
-// --setup-only builds, fetches and starts the sandbox, then exits leaving it up,
-// so CI can do everything that needs the network before cutting egress.
+//   bun run e2e [--harness claude-code] [--variant <name>] [--model mock|real] [--keep] [--no-build]
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -25,7 +22,6 @@ const { values: args } = parseArgs({
     model: { type: "string", default: process.env.E2E_MODEL || "mock" },
     keep: { type: "boolean", default: false },
     "no-build": { type: "boolean", default: false },
-    "setup-only": { type: "boolean", default: false },
   },
 });
 
@@ -102,11 +98,6 @@ if (state === "healthy") {
     stopOwnedSandbox();
     throw e;
   }
-}
-
-if (args["setup-only"]) {
-  log(`setup done; the sandbox is up at ${SANDBOX_URL} and left running`);
-  process.exit(0);
 }
 
 const print = (checks: CheckResult[]) => {
