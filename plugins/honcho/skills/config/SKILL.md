@@ -34,15 +34,13 @@ AskUserQuestion:
   options:
     - label: "Peers"
       description: "Your name and AI name (currently: {resolved.peerName} / {resolved.aiPeer})"
-    - label: "Session mapping"
-      description: "How sessions are named — per directory, git branch, or per chat (currently: {resolved.sessionStrategy})"
     - label: "Workspace"
       description: "Data space and session scope (currently: {resolved.workspace})"
     - label: "Memory injection"
       description: "What Honcho injects at session start and per turn (currently: start [{resolved.injection.sessionStart}], turn [{resolved.injection.perTurn}], shown in UI [{resolved.injection.showContents}])"
 ```
 
-For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `["directives", "summary", "peerCard"]`, and if `injection.perTurn` is unset it is `["userContext"]` (user conclusions on). A stored perTurn value of `"context"` is the legacy name for `"userContext"` — treat them as the same. `injection.showContents` is `[]` when unset — render that as `none`.
+For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `["directives", "peerCard"]`, and if `injection.perTurn` is unset it is `["userContext"]` (user conclusions on). A stored perTurn value of `"context"` is the legacy name for `"userContext"` — treat them as the same. `injection.showContents` is `[]` when unset — render that as `none`.
 
 If the user selects "Other", present advanced options:
 
@@ -85,36 +83,6 @@ Then ask for the new value. Call `set_config` with `peerName` or `aiPeer`.
 ### Simple fields (Logging, etc.)
 
 Use `AskUserQuestion` to ask for the new value if there are known options, otherwise ask the user to type it. Call `set_config` with the appropriate field. Show the result.
-
-### Session mapping
-
-```
-AskUserQuestion:
-  question: "Which session mapping strategy?"
-  header: "Sessions"
-  options:
-    - label: "per-directory (Recommended)"
-      description: "{peer}-{repo} — one session per project"
-    - label: "git-branch"
-      description: "{peer}-{repo}-{branch} — session follows branch"
-    - label: "chat-instance"
-      description: "chat-{id} — fresh each launch"
-```
-
-Do NOT use markdown previews for this menu — descriptions are sufficient and previews truncate in narrow terminals.
-
-After strategy selection, ask about peer prefix:
-
-```
-AskUserQuestion:
-  question: "Include your name in session names?"
-  header: "Prefix"
-  options:
-    - label: "Yes — {peerName}-{repoName}"
-      description: "For teams sharing a workspace"
-    - label: "No — {repoName} only"
-      description: "Cleaner for solo use"
-```
 
 ### Workspace
 
@@ -159,8 +127,6 @@ AskUserQuestion:
       options:
         - label: "Memory directives"
           description: "How to use memory — treat as background, search, save insights"
-        - label: "Session summary"
-          description: "Rolling long summary of prior sessions"
         - label: "Peer card"
           description: "Your identity + attributes list"
         - label: "Representation"
@@ -173,30 +139,26 @@ AskUserQuestion:
           description: "Fresh, prompt-scoped memory about you pulled every turn"
         - label: "Assistant conclusions"
           description: "Same fetch, but for the AI peer — what Honcho knows about the assistant"
-        - label: "Session messages"
-          description: "Recent raw messages from the mapped Honcho session — useful when other instances share the session"
         - label: "Dialectic recall"
           description: "A reasoned answer over your history each turn — richer but slower (off by default)"
     - question: "Which of those should print what they injected to the terminal?"
       header: "Show in UI"
       multiSelect: true
-      options:                     # same four labels as "Per turn"
+      options:                     # same three labels as "Per turn"
         - label: "User conclusions"
           description: "List each injected conclusion instead of just the count"
         - label: "Assistant conclusions"
           description: "List each injected conclusion instead of just the count"
-        - label: "Session messages"
-          description: "List each injected message, one truncated line each"
         - label: "Dialectic recall"
           description: "Print the full reasoned answer — prose, can be long"
 ```
 
 Map the selections to component names, then call `set_config` once per field:
-- Session start → `injection.sessionStart`, mapping "Memory directives"→`directives`, "Session summary"→`summary`, "Peer card"→`peerCard`, "Representation"→`peerRepresentation`.
-- Per turn → `injection.perTurn`, mapping "User conclusions"→`userContext`, "Assistant conclusions"→`assistantContext`, "Session messages"→`sessionContext`, "Dialectic recall"→`dialectic`.
+- Session start → `injection.sessionStart`, mapping "Memory directives"→`directives`, "Peer card"→`peerCard`, "Representation"→`peerRepresentation`.
+- Per turn → `injection.perTurn`, mapping "User conclusions"→`userContext`, "Assistant conclusions"→`assistantContext`, "Dialectic recall"→`dialectic`.
 - Show in UI → `injection.showContents`, same mapping as per turn.
 
-Pass the value as a JSON array (e.g. `["directives","summary","peerCard"]`). An empty selection means `[]`: for `injection.sessionStart` and `injection.perTurn` that surface then injects nothing, and for `injection.showContents` (the default) every enabled per-turn component still injects — it just reports a one-line summary (count, tokens, timing) instead of printing its payload.
+Pass the value as a JSON array (e.g. `["directives","peerCard"]`). An empty selection means `[]`: for `injection.sessionStart` and `injection.perTurn` that surface then injects nothing, and for `injection.showContents` (the default) every enabled per-turn component still injects — it just reports a one-line summary (count, tokens, timing) instead of printing its payload.
 
 `showContents` is display-only. It never changes what reaches the model.
 

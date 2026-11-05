@@ -2,7 +2,7 @@
  * Backfill runner — imports local Claude Code session transcripts into Honcho.
  *
  * Scans ~/.claude/projects/<dir>/<uuid>.jsonl within a recency window, rebuilds
- * each conversation, names sessions with the same rules as the live hooks, and
+ * each conversation, names sessions by Claude Code session id like the live hooks, and
  * uploads with the original message timestamps.
  *
  * Usage:
@@ -17,10 +17,9 @@ import {
   loadConfig,
   getHonchoClientOptions,
   getObservationMode,
-  deriveSessionName,
+  sanitizeForSessionName,
   getConfigDir,
   setDetectedHost,
-  type SessionStrategy,
 } from "../config.js";
 import { addMessagesBatched, chunkContent } from "../cache.js";
 import { parseTranscriptForBackfill, findTranscripts, type ParsedMessage } from "./transcript-parse.js";
@@ -74,48 +73,30 @@ interface SessionGroup {
   messages: Array<ParsedMessage & { sourceTranscript: string }>;
 }
 
-/** Group all messages into Honcho sessions, naming each via the configured strategy
- *  and per-message cwd/branch (+ the transcript uuid for chat-instance). */
+/** One Honcho session per transcript, named by its Claude Code session id like
+ *  the live hooks. */
 export function groupIntoSessions(
   transcripts: Array<{ path: string; mtimeMs: number }>,
-  strategy: SessionStrategy,
-  peerName: string | undefined,
-  sessionPeerPrefix: boolean | undefined,
-  sessionOverrides: Record<string, string> = {}
 ): { groups: Map<string, SessionGroup>; parsed: number; empty: number } {
   const groups = new Map<string, SessionGroup>();
   let parsed = 0;
   let empty = 0;
 
   for (const { path } of transcripts) {
-    const { messages, cwd: tCwd, gitBranch: tBranch, sessionId } = parseTranscriptForBackfill(path);
+    const { messages, sessionId } = parseTranscriptForBackfill(path);
     if (messages.length === 0) {
       empty++;
       continue;
     }
     parsed++;
     const source = basename(path);
-    for (const msg of messages) {
-      const cwd = msg.cwd || tCwd;
-      if (!cwd) continue; // can't name a session without a directory
-      // Honor manual per-directory overrides exactly as getSessionName() does,
-      // so backfilled sessions share names with future live sessions.
-      const name =
-        strategy === "per-directory" && sessionOverrides[cwd]
-          ? sessionOverrides[cwd]
-          : deriveSessionName(strategy, cwd, {
-              peerName,
-              sessionPeerPrefix,
-              branch: msg.gitBranch || tBranch,
-              instanceId: sessionId,
-            });
-      let group = groups.get(name);
-      if (!group) {
-        group = { name, messages: [] };
-        groups.set(name, group);
-      }
-      group.messages.push({ ...msg, sourceTranscript: source });
+    const name = sanitizeForSessionName(sessionId || basename(path, ".jsonl"));
+    let group = groups.get(name);
+    if (!group) {
+      group = { name, messages: [] };
+      groups.set(name, group);
     }
+    for (const msg of messages) group.messages.push({ ...msg, sourceTranscript: source });
   }
   return { groups, parsed, empty };
 }
@@ -135,10 +116,8 @@ export async function run(): Promise<void> {
   }
 
   const targetWorkspace = args.workspace || config.workspace;
-  const strategy: SessionStrategy = config.sessionStrategy ?? "per-directory";
 
   console.log(`  ${s.label("Workspace")}:   ${targetWorkspace}${args.workspace ? s.dim("  (override)") : ""}`);
-  console.log(`  ${s.label("Strategy")}:    ${strategy}`);
   console.log(`  ${s.label("Window")}:      last ${args.days} days`);
   console.log(`  ${s.label("User peer")}:   ${config.peerName}`);
   console.log(`  ${s.label("AI peer")}:     ${config.aiPeer}`);
@@ -162,13 +141,7 @@ export async function run(): Promise<void> {
   }
 
   // Group into sessions
-  const { groups, parsed, empty } = groupIntoSessions(
-    todo,
-    strategy,
-    config.peerName,
-    config.sessionPeerPrefix,
-    config.sessions ?? {}
-  );
+  const { groups, parsed, empty } = groupIntoSessions(todo);
   const totalMessages = [...groups.values()].reduce((n, g) => n + g.messages.length, 0);
 
   console.log(s.listItem(`${parsed} transcript(s) with content${empty ? s.dim(` (${empty} empty, skipped)`) : ""}`));
@@ -225,7 +198,6 @@ export async function run(): Promise<void> {
             metadata: {
               backfill: true,
               source_transcript: m.sourceTranscript,
-              session_affinity: g.name,
               type: m.role === "assistant"
                 ? (m.isResponse ? "assistant_response" : "assistant_intermediate")
                 : undefined,

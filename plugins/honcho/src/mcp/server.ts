@@ -13,6 +13,7 @@ import {
   coerceBoolean,
   getHonchoClientOptions,
   getSessionName,
+  getInjectionConfig,
   getConfigPath,
   configExists,
   getDetectedHost,
@@ -20,7 +21,6 @@ import {
   getKnownHosts,
   setDetectedHost,
   type HonchoCLAUDEConfig,
-  type SessionStrategy,
   type ReasoningLevel,
   type HonchoEnvironment,
   type ObservationMode,
@@ -37,7 +37,6 @@ import {
 import { validateRedactPattern } from "../redact.js";
 import { honchoSessionUrl } from "../styles.js";
 import {
-  getLastActiveCwd,
   clearIdCache,
   clearPeerCache,
   clearUserContextOnly,
@@ -64,7 +63,7 @@ const DANGEROUS_FIELDS = new Set(["workspace", "endpoint.environment", "endpoint
 
 // Fields that affect session identity/routing — stale sessions risk cross-contamination
 const SESSION_AFFECTING_FIELDS = new Set([
-  "workspace", "aiPeer", "peerName", "sessionStrategy", "sessionPeerPrefix",
+  "workspace", "aiPeer", "peerName",
   "endpoint.environment", "endpoint.baseUrl", "globalOverride", "observationMode",
 ]);
 
@@ -91,7 +90,7 @@ function renderCard(rows: [string, string][], title: string): string {
   return [top, blank, ...body, blank, bot].join("\n");
 }
 
-function handleGetConfig(cwd: string) {
+function handleGetConfig() {
   const cfg = loadConfig();
   const host = getDetectedHost();
   const cfgPath = getConfigPath();
@@ -111,16 +110,13 @@ function handleGetConfig(cwd: string) {
     workspace: cfg.workspace,
     endpoint: getEndpointInfo(cfg),
     globalOverride,
-    sessionStrategy: cfg.sessionStrategy ?? "per-directory",
-    sessionPeerPrefix: cfg.sessionPeerPrefix !== false,
-    sessions: cfg.sessions ?? {},
     messageUpload: cfg.messageUpload ?? {},
     contextRefresh: cfg.contextRefresh ?? {},
     reasoningLevel: cfg.reasoningLevel ?? "medium",
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
     redactPatterns: cfg.redactPatterns ?? [],
-    injection: cfg.injection ?? {},
+    injection: getInjectionConfig(cfg),
     rememberTool: cfg.rememberTool === true,
     enabled: cfg.enabled !== false,
     logging: cfg.logging !== false,
@@ -128,7 +124,7 @@ function handleGetConfig(cwd: string) {
   } : null;
 
   // Current status header values
-  const sessionName = cfg ? getSessionName(cwd) : null;
+  const sessionName = cfg ? getSessionName() : null;
   const endpointInfo = cfg ? getEndpointInfo(cfg) : null;
   const endpointLabel = endpointInfo
     ? endpointInfo.type === "production" ? "platform" : endpointInfo.type
@@ -209,11 +205,6 @@ function handleGetConfig(cwd: string) {
   }
 
   // Pre-render the status card
-  const strategyLabels: Record<string, string> = {
-    "per-directory": "per directory",
-    "git-branch": "per git branch",
-    "chat-instance": "per chat",
-  };
   const hostLabel = endpointInfo
     ? endpointInfo.type === "production"
       ? `platform (app.honcho.dev)`
@@ -226,7 +217,6 @@ function handleGetConfig(cwd: string) {
     ["workspace", cfg.workspace],
 
     ["session", sessionName ?? "unknown"],
-    ["mapping", strategyLabels[cfg.sessionStrategy ?? "per-directory"] ?? cfg.sessionStrategy ?? "per directory"],
     ["peer", `${cfg.peerName} / ${cfg.aiPeer}`],
     ["host", hostLabel],
     ["messages", cfg.saveMessages !== false ? "saving enabled" : "saving disabled"],
@@ -248,7 +238,7 @@ function handleGetConfig(cwd: string) {
 /**
  * Coerce a set_config `value` into a string array. The `value` field is
  * schema-less, so MCP clients may deliver an array as a real array OR as a
- * JSON-encoded string (e.g. '["summary","peerCard"]'); accept both. Returns
+ * JSON-encoded string (e.g. '["directives","peerCard"]'); accept both. Returns
  * null when the value is neither, so the caller can report a shape error.
  */
 function coerceStringArray(value: unknown): string[] | null {
@@ -342,9 +332,6 @@ function handleSetConfig(args: Record<string, unknown>) {
       saveRootField("peerName", cfg.peerName);
       clearPeerCache();
       clearUserContextOnly();
-      if (String(value) !== String(previousValue) && Object.keys(cfg.sessions ?? {}).length > 0) {
-        warnings.push(`${Object.keys(cfg.sessions ?? {}).length} session override(s) kept under their existing names; only newly created sessions use the new naming. Use sessions.set/sessions.remove to adjust individual mappings.`);
-      }
       cacheInvalidation = { cleared: ["peer IDs", "user context"], reason: "Peer name changed" };
       break;
 
@@ -395,27 +382,6 @@ function handleSetConfig(args: Record<string, unknown>) {
       clearClaudeContextOnly();
       cacheInvalidation = { cleared: ["all IDs", "all context"], reason: "Endpoint URL changed" };
       break;
-
-    case "sessionStrategy": {
-      const prevStrategy = cfg.sessionStrategy ?? "per-directory";
-      previousValue = prevStrategy;
-      cfg.sessionStrategy = String(value) as SessionStrategy;
-      // Session overrides are kept: they only apply under per-directory (useless for chat-instance, and git-branch needs a different solution)
-      if (String(value) !== prevStrategy && String(value) !== "per-directory" && Object.keys(cfg.sessions ?? {}).length > 0) {
-        warnings.push(`${Object.keys(cfg.sessions ?? {}).length} session override(s) kept but inactive: overrides only apply under the per-directory strategy.`);
-      }
-      break;
-    }
-
-    case "sessionPeerPrefix": {
-      const prevPrefix = cfg.sessionPeerPrefix !== false;
-      previousValue = prevPrefix;
-      cfg.sessionPeerPrefix = coerceBoolean(value);
-      if (cfg.sessionPeerPrefix !== prevPrefix && Object.keys(cfg.sessions ?? {}).length > 0) {
-        warnings.push(`${Object.keys(cfg.sessions ?? {}).length} session override(s) kept under their existing names; only newly created sessions use the new naming. Use sessions.set/sessions.remove to adjust individual mappings.`);
-      }
-      break;
-    }
 
     case "globalOverride":
       previousValue = cfg.globalOverride ?? false;
@@ -570,20 +536,6 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.injection.searchMaxDistance = Number(value);
       break;
 
-    case "injection.sessionContextTokens": {
-      const tokens = Number(value);
-      if (!Number.isFinite(tokens) || tokens <= 0) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "injection.sessionContextTokens must be a positive number" }, null, 2) }],
-          isError: true,
-        };
-      }
-      previousValue = cfg.injection?.sessionContextTokens;
-      if (!cfg.injection) cfg.injection = {};
-      cfg.injection.sessionContextTokens = tokens;
-      break;
-    }
-
     case "rememberTool":
       previousValue = cfg.rememberTool;
       cfg.rememberTool = coerceBoolean(value);
@@ -621,37 +573,6 @@ function handleSetConfig(args: Record<string, unknown>) {
       break;
     }
 
-    case "sessions.set": {
-      const obj = value as Record<string, unknown>;
-      const path = obj?.path;
-      const sName = obj?.name;
-      if (typeof path !== "string" || !path || typeof sName !== "string" || !sName) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "sessions.set requires {path: string, name: string}" }, null, 2) }],
-          isError: true,
-        };
-      }
-      if (!cfg.sessions) cfg.sessions = {};
-      previousValue = cfg.sessions[path] ?? null;
-      cfg.sessions[path] = sName;
-      break;
-    }
-
-    case "sessions.remove": {
-      const obj = value as Record<string, unknown>;
-      const rPath = obj?.path;
-      if (typeof rPath !== "string" || !rPath) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "sessions.remove requires {path: string}" }, null, 2) }],
-          isError: true,
-        };
-      }
-      if (!cfg.sessions) cfg.sessions = {};
-      previousValue = cfg.sessions[rPath] ?? null;
-      delete cfg.sessions[rPath];
-      break;
-    }
-
     default:
       return {
         content: [{
@@ -672,16 +593,13 @@ function handleSetConfig(args: Record<string, unknown>) {
     aiPeer: cfg.aiPeer,
     workspace: cfg.workspace,
     endpoint: endpointInfo,
-    sessionStrategy: cfg.sessionStrategy ?? "per-directory",
-    sessionPeerPrefix: cfg.sessionPeerPrefix !== false,
-    sessions: cfg.sessions ?? {},
     messageUpload: cfg.messageUpload ?? {},
     contextRefresh: cfg.contextRefresh ?? {},
     reasoningLevel: cfg.reasoningLevel ?? "medium",
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
     redactPatterns: cfg.redactPatterns ?? [],
-    injection: cfg.injection ?? {},
+    injection: getInjectionConfig(cfg),
     rememberTool: cfg.rememberTool === true,
     enabled: cfg.enabled !== false,
     logging: cfg.logging !== false,
@@ -694,8 +612,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     : undefined;
 
   // Include session URL when session-affecting fields change
-  const cwd = getLastActiveCwd() || process.cwd();
-  const newSessionName = SESSION_AFFECTING_FIELDS.has(field) ? getSessionName(cwd) : undefined;
+  const newSessionName = SESSION_AFFECTING_FIELDS.has(field) ? getSessionName() : undefined;
   const sessionUrl = newSessionName ? honchoSessionUrl(cfg, newSessionName) ?? undefined : undefined;
 
   return {
@@ -934,16 +851,6 @@ export async function runMcpServer(): Promise<void> {
           },
         },
         {
-          name: "get_briefing",
-          description:
-            "Load the session briefing: the stored long summary of this session plus the user's peer card (identity/attribute profile). " +
-            "Call this once at the start of a session when the session-start directives ask for it, or any time you need to catch up on where the session left off.",
-          inputSchema: {
-            type: "object",
-            properties: {},
-          },
-        },
-        {
           name: "get_context",
           description: "Retrieve the full context object (representation + peer card) from Honcho for the current user. Scoped by observation mode.",
           inputSchema: {
@@ -989,8 +896,6 @@ export async function runMcpServer(): Promise<void> {
                   "globalOverride",
                   "endpoint.environment",
                   "endpoint.baseUrl",
-                  "sessionStrategy",
-                  "sessionPeerPrefix",
                   "enabled",
                   "logging",
                   "saveMessages",
@@ -1010,16 +915,13 @@ export async function runMcpServer(): Promise<void> {
                   "injection.maxConclusions",
                   "injection.searchMaxDistance",
                   "injection.searchQuerySource",
-                  "injection.sessionContextTokens",
                   "injection.dialecticTemplate",
                   "injection.dialecticReasoning",
                   "rememberTool",
-                  "sessions.set",
-                  "sessions.remove",
                 ],
               },
               value: {
-                description: "New value. For sessions.set: {path, name}. For sessions.remove: {path}. For injection.sessionStart / injection.perTurn / injection.showContents: a string array of component names (e.g. [\"summary\",\"peerCard\"]). For redactPatterns: a string array of regexes redacted from tool summaries in addition to the built-in secret patterns.",
+                description: "New value. For injection.sessionStart / injection.perTurn / injection.showContents: a string array of component names (e.g. [\"directives\",\"peerCard\"]). For redactPatterns: a string array of regexes redacted from tool summaries in addition to the built-in secret patterns.",
               },
               confirm: {
                 type: "boolean",
@@ -1036,7 +938,6 @@ export async function runMcpServer(): Promise<void> {
   // Handle tool calls
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const cwd = getLastActiveCwd() || process.cwd();
 
     clients ??= createClients();
     if (!clients) {
@@ -1047,7 +948,7 @@ export async function runMcpServer(): Promise<void> {
     // ── Config tools (no Honcho session needed) ──
 
     if (name === "get_config") {
-      return handleGetConfig(cwd);
+      return handleGetConfig();
     }
 
     if (name === "set_config") {
@@ -1112,7 +1013,13 @@ export async function runMcpServer(): Promise<void> {
 
     // ── Honcho session tools ──
 
-    const sessionName = getSessionName(cwd);
+    const sessionName = getSessionName();
+    if (!sessionName) {
+      return {
+        content: [{ type: "text", text: "Error: no Claude Code session id available" }],
+        isError: true,
+      };
+    }
 
     try {
       const session = await honcho.session(sessionName);
@@ -1301,34 +1208,6 @@ export async function runMcpServer(): Promise<void> {
                 text: `Saved conclusion: ${conclusions[0]?.content || content}`,
               },
             ],
-          };
-        }
-
-        case "get_briefing": {
-          // Fetches at sessionStart "summary"/"peerCard" components
-          const [summariesResult, ctxResult] = await Promise.allSettled([
-            session.summaries(),
-            activePeer.context({
-              ...(contextTarget ? { target: contextTarget } : {}),
-              maxConclusions: 25,
-              includeMostFrequent: true,
-            }),
-          ]);
-
-          const summary = summariesResult.status === "fulfilled"
-            ? (summariesResult.value as any)?.longSummary?.content?.trim()
-            : null;
-          const card: string[] = ctxResult.status === "fulfilled"
-            ? ((ctxResult.value as any)?.peerCard ?? []).filter((item: string) => item?.trim())
-            : [];
-
-          const parts: string[] = [];
-          if (summary) parts.push(`## Session summary\n${summary}`);
-          if (card.length) parts.push(`## Peer card (${card.length} items)\n${card.map((item) => `- ${item}`).join("\n")}`);
-          if (parts.length === 0) parts.push("No briefing available yet — no stored session summary or peer card.");
-
-          return {
-            content: [{ type: "text", text: parts.join("\n\n") }],
           };
         }
 

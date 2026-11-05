@@ -40,8 +40,6 @@ ${recall}
  * means it came back empty.
  */
 export interface SessionStartData {
-  /** SDK `session.summaries().long` narrative ("" on a fresh session). */
-  summary?: string | null;
   /** `context().peerCard` — structured identity/attribute list, full length. */
   peerCard?: string[] | null;
   /** `context().representation` — derived prose doc, full length. */
@@ -58,7 +56,7 @@ export interface RenderedInjection {
   content: string;
   /** Short labels of the emitted components, in injection order. */
   labels: string[];
-  /** Selected components that rendered nothing, e.g. "summary none yet". */
+  /** Selected components that rendered nothing, e.g. "peer card empty". */
   notes: string[];
 }
 
@@ -84,16 +82,6 @@ export function renderSessionStart(
         labels.push("directives");
         break;
       }
-      case "summary": {
-        const summary = data.summary?.trim();
-        if (summary) {
-          parts.push(`Session summary: ${summary}`);
-          labels.push("summary");
-        } else {
-          missing(data.summary, "summary", "none yet");
-        }
-        break;
-      }
       case "peerRepresentation": {
         const rep = data.representation?.trim();
         if (rep) {
@@ -102,13 +90,6 @@ export function renderSessionStart(
         } else {
           missing(data.representation, "representation", "empty");
         }
-        break;
-      }
-      case "briefing": {
-        parts.push(
-          `Session briefing: the session summary and user profile were NOT injected — load them by calling the honcho \`get_briefing\` tool as the first action of your first response, before answering. Skip the call only if the user's first prompt explicitly says not to.`
-        );
-        labels.push("briefing nudge");
         break;
       }
       case "peerCard": {

@@ -1,5 +1,4 @@
 import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
-import { getInstanceIdForCwd } from "../cache.js";
 import { clearSessionFiles } from "../state.js";
 import { logHook, setLogContext } from "../log.js";
 
@@ -41,10 +40,9 @@ export async function handleSessionEnd(): Promise<void> {
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const reason = hookInput.reason || "unknown";
-  const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
-  const sessionName = getSessionName(cwd, instanceId || undefined);
+  const sessionName = getSessionName(hookInput.session_id);
 
-  setLogContext(cwd, sessionName);
+  setLogContext(cwd, sessionName ?? undefined);
   logHook("session-end", `Session ending`, { reason });
 
   clearSessionFiles(hookInput.session_id);

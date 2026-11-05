@@ -1,10 +1,8 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig } from "../config.js";
+import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig } from "../config.js";
 import { renderSessionStart } from "../injection.js";
 import {
-  setCachedSessionId,
   resetMessageCount,
-  setClaudeInstanceId,
   getCachedGitState,
   setCachedGitState,
   detectGitChanges,
@@ -63,21 +61,18 @@ export async function handleSessionStart(): Promise<void> {
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const claudeInstanceId = hookInput.session_id;
 
-  // Store Claude's instance ID for parallel session support
-  // Global write kept for backward compat (post-tool-use, MCP server, etc.)
-  if (claudeInstanceId) {
-    setClaudeInstanceId(claudeInstanceId);
-  }
-
   // Set log context early so all logs include cwd/session
-  const sessionName = getSessionName(cwd, claudeInstanceId);
-  setLogContext(cwd, sessionName);
+  const sessionName = getSessionName(claudeInstanceId);
+  setLogContext(cwd, sessionName ?? undefined);
+  if (!sessionName) {
+    logHook("session-start", "No Claude Code session id; skipping");
+    process.exit(0);
+  }
 
   // A resumed conversation already carries its session-start injection; only
   // the local session bookkeeping is refreshed.
   const source = hookInput.source ?? "startup";
   if (source === "resume") {
-    setCachedSessionId(cwd, sessionName, sessionName, claudeInstanceId);
     setSessionLink(honchoSessionUrl(config, sessionName), sessionName, claudeInstanceId);
     logHook("session-start", "Resumed conversation; skipping injection");
     process.exit(0);
@@ -125,10 +120,6 @@ export async function handleSessionStart(): Promise<void> {
     ]);
     logApiCall("honcho.session/peer", "GET", `session + 2 peers`, Date.now() - startTime, true);
 
-    // Write CWD to cache so MCP server can resolve the project directory
-    // Also stores instanceId per-cwd to prevent cross-session collision
-    setCachedSessionId(cwd, sessionName, session.id, claudeInstanceId);
-
     // Step 4: Add peers to session (materializes session server-side).
     // Peer defaults (observeMe, observeOthers) are managed server-side —
     // configure them via API or on app.honcho.dev. We only override observeOthers
@@ -138,13 +129,6 @@ export async function handleSessionStart(): Promise<void> {
       ? [userPeer, [aiPeer, { observeOthers: true }]]
       : [userPeer, aiPeer];
     await session.addPeers(peers);
-
-    // Only persist session names for per-directory strategy (stable names).
-    // Dynamic strategies (git-branch, chat-instance) change per session,
-    // so locking them as overrides defeats the purpose.
-    if (!getSessionForPath(cwd) && (!config.sessionStrategy || config.sessionStrategy === "per-directory")) {
-      setSessionForPath(cwd, sessionName);
-    }
 
     // Upload git changes as observations (fire-and-forget)
     // These capture external activity that happened OUTSIDE of Claude sessions
@@ -171,7 +155,7 @@ export async function handleSessionStart(): Promise<void> {
     }
 
     // Step 5: Fetch only what the configured session-start components need —
-    // the SDK long summary and/or the context() representation + peer card.
+    // the context() representation + peer card.
     // Nothing is cached here; the per-turn hook does its own fresh,
     // prompt-scoped fetch, so a session with no context components pays for no
     // context round-trip.
@@ -179,18 +163,17 @@ export async function handleSessionStart(): Promise<void> {
 
     const injection = getInjectionConfig(config);
     const startComponents = injection.sessionStart;
-    const wantSummary = startComponents.includes("summary");
     const wantContext =
       startComponents.includes("peerCard") || startComponents.includes("peerRepresentation");
 
-    logAsync("context-fetch", `Starting context fetch${wantSummary ? " + summary" : ""}`);
+    logAsync("context-fetch", "Starting context fetch");
 
     const fetchStart = Date.now();
 
     // unified: user observes self — use userPeer, no target.
     // directional: aiPeer observes user — use aiPeer with target.
     const contextLabel = observationMode === "unified" ? "userPeer.context()" : "aiPeer.context(target=user)";
-    const [userContextResult, summaryResult] = await Promise.allSettled([
+    const [userContextResult] = await Promise.allSettled([
       wantContext
         ? raceTimeout(
             observationMode === "unified"
@@ -199,13 +182,11 @@ export async function handleSessionStart(): Promise<void> {
             CONTEXT_FETCH_TIMEOUT_MS
           )
         : Promise.resolve(null),
-      wantSummary ? raceTimeout(session.summaries(), CONTEXT_FETCH_TIMEOUT_MS) : Promise.resolve(null),
     ]);
 
     const fetchDuration = Date.now() - fetchStart;
     const asyncResults = [
       ...(wantContext ? [{ name: contextLabel, success: userContextResult.status === "fulfilled" && userContextResult.value !== null }] : []),
-      ...(wantSummary ? [{ name: "session.summaries()", success: summaryResult.status === "fulfilled" && summaryResult.value !== null }] : []),
     ];
     const successCount = asyncResults.filter(r => r.success).length;
     logAsync("context-fetch", `Fetched ${successCount}/${asyncResults.length} in ${fetchDuration}ms`, asyncResults);
@@ -220,9 +201,7 @@ export async function handleSessionStart(): Promise<void> {
     // Compose the configured session-start injection. Default [] renders to an
     // empty payload — nothing injected at session start.
     const contextValue = userContextResult.status === "fulfilled" ? (userContextResult.value as any) : null;
-    const summaryValue = summaryResult.status === "fulfilled" ? (summaryResult.value as any) : null;
     const rendered = renderSessionStart(startComponents, {
-      summary: summaryValue ? (summaryValue.longSummary?.content ?? "") : null,
       peerCard: contextValue ? (contextValue.peerCard ?? []) : null,
       representation: contextValue ? (contextValue.representation ?? "") : null,
       remember: config.rememberTool === true,

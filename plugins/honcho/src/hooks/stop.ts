@@ -1,7 +1,7 @@
 import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, isLoggingEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, isLoggingEnabled, getCachedStdin, readStdinText } from "../config.js";
 import { existsSync, readFileSync } from "fs";
-import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
+import { chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visStopMessage } from "../visual.js";
 import { isHarnessInjected, isSlashCommand } from "../prompt-filters.js";
@@ -155,11 +155,13 @@ export async function handleStop(): Promise<void> {
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const transcriptPath = hookInput.transcript_path;
-  const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
-  const sessionName = getSessionName(cwd, instanceId || undefined);
+  const sessionName = getSessionName(hookInput.session_id);
 
-  // Set log context
-  setLogContext(cwd, sessionName);
+  setLogContext(cwd, sessionName ?? undefined);
+  if (!sessionName) {
+    logHook("stop", "No Claude Code session id; skipping");
+    process.exit(0);
+  }
 
   const turnMessages = getCurrentTurnAssistantMessages(transcriptPath || "", hookInput.last_assistant_message);
 
@@ -185,9 +187,7 @@ export async function handleStop(): Promise<void> {
         aiPeer.message(chunk, {
           createdAt: block.timestamp || fallbackTs,
           metadata: {
-            instance_id: instanceId || undefined,
             type: i === lastIdx ? "assistant_response" : "assistant_intermediate",
-            session_affinity: sessionName,
           },
         })
       )

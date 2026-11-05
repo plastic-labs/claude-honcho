@@ -39,7 +39,7 @@ export async function status(): Promise<void> {
 
     console.log(`  ${s.label("Connection")}:  ${s.success("connected")} ${s.dim(`(${latency}ms)`)}`);
     console.log(`  ${s.label("Workspace")}:   ${config.workspace} ${s.dim(`@ ${endpointInfo.url}`)}`);
-    console.log(`  ${s.label("Session")}:     ${getSessionName(process.cwd())}`);
+    console.log(`  ${s.label("Session")}:     ${getSessionName() ?? "unknown"}`);
     console.log(`  ${s.label("Peers")}:       ${config.peerName} / ${config.aiPeer}`);
 
     // Observation queue — messages being processed into conclusions

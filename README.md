@@ -119,7 +119,7 @@ to the peer name you chose in your environment: it will carry across different p
 - **Persistent Memory** — Claude remembers your preferences, projects, and context across sessions
 - **Survives Context Wipes** — Even when Claude's context window resets, memory persists
 - **Git Awareness** — Detects branch switches, commits, and changes made outside Claude
-- **Flexible Sessions** — Map sessions per directory, per git branch, or per chat instance
+- **One session per chat** — Each Claude Code chat maps to its own Honcho session
 - **AI Self-Awareness** — Claude knows what it was working on, even after restarts
 - **Configurable Memory Injection** — Choose exactly what context is injected at session start and per turn
 - **Team Support** — Multiple people can share a workspace and build context together
@@ -137,7 +137,6 @@ The honcho plugin provides these tools via MCP:
 | `list_conclusions`   | List saved conclusions                                         |
 | `query_conclusions`  | Semantic search over saved conclusions                         |
 | `delete_conclusion`  | Delete a conclusion by ID                                      |
-| `get_briefing`       | Load the session briefing: session summary + peer card         |
 | `get_context`        | Retrieve the full context object (representation + peer card)  |
 | `get_representation` | Retrieve the user's representation string                      |
 | `get_config`         | View current configuration and status                          |
@@ -152,7 +151,6 @@ The honcho plugin provides these tools via MCP:
 | `/honcho:config`    | Interactive configuration menu                              |
 | `/honcho:setup`     | First-time setup — validate API key and create config       |
 | `/honcho:interview` | Interview to capture stable, cross-project user preferences |
-| `/honcho:briefing`  | Load the session briefing via a visible tool call            |
 | `/honcho:import`    | Backfill past Claude Code sessions into Honcho memory        |
 | `/honcho:insights`  | Distill memory into CLAUDE.md edits, style rules, skill ideas |
 
@@ -184,10 +182,6 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
     }
   },
 
-  // Session mapping
-  "sessionStrategy": "per-directory", // "per-directory" | "git-branch" | "chat-instance"
-  "sessionPeerPrefix": true,          // Prefix session names with peerName (default: true)
-
   // Message handling
   "saveMessages": true,
   "saveToolUse": false,               // Save [Tool] action summaries (default: false)
@@ -208,7 +202,7 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
 
   // Memory injection (see "Memory Injection" below)
   "injection": {
-    "sessionStart": ["directives", "summary", "peerCard"],
+    "sessionStart": ["directives", "peerCard"],
     "perTurn": ["userContext"]
   },
 
@@ -235,29 +229,23 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
 }
 ```
 
-### Session Strategies
+### Sessions
 
-Session strategy controls how Honcho maps your conversations to sessions. Change it with `/honcho:config` or `set_config`:
+Each Claude Code chat maps to one Honcho session whose id is the Claude Code session id. Resuming a chat continues its session; `/clear` and new chats start a new one. Memory about you still carries across every chat in the workspace.
 
-| Strategy | Behavior | Best for |
-| --- | --- | --- |
-| `per-directory` (default) | One session per project directory. Stable across restarts. | Most users — each project accumulates its own memory |
-| `git-branch` | Session name includes the current git branch. Switching branches switches sessions. | Feature-branch workflows where context per branch matters |
-| `chat-instance` | Each Claude Code chat gets its own session. No continuity between restarts. | Ephemeral usage, experimentation, or when you want a clean slate each time |
+This mapping isn't configurable. If you want a different session layout, connect to Honcho through the [Honcho MCP server](https://mcp.honcho.dev) and manage sessions yourself.
 
 ### Memory Injection
 
 The `injection` config block controls exactly what memory is injected into Claude's context, on two surfaces: **once at session start** and **per prompt**. Each surface selects zero or more components; retrieval knobs shape what those components emit. Configure it with `/honcho:config` (memory injection settings), `set_config`, or by editing `~/.honcho/config.json`.
 
-**Session-start components** (default: `["directives", "summary", "peerCard"]`):
+**Session-start components** (default: `["directives", "peerCard"]`):
 
 | Component | What it injects |
 | --- | --- |
 | `directives` | Static memory-usage guidance — treat injected memory as background, use `chat`/`search` for recall, save insights with `create_conclusion` |
-| `summary` | The session's long summary narrative (skipped on a fresh session) |
 | `peerCard` | Your peer card — a structured identity/attribute list |
 | `peerRepresentation` | Your full derived representation, injected at full length |
-| `briefing` | A nudge for Claude to call the `get_briefing` MCP tool instead of injecting the summary and peer card inline — the tool call renders as an expandable row in the UI. Use it *in place of* `summary`/`peerCard`, not alongside them |
 
 **Per-turn components** (default: `["userContext"]`):
 
@@ -265,7 +253,6 @@ The `injection` config block controls exactly what memory is injected into Claud
 | --- | --- |
 | `userContext` | A fresh, prompt-scoped context fetch for *you* — conclusions selected by semantic search, shaped by the retrieval knobs below |
 | `assistantContext` | The same context fetch for the AI peer — what Honcho has derived about the assistant itself |
-| `sessionContext` | Recent raw messages from the currently mapped Honcho session, which can span other Claude instances sharing the session name |
 | `dialectic` | A reasoned `chat()` answer over your representation, seeded from `dialecticTemplate`. Off by default — much slower than a context fetch |
 
 **Retrieval knobs:**
@@ -276,7 +263,6 @@ The `injection` config block controls exactly what memory is injected into Claud
 | `maxConclusions` | `15` | Max conclusions injected per context fetch |
 | `searchMaxDistance` | `0.6` | Max cosine distance for the semantic search — lower is stricter |
 | `searchQuerySource` | `"prompt"` | What drives the per-turn search: the raw `"prompt"` or extracted `"topics"` |
-| `sessionContextTokens` | `1500` | Token budget for the `sessionContext` message fetch |
 | `dialecticTemplate` | compact factual recall | Query template for the `dialectic` component; the prompt is substituted into `%{user_query}` |
 | `dialecticReasoning` | `"medium"` | Reasoning tier for the per-turn `dialectic` call — separate from the top-level `reasoningLevel` |
 
@@ -285,7 +271,7 @@ If injected context feels off-topic, lower `searchMaxDistance`; if too sparse, r
 **Visibility:** per-turn components report a one-line summary in the terminal by default. To print a component's full injected payload, list it in `showContents`:
 
 ```json
-{ "injection": { "showContents": ["userContext", "sessionContext"] } }
+{ "injection": { "showContents": ["userContext", "dialectic"] } }
 ```
 
 ### The `honcho_remember` Tool
@@ -392,8 +378,6 @@ python scripts/migrate-observations.py -w agents --from-observer hermes --user a
 
 Run with `--help` for all options.
 
-Session names are prefixed with your `peerName` by default (e.g., `alice-my-project`). Set `sessionPeerPrefix: false` if you're the only user and want shorter names.
-
 ### Host-Aware Configuration
 
 The plugin auto-detects which tool is running it (Claude Code, Cursor, etc.) and reads the matching block from `hosts`. Each host gets its own workspace and AI peer name, so data stays separated by default.
@@ -423,7 +407,7 @@ All tools will read and write to the `shared` workspace. Each tool still uses it
 
 ### Team Setup with Shared Context
 
-Multiple people can share context by pointing to the same workspace. Each person uses their own `peerName` as identity, and sessions are automatically prefixed with it to avoid collisions.
+Multiple people can share context by pointing to the same workspace. Each person uses their own `peerName` as identity.
 
 **Person A** (`~/.honcho/config.json`):
 ```json
@@ -453,7 +437,7 @@ Multiple people can share context by pointing to the same workspace. Each person
 }
 ```
 
-Both Alice and Bob write to the `team-acme` workspace. Their sessions are namespaced (e.g., `alice-my-project`, `bob-my-project`) so data doesn't collide, but Honcho's dialectic reasoning can draw on context from both users. If you want fully independent sessions, set `sessionPeerPrefix: false` — but this is not recommended in shared workspaces.
+Both Alice and Bob write to the `team-acme` workspace. Each chat has its own session, so data doesn't collide, but Honcho's dialectic reasoning can draw on context from both users.
 
 ### Environment Variables
 
@@ -479,8 +463,8 @@ Environment variables work for initial bootstrap (before a config file exists). 
 ├─────────────────────────────────────────────────────────────────┤
 │  SessionStart   │  UserPrompt     │  PostToolUse   │ SessionEnd │
 │  ───────────    │  ───────────    │  ────────────  │ ────────── │
-│  Load context   │  Save message   │  Log activity  │ Upload all │
-│  from Honcho    │  to Honcho      │  to Honcho     │ + summary  │
+│  Load context   │  Save message   │  Log activity  │ Clean up   │
+│  from Honcho    │  to Honcho      │  to Honcho     │            │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -499,7 +483,7 @@ The plugin hooks into Claude Code's lifecycle events:
 - **PostToolUse**: Logs Claude's actions (file edits, commands, etc.)
 - **PreCompact**: Anchors a memory snapshot before context compaction so knowledge survives summarization
 - **Stop**: Flushes any pending messages
-- **SessionEnd**: Uploads remaining messages and generates a summary
+- **SessionEnd**: Clears local per-chat state
 
 ## Troubleshooting
 

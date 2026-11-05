@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode } from "../config.js";
+import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode } from "../config.js";
 import { Spinner } from "../spinner.js";
 import { setMemoryState } from "../state.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -48,7 +48,6 @@ function formatMemoryCard(
   sessionName: string,
   userContext: any,
   claudeContext: any,
-  summaries: any,
   userDialectic: string | null,
   claudeDialectic: string | null
 ): string {
@@ -82,13 +81,6 @@ ${userPeerCard.join("\n")}`);
   const claudeRep = claudeContext?.representation;
   if (typeof claudeRep === "string" && claudeRep.trim()) {
     parts.push(`### ${config.aiPeer}'s Recent Work (PRESERVE)\n${claudeRep}`);
-  }
-
-  // Session summary - what we were doing
-  const shortSummary = summaries?.shortSummary;
-  if (shortSummary?.content) {
-    parts.push(`### Session Context (PRESERVE)
-${shortSummary.content}`);
   }
 
   // Fresh dialectic insights - expensive but worth it at compaction time
@@ -134,8 +126,12 @@ export async function handlePreCompact(): Promise<void> {
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const trigger = hookInput.trigger || "auto";
 
-  // Set log context
-  setLogContext(cwd, getSessionName(cwd));
+  const sessionName = getSessionName(hookInput.session_id);
+  setLogContext(cwd, sessionName ?? undefined);
+  if (!sessionName) {
+    logHook("pre-compact", "No Claude Code session id; skipping");
+    process.exit(0);
+  }
 
   logHook("pre-compact", `Compaction triggered (${trigger})`);
 
@@ -148,7 +144,6 @@ export async function handlePreCompact(): Promise<void> {
 
   try {
     const honcho = new Honcho(getHonchoClientOptions(config));
-    const sessionName = getSessionName(cwd);
     const observationMode = getObservationMode(config);
 
     // Get session and peers using new fluent API
@@ -167,7 +162,6 @@ export async function handlePreCompact(): Promise<void> {
     }
 
     logApiCall(contextLabel, "GET", observationMode === "unified" ? "self" : `target=${config.peerName}`);
-    logApiCall("session.summaries", "GET", sessionName);
     logApiCall("peer.chat", "POST", "dialectic queries x2");
 
     // Fetch ALL context in parallel - this is the RIGHT time for expensive calls
@@ -177,15 +171,13 @@ export async function handlePreCompact(): Promise<void> {
       ? { session, reasoningLevel: config.reasoningLevel ?? "low" }
       : { target: config.peerName, session, reasoningLevel: config.reasoningLevel ?? "low" };
 
-    const [userContextResult, summariesResult, userChatResult, claudeChatResult] =
+    const [userContextResult, userChatResult, claudeChatResult] =
       await Promise.allSettled([
         contextPeer.context({
           ...(contextTarget ? { target: contextTarget } : {}),
           maxConclusions: 30,
           includeMostFrequent: true,
         }),
-        // Session summaries
-        session.summaries(),
         // Fresh dialectic - ask about user (worth the cost at compaction time)
         contextPeer.chat(
           `What are the most important things to remember about ${config.peerName}? Cover their preferences, working style, current projects, and any critical context that should survive a conversation summary. ${FACTS_ONLY}`,
@@ -201,7 +193,6 @@ export async function handlePreCompact(): Promise<void> {
 
     // Extract results
     const userContext = userContextResult.status === "fulfilled" ? userContextResult.value : null;
-    const summaries = summariesResult.status === "fulfilled" ? summariesResult.value : null;
 
     verboseApiResult(`pre-compact ${contextLabel} → representation`, (userContext as any)?.representation);
     verboseList("pre-compact peerCard", (userContext as any)?.peerCard);
@@ -217,7 +208,6 @@ export async function handlePreCompact(): Promise<void> {
       sessionName,
       userContext,
       null,
-      summaries,
       userDialectic,
       claudeDialectic
     );
@@ -238,7 +228,6 @@ export async function handlePreCompact(): Promise<void> {
     const anchored: string[] = [];
     if (ctx?.peerCard?.length) anchored.push(`peer card (${ctx.peerCard.length} items)`);
     if (typeof ctx?.representation === "string" && ctx.representation.trim()) anchored.push("conclusions");
-    if ((summaries as any)?.shortSummary?.content) anchored.push("session summary");
     const answers = [userDialectic, claudeDialectic].filter(Boolean).length;
     if (answers) anchored.push(`${answers} dialectic answer${answers === 1 ? "" : "s"}`);
     console.log(`[${config.aiPeer}/Honcho Memory Anchor]\n\n${memoryCard}\n\n${visAnchorSummary("pre-compact", anchored, fetchMs)}`);
