@@ -22,8 +22,6 @@ export interface ContextRefreshConfig {
   messageThreshold?: number;
   /** Cache TTL in seconds (default: 300) */
   ttlSeconds?: number;
-  /** Skip dialectic chat() calls in user-prompt hook (default: false) */
-  skipDialectic?: boolean;
 }
 
 // ============================================
@@ -36,99 +34,32 @@ export interface ContextRefreshConfig {
  * validation builds its allow-set and error text from the same array — so
  * adding a component is a one-line edit with no drift between layers.
  * - "directives": static memory-usage guidance (treat injected memory as
- *   background, use chat/search, save insights) — formerly a manual "paste
+ *   background, recall with the chat tool) — formerly a manual "paste
  *   this into your CLAUDE.md" README step; now shipped every session instead.
- * - "peerCard" / "peerRepresentation": the two fields of a single context() call,
- *   each injected at full length (no per-field caps — inclusion is the only lever).
+ * - "peerCard": the user's peer card (getCard), injected at full length.
+ *
+ * Nothing is injected per turn: recall happens when the model calls the
+ * `chat` tool.
  */
-export const SESSION_START_COMPONENTS = ["directives", "peerCard", "peerRepresentation"] as const;
+export const SESSION_START_COMPONENTS = ["directives", "peerCard"] as const;
 export type SessionStartComponent = (typeof SESSION_START_COMPONENTS)[number];
 
-/**
- * Components the UserPromptSubmit hook may emit per non-trivial prompt.
- * - "userContext": a fresh, prompt-scoped peer.context() blob for the user
- *   peer, whose semantic retrieval is shaped by the searchTopK/
- *   searchMaxDistance/maxConclusions knobs below.
- * - "assistantContext": the same peer.context() fetch, but for the AI peer —
- *   what Honcho has derived about the assistant itself.
- * - "dialectic": a reasoned peer.chat() answer over the representation, seeded
- *   from `dialecticTemplate` (the prompt substituted into %{user_query}) at the
- *   `dialecticReasoning` tier. Off by default — chat() is far slower than
- *   context() (~12s at medium), so it runs on its own budget, not the 4s
- *   context race, and stays under the 30s UserPromptSubmit harness ceiling.
- *
- * A "search" component (filtered semantic search over inductive conclusions)
- * was scoped out: `level` is not filterable through the API, so it needs a
- * honcho-backend + SDK change before it can ship. See the plan.
- */
-export const PER_TURN_COMPONENTS = ["userContext", "assistantContext", "dialectic"] as const;
-export type PerTurnComponent = (typeof PER_TURN_COMPONENTS)[number];
-
-/** Pre-split configs stored `"context"` for what is now "userContext";
- *  removed components ("sessionContext") are dropped. */
-export function normalizePerTurn(components: string[]): PerTurnComponent[] {
-  return components
-    .map((c) => (c === "context" ? "userContext" : c))
-    .filter((c): c is PerTurnComponent => (PER_TURN_COMPONENTS as readonly string[]).includes(c));
-}
-
 /** Removed components: "briefing" carried the peer card, so it maps to
- *  "peerCard"; "summary" is dropped. */
+ *  "peerCard"; "summary" and "peerRepresentation" are dropped. */
 export function normalizeSessionStart(components: string[]): SessionStartComponent[] {
   const out = components.map((c) => (c === "briefing" ? "peerCard" : c));
   return [...new Set(out)].filter((c): c is SessionStartComponent =>
     (SESSION_START_COMPONENTS as readonly string[]).includes(c));
 }
 
-/**
- * The `injection` config block: turns the two hardcoded injection surfaces
- * into a composable, config-driven menu. Each surface selects zero or more
- * components; the retrieval knobs shape whatever those components emit.
- */
+/** The `injection` config block: which components are emitted at session start. */
 export interface InjectionConfig {
   /** Components emitted once at session open (default: ["directives", "peerCard"]). */
   sessionStart?: SessionStartComponent[];
-  /** Components emitted per non-trivial prompt (default: ["userContext"]). */
-  perTurn?: PerTurnComponent[];
-  /** Per-turn components whose full injected payload is printed to the terminal.
-   *  Components not listed still inject; they just report a one-line summary
-   *  instead of their contents (default: [] — summaries only). */
-  showContents?: PerTurnComponent[];
-  /** Top-K conclusions pulled by context()'s semantic search (default: 10). */
-  searchTopK?: number;
-  /** Max conclusions injected per context() call (default: 15). */
-  maxConclusions?: number;
-  /** Max cosine distance for context()'s semantic search — lower is stricter
-   *  (default: 0.6). */
-  searchMaxDistance?: number;
-  /** What drives the per-turn semantic search: the raw "prompt" (default)
-   *  or extracted "topics". */
-  searchQuerySource?: "topics" | "prompt";
-  /** Query template for the per-turn "dialectic" component. The user's prompt
-   *  is substituted into every `%{user_query}` (default: surface anything from
-   *  the user's history relevant to the prompt). */
-  dialecticTemplate?: string;
-  /** Reasoning tier for the per-turn "dialectic" chat() call (default: "low").
-   *  Kept separate from the top-level `reasoningLevel` so per-turn dialectic can
-   *  stay cheap on the hot path without lowering the tier used elsewhere. */
-  dialecticReasoning?: ReasoningLevel;
 }
 
-/** Resolved injection defaults: memory-usage directives + peer card at
- *  session start, a fresh user-peer context() per turn. Retrieval knobs
- *  are tuned for a lean per-turn block — topK 10 for recall, a 0.6 cosine
- *  distance, searching on the raw prompt. No component prints its contents. */
 export const DEFAULT_INJECTION: Required<InjectionConfig> = {
   sessionStart: ["directives", "peerCard"],
-  perTurn: ["userContext"],
-  showContents: [],
-  searchTopK: 10,
-  maxConclusions: 15,
-  searchMaxDistance: 0.6,
-  searchQuerySource: "prompt",
-  dialecticTemplate:
-    "Return a compact, factual list of anything from the user's history — preferences, prior decisions, relevant past work — that would help with the following. Write in the third person as background notes; do not address the user, ask questions, or offer next steps. If nothing relevant exists, say so in one line. Relevant to: %{user_query}",
-  dialecticReasoning: "medium",
 };
 
 export const REASONING_LEVELS = ["minimal", "low", "medium", "high", "max"] as const;
@@ -769,7 +700,6 @@ export function getContextRefreshConfig(): ContextRefreshConfig {
   return {
     messageThreshold: config?.contextRefresh?.messageThreshold ?? 30,
     ttlSeconds: config?.contextRefresh?.ttlSeconds ?? 300,
-    skipDialectic: config?.contextRefresh?.skipDialectic ?? false,
   };
 }
 
@@ -784,18 +714,12 @@ export function getContextRefreshConfig(): ContextRefreshConfig {
  */
 export function getInjectionConfig(config?: HonchoCLAUDEConfig | null): Required<InjectionConfig> {
   const injection = (config === undefined ? loadConfig() : config)?.injection;
-  const resolved = { ...DEFAULT_INJECTION, ...(injection ?? {}) };
+  const resolved = { ...DEFAULT_INJECTION, ...(injection ?? {}) } as Required<InjectionConfig>;
   // Guard hand-edited configs: a non-array component list falls back to the default.
   resolved.sessionStart = Array.isArray(resolved.sessionStart)
     ? normalizeSessionStart(resolved.sessionStart)
     : DEFAULT_INJECTION.sessionStart;
-  resolved.perTurn = Array.isArray(resolved.perTurn)
-    ? normalizePerTurn(resolved.perTurn)
-    : DEFAULT_INJECTION.perTurn;
-  resolved.showContents = Array.isArray(resolved.showContents)
-    ? normalizePerTurn(resolved.showContents)
-    : DEFAULT_INJECTION.showContents;
-  return resolved;
+  return { sessionStart: resolved.sessionStart };
 }
 
 export function isLoggingEnabled(): boolean {

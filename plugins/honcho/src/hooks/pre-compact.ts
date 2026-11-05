@@ -1,10 +1,9 @@
-import { Honcho } from "@honcho-ai/sdk";
 import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode } from "../config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { Spinner } from "../spinner.js";
 import { setMemoryState } from "../state.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
-import { verboseApiResult, verboseList, visAnchorSummary } from "../visual.js";
+import { verboseList, visAnchorSummary } from "../visual.js";
 
 
 interface HookInput {
@@ -16,48 +15,22 @@ interface HookInput {
   workspace_roots?: string[];
 }
 
-// Appended to both dialectic questions; the answers go into the anchor verbatim.
-const FACTS_ONLY =
-  "Answer with facts only, as a terse bullet list written in the third person. " +
-  "No preamble, no closing summary, no offers to help further, and no questions.";
-
-// A trailing offer such as "If you'd like, I can convert this into…". An "if
-// you want" paragraph counts only when it goes on to offer something, so "If
-// you want details, they live in DEV-2024." stays.
-const CHAT_OFFER = /^(let me know|would you like|want me to|i can also)\b/i;
-const CONDITIONAL_OFFER = /^(if you('d| would)? like|if you want)\b.*\b(i can|i could|i'll|i will|let me know|just ask|happy to)\b/is;
-
-function isChatFiller(paragraph: string): boolean {
-  return CHAT_OFFER.test(paragraph) || CONDITIONAL_OFFER.test(paragraph);
-}
-
-/** Drop trailing paragraphs that are chat filler rather than facts. */
-export function stripChatFiller(answer: string): string {
-  const paragraphs = answer.trim().split(/\n\s*\n/);
-  while (paragraphs.length > 1 && isChatFiller(paragraphs[paragraphs.length - 1].trim())) {
-    paragraphs.pop();
-  }
-  return paragraphs.join("\n\n");
-}
-
 /**
- * Format a compact memory card that survives summarization
- * This is injected RIGHT BEFORE compaction so it becomes part of the summary
+ * Format a compact memory card that survives summarization.
+ * This is injected RIGHT BEFORE compaction so it becomes part of the summary.
+ * Only the session identity and the peer card: anything else is recalled on
+ * demand through the chat tool, so nothing is fetched with context() or chat().
  */
 function formatMemoryCard(
   config: { peerName: string; aiPeer: string; workspace: string },
   sessionName: string,
-  userContext: any,
-  claudeContext: any,
-  userDialectic: string | null,
-  claudeDialectic: string | null
+  peerCard: string[] | null
 ): string {
   const parts: string[] = [];
 
-  // Header - identity anchor
   parts.push(`## HONCHO MEMORY ANCHOR (Pre-Compaction Injection)
 This context is being injected because the conversation is about to be summarized.
-These conclusions MUST be preserved in the summary.
+Preserve it in the summary.
 
 ### Session Identity
 - User: ${config.peerName}
@@ -65,39 +38,13 @@ These conclusions MUST be preserved in the summary.
 - Workspace: ${config.workspace}
 - Session: ${sessionName}`);
 
-  // User profile - critical to preserve
-  const userPeerCard = userContext?.peerCard;
-  if (userPeerCard?.length > 0) {
+  if (peerCard?.length) {
     parts.push(`### ${config.peerName}'s Profile (PRESERVE)
-${userPeerCard.join("\n")}`);
-  }
-
-  // Key user conclusions
-  const userRep = userContext?.representation;
-  if (typeof userRep === "string" && userRep.trim()) {
-    parts.push(`### Key Conclusions About ${config.peerName} (PRESERVE)\n${userRep}`);
-  }
-
-  // Claude's self-context - what was I working on
-  const claudeRep = claudeContext?.representation;
-  if (typeof claudeRep === "string" && claudeRep.trim()) {
-    parts.push(`### ${config.aiPeer}'s Recent Work (PRESERVE)\n${claudeRep}`);
-  }
-
-  // Fresh dialectic insights - expensive but worth it at compaction time
-  if (userDialectic) {
-    parts.push(`### AI Understanding of ${config.peerName} (PRESERVE)
-${userDialectic}`);
-  }
-
-  if (claudeDialectic) {
-    parts.push(`### ${config.aiPeer}'s Self-Reflection (PRESERVE)
-${claudeDialectic}`);
+${peerCard.join("\n")}`);
   }
 
   parts.push(`### End Memory Anchor
-The above context represents persistent memory from Honcho.
-When summarizing this conversation, ensure these conclusions are preserved.`);
+Anything else about ${config.peerName} can be recalled with the Honcho \`chat\` tool.`);
 
   return parts.join("\n\n");
 }
@@ -147,90 +94,31 @@ export async function handlePreCompact(): Promise<void> {
     const honcho = await createHonchoClient(config);
     const observationMode = getObservationMode(config);
 
-    // Get session and peers using new fluent API
-    const session = await honcho.session(sessionName);
-    const userPeer = await honcho.peer(config.peerName);
-    const aiPeer = await honcho.peer(config.aiPeer);
-
-    // unified: user self-observations — query via userPeer.
-    // directional: ai cross-observations — query via aiPeer with target.
-    const contextPeer = observationMode === "unified" ? userPeer : aiPeer;
-    const contextTarget = observationMode === "unified" ? undefined : config.peerName;
-    const contextLabel = observationMode === "unified" ? "userPeer.context()" : `aiPeer.context(target=${config.peerName})`;
-
     if (trigger === "auto") {
-      spinner.update("fetching memory context");
+      spinner.update("fetching peer card");
     }
 
-    logApiCall(contextLabel, "GET", observationMode === "unified" ? "self" : `target=${config.peerName}`);
-    logApiCall("peer.chat", "POST", "dialectic queries x2");
-
-    // Fetch ALL context in parallel - this is the RIGHT time for expensive calls
-    // because the context is about to be reset anyway
+    // unified: the user's own card; directional: the AI peer's card of the user.
+    const cardLabel = observationMode === "unified" ? "userPeer.getCard()" : `aiPeer.getCard(target=${config.peerName})`;
     const fetchStart = Date.now();
-    const dialecticArgs = observationMode === "unified"
-      ? { session, reasoningLevel: config.reasoningLevel ?? "low" }
-      : { target: config.peerName, session, reasoningLevel: config.reasoningLevel ?? "low" };
-
-    const [userContextResult, userChatResult, claudeChatResult] =
-      await Promise.allSettled([
-        contextPeer.context({
-          ...(contextTarget ? { target: contextTarget } : {}),
-          maxConclusions: 30,
-          includeMostFrequent: true,
-        }),
-        // Fresh dialectic - ask about user (worth the cost at compaction time)
-        contextPeer.chat(
-          `What are the most important things to remember about ${config.peerName}? Cover their preferences, working style, current projects, and any critical context that should survive a conversation summary. ${FACTS_ONLY}`,
-          dialecticArgs
-        ),
-        // Fresh dialectic - what were we working on together
-        contextPeer.chat(
-          `What are the most important things that were worked on with ${config.peerName}? ${FACTS_ONLY}`,
-          dialecticArgs
-        ),
-      ]);
+    const peerCard = await (observationMode === "unified"
+      ? (await honcho.peer(config.peerName)).getCard()
+      : (await honcho.peer(config.aiPeer)).getCard(config.peerName)
+    ).catch(() => null);
     const fetchMs = Date.now() - fetchStart;
+    logApiCall(cardLabel, "GET", observationMode === "unified" ? "self" : `target=${config.peerName}`, fetchMs, peerCard !== null);
+    verboseList(`pre-compact ${cardLabel}`, peerCard);
 
-    // Extract results
-    const userContext = userContextResult.status === "fulfilled" ? userContextResult.value : null;
-
-    verboseApiResult(`pre-compact ${contextLabel} → representation`, (userContext as any)?.representation);
-    verboseList("pre-compact peerCard", (userContext as any)?.peerCard);
-
-    const dialecticAnswer = (r: PromiseSettledResult<string | null>) =>
-      r.status === "fulfilled" && typeof r.value === "string" && r.value.trim() ? stripChatFiller(r.value) : null;
-    const userDialectic = dialecticAnswer(userChatResult);
-    const claudeDialectic = dialecticAnswer(claudeChatResult);
-
-    // Format the memory card
-    const memoryCard = formatMemoryCard(
-      config,
-      sessionName,
-      userContext,
-      null,
-      userDialectic,
-      claudeDialectic
-    );
+    const memoryCard = formatMemoryCard(config, sessionName, peerCard);
 
     if (trigger === "auto") {
       spinner.stop("memory anchored");
     }
     setMemoryState("idle", undefined, hookInput.session_id);
 
-    verboseApiResult(`pre-compact peer.chat(user) → "${config.peerName}"`, userDialectic);
-    verboseApiResult(`pre-compact peer.chat(claude) → "${config.aiPeer}"`, claudeDialectic);
-
     logHook("pre-compact", `Memory anchored (${memoryCard.length} chars)`);
 
-    // The memory card, then one summary line. Full API payloads go to the
-    // verbose log only.
-    const ctx = userContext as any;
-    const anchored: string[] = [];
-    if (ctx?.peerCard?.length) anchored.push(`peer card (${ctx.peerCard.length} items)`);
-    if (typeof ctx?.representation === "string" && ctx.representation.trim()) anchored.push("conclusions");
-    const answers = [userDialectic, claudeDialectic].filter(Boolean).length;
-    if (answers) anchored.push(`${answers} dialectic answer${answers === 1 ? "" : "s"}`);
+    const anchored = peerCard?.length ? [`peer card (${peerCard.length} items)`] : [];
     console.log(`[${config.aiPeer}/Honcho Memory Anchor]\n\n${memoryCard}\n\n${visAnchorSummary("pre-compact", anchored, fetchMs)}`);
     process.exit(0);
   } catch (error) {

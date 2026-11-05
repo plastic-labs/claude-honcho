@@ -37,10 +37,10 @@ AskUserQuestion:
     - label: "Workspace"
       description: "Data space and session scope (currently: {resolved.workspace})"
     - label: "Memory injection"
-      description: "What Honcho injects at session start and per turn (currently: start [{resolved.injection.sessionStart}], turn [{resolved.injection.perTurn}], shown in UI [{resolved.injection.showContents}])"
+      description: "What Honcho injects at session start (currently: [{resolved.injection.sessionStart}])"
 ```
 
-For the "Memory injection" description, use the *effective* values: if `injection.sessionStart` is unset it is `["directives", "peerCard"]`, and if `injection.perTurn` is unset it is `["userContext"]` (user conclusions on). A stored perTurn value of `"context"` is the legacy name for `"userContext"` — treat them as the same. `injection.showContents` is `[]` when unset — render that as `none`.
+For the "Memory injection" description, use the *effective* value: if `injection.sessionStart` is unset it is `["directives", "peerCard"]`.
 
 If the user selects "Other", present advanced options:
 
@@ -116,7 +116,7 @@ If confirmed, call `set_config` again WITH `confirm: true`.
 
 ### Memory injection
 
-Ask all three questions in a SINGLE `AskUserQuestion` call — multi-select each — so the user configures every surface at once. Always include all three, each offering all of its options: the "Show in UI" answers arrive in the same response as "Per turn", so there is no way to narrow them to what the user just enabled. A "Show in UI" pick for a component that is off is harmless — it's stored and takes effect if that component is enabled later. This is the only injection prompt; do not add follow-ups.
+Honcho injects only at session start. Nothing is injected per turn: Claude recalls memory by calling the `chat` tool (about the user, within a `scope`, or across the workspace with `workspace: true`).
 
 ```yaml
 AskUserQuestion:
@@ -126,45 +126,12 @@ AskUserQuestion:
       multiSelect: true
       options:
         - label: "Memory directives"
-          description: "How to use memory — treat as background, search, save insights"
+          description: "How to use memory — treat as background, recall with the chat tool"
         - label: "Peer card"
           description: "Your identity + attributes list"
-        - label: "Representation"
-          description: "Honcho's derived prose profile of you"
-    - question: "What should Honcho inject on each user turn?"
-      header: "Per turn"
-      multiSelect: true
-      options:
-        - label: "User conclusions"
-          description: "Fresh, prompt-scoped memory about you pulled every turn"
-        - label: "Assistant conclusions"
-          description: "Same fetch, but for the AI peer — what Honcho knows about the assistant"
-        - label: "Dialectic recall"
-          description: "A reasoned answer over your history each turn — richer but slower (off by default)"
-    - question: "Which of those should print what they injected to the terminal?"
-      header: "Show in UI"
-      multiSelect: true
-      options:                     # same three labels as "Per turn"
-        - label: "User conclusions"
-          description: "List each injected conclusion instead of just the count"
-        - label: "Assistant conclusions"
-          description: "List each injected conclusion instead of just the count"
-        - label: "Dialectic recall"
-          description: "Print the full reasoned answer — prose, can be long"
 ```
 
-Map the selections to component names, then call `set_config` once per field:
-- Session start → `injection.sessionStart`, mapping "Memory directives"→`directives`, "Peer card"→`peerCard`, "Representation"→`peerRepresentation`.
-- Per turn → `injection.perTurn`, mapping "User conclusions"→`userContext`, "Assistant conclusions"→`assistantContext`, "Dialectic recall"→`dialectic`.
-- Show in UI → `injection.showContents`, same mapping as per turn.
-
-Pass the value as a JSON array (e.g. `["directives","peerCard"]`). An empty selection means `[]`: for `injection.sessionStart` and `injection.perTurn` that surface then injects nothing, and for `injection.showContents` (the default) every enabled per-turn component still injects — it just reports a one-line summary (count, tokens, timing) instead of printing its payload.
-
-`showContents` is display-only. It never changes what reaches the model.
-
-Retrieval tuning is intentionally NOT asked here. `injection.searchTopK` (default 10), `injection.maxConclusions` (15), `injection.searchMaxDistance` (0.6, cosine — lower is stricter), and `injection.searchQuerySource` ("prompt" | "topics", default "prompt") are all configurable via `set_config`, but keep the defaults; only mention they're tunable if the user brings it up, and never prompt for them.
-
-If the user enables "Dialectic recall", note the two knobs that shape it — `injection.dialecticTemplate` (the query, with a `%{user_query}` placeholder) and `injection.dialecticReasoning` (tier, default "low") — both via `set_config`. Flag the trade-off: it fires a `chat()` call every non-trivial turn (~12s at medium), on its own budget under the 30s hook ceiling, so it adds real per-turn latency. Keep it off unless the user wants it.
+Map the selections to `injection.sessionStart` ("Memory directives"→`directives`, "Peer card"→`peerCard`) and call `set_config` once with a JSON array (e.g. `["directives","peerCard"]`). An empty selection means `[]`: nothing is injected at session start.
 
 ### Dangerous fields (Host)
 
@@ -183,8 +150,6 @@ AskUserQuestion:
       description: "Cache lifetime — currently {contextRefresh.ttlSeconds}s (default: 300)"
     - label: "Message threshold"
       description: "Refresh every N messages — currently {contextRefresh.messageThreshold} (default: 30)"
-    - label: "Skip dialectic"
-      description: "Skip chat() in prompt hook — currently {contextRefresh.skipDialectic} (default: false)"
 ```
 
 Then ask for the new value and call `set_config`.

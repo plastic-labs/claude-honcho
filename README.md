@@ -123,7 +123,7 @@ to the peer name you chose in your environment: it will carry across different p
 - **AI Self-Awareness** — Claude knows what it was working on, even after restarts
 - **Configurable Memory Injection** — Choose exactly what context is injected at session start and per turn
 - **Team Support** — Multiple people can share a workspace and build context together
-- **MCP Tools** — Search memory, query knowledge about you, and save insights
+- **MCP Tools** — Search memory and ask Honcho about you, a project scope, or the whole workspace
 
 ## MCP Tools
 
@@ -131,14 +131,12 @@ The honcho plugin provides these tools via MCP:
 
 | Tool                 | Description                                                    |
 | -------------------- | -------------------------------------------------------------- |
-| `search`             | Semantic search across session messages and saved conclusions  |
-| `chat`               | Query Honcho's knowledge about the user (dialectic reasoning)  |
+| `search`             | Semantic search across session messages and derived conclusions |
+| `chat`               | Ask Honcho about the user, optionally limited to a `scope`, or about the whole workspace (`workspace: true`) |
 | `create_conclusion`  | Save insights about the user to memory                         |
-| `list_conclusions`   | List saved conclusions                                         |
-| `query_conclusions`  | Semantic search over saved conclusions                         |
+| `list_conclusions`   | List derived conclusions (explicit ones are excluded)          |
+| `query_conclusions`  | Semantic search over derived conclusions                       |
 | `delete_conclusion`  | Delete a conclusion by ID                                      |
-| `get_context`        | Retrieve the full context object (representation + peer card)  |
-| `get_representation` | Retrieve the user's representation string                      |
 | `get_config`         | View current configuration and status                          |
 | `set_config`         | Change any configuration field programmatically                |
 | `honcho_remember`    | Fan-out dialectic recall (only registered when `rememberTool: true`) |
@@ -192,18 +190,11 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
     "summarizeAssistant": false       // Summarize instead of sending full assistant text
   },
 
-  // Context retrieval
-  "contextRefresh": {
-    "messageThreshold": 30,           // Refresh context every N messages
-    "ttlSeconds": 300,                // Cache TTL for context
-    "skipDialectic": false            // Skip dialectic chat() calls in user-prompt hook
-  },
-  "reasoningLevel": "medium",         // Default dialectic reasoning tier: "minimal" | "low" | "medium" | "high" | "max"
+  "reasoningLevel": "medium",         // Default reasoning tier for the chat tool: "minimal" | "low" | "medium" | "high" | "max"
 
   // Memory injection (see "Memory Injection" below)
   "injection": {
-    "sessionStart": ["directives", "peerCard"],
-    "perTurn": ["userContext"]
+    "sessionStart": ["directives", "peerCard"]
   },
 
   // On-demand recall tool (see "The honcho_remember Tool" below)
@@ -239,42 +230,20 @@ This mapping isn't configurable. If you want a different session layout, connect
 
 ### Memory Injection
 
-The `injection` config block controls exactly what memory is injected into Claude's context, on two surfaces: **once at session start** and **per prompt**. Each surface selects zero or more components; retrieval knobs shape what those components emit. Configure it with `/honcho:config` (memory injection settings), `set_config`, or by editing `~/.honcho/config.json`.
-
-**Session-start components** (default: `["directives", "peerCard"]`):
+At session start the plugin injects at most two things, chosen by `injection.sessionStart` (default: `["directives", "peerCard"]`):
 
 | Component | What it injects |
 | --- | --- |
-| `directives` | Static memory-usage guidance — treat injected memory as background, use `chat`/`search` for recall, save insights with `create_conclusion` |
+| `directives` | Static memory-usage guidance — treat Honcho memory as background, recall with the `chat` tool (it names this chat's repo and machine scopes), save insights with `create_conclusion` |
 | `peerCard` | Your peer card — a structured identity/attribute list |
-| `peerRepresentation` | Your full derived representation, injected at full length |
 
-**Per-turn components** (default: `["userContext"]`):
+Nothing is injected per prompt, and nothing is fetched with `context()`. Tools that read conclusions (`search`, `list_conclusions`, `query_conclusions`) return only derived conclusions; explicit ones are filtered out. Claude recalls memory when it needs it by calling `chat`:
 
-| Component | What it injects |
-| --- | --- |
-| `userContext` | A fresh, prompt-scoped context fetch for *you* — conclusions selected by semantic search, shaped by the retrieval knobs below |
-| `assistantContext` | The same context fetch for the AI peer — what Honcho has derived about the assistant itself |
-| `dialectic` | A reasoned `chat()` answer over your representation, seeded from `dialecticTemplate`. Off by default — much slower than a context fetch |
+- **About you** (default): an answer from everything Honcho knows about you.
+- **Within a scope**: pass `scope` (e.g. the repo name) to answer only from that scope's sessions.
+- **Across the workspace**: pass `workspace: true` to ask about every peer in the workspace.
 
-**Retrieval knobs:**
-
-| Field | Default | Description |
-| --- | --- | --- |
-| `searchTopK` | `10` | Top-K conclusions pulled by the context fetch's semantic search |
-| `maxConclusions` | `15` | Max conclusions injected per context fetch |
-| `searchMaxDistance` | `0.6` | Max cosine distance for the semantic search — lower is stricter |
-| `searchQuerySource` | `"prompt"` | What drives the per-turn search: the raw `"prompt"` or extracted `"topics"` |
-| `dialecticTemplate` | compact factual recall | Query template for the `dialectic` component; the prompt is substituted into `%{user_query}` |
-| `dialecticReasoning` | `"medium"` | Reasoning tier for the per-turn `dialectic` call — separate from the top-level `reasoningLevel` |
-
-If injected context feels off-topic, lower `searchMaxDistance`; if too sparse, raise it or bump `searchTopK`.
-
-**Visibility:** per-turn components report a one-line summary in the terminal by default. To print a component's full injected payload, list it in `showContents`:
-
-```json
-{ "injection": { "showContents": ["userContext", "dialectic"] } }
-```
+Configure it with `/honcho:config`, `set_config`, or by editing `~/.honcho/config.json`.
 
 ### The `honcho_remember` Tool
 
@@ -465,8 +434,8 @@ Environment variables work for initial bootstrap (before a config file exists). 
 ├─────────────────────────────────────────────────────────────────┤
 │  SessionStart   │  UserPrompt     │  PostToolUse   │ SessionEnd │
 │  ───────────    │  ───────────    │  ────────────  │ ────────── │
-│  Load context   │  Save message   │  Log activity  │ Clean up   │
-│  from Honcho    │  to Honcho      │  to Honcho     │            │
+│  Load peer card │  Save message   │  Log activity  │ Clean up   │
+│  + directives   │  to Honcho      │  to Honcho     │            │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -474,16 +443,16 @@ Environment variables work for initial bootstrap (before a config file exists). 
 │                         Honcho API                              │
 │                                                                 │
 │   Your messages and Claude's work → Persistent Memory →         │
-│   Retrieved as context at session start                         │
+│   Recalled on demand through the chat tool                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 The plugin hooks into Claude Code's lifecycle events:
 
-- **SessionStart**: Loads your context and history from Honcho
-- **UserPrompt**: Saves your messages and retrieves relevant context
+- **SessionStart**: Joins this chat's session to its repo and machine scopes, and injects the memory directives and your peer card
+- **UserPrompt**: Saves your messages (nothing is retrieved per turn; Claude calls `chat` when it needs memory)
 - **PostToolUse**: Logs Claude's actions (file edits, commands, etc.)
-- **PreCompact**: Anchors a memory snapshot before context compaction so knowledge survives summarization
+- **PreCompact**: Anchors the session identity and your peer card before compaction so they survive summarization
 - **Stop**: Flushes any pending messages
 - **SessionEnd**: Clears local per-chat state
 

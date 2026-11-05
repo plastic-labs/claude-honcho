@@ -13,7 +13,7 @@ import { setMemoryState, setSessionLink } from "../state.js";
 import { honchoSessionUrl } from "../styles.js";
 import { captureGitState, getSessionScopes } from "../git.js";
 import { logHook, logApiCall, logFlow, logAsync, setLogContext } from "../log.js";
-import { verboseApiResult, verboseList, clearVerboseLog, visComposedInjection } from "../visual.js";
+import { verboseList, clearVerboseLog, visComposedInjection } from "../visual.js";
 
 
 interface HookInput {
@@ -27,7 +27,7 @@ interface HookInput {
 // This hook runs synchronously, so these fetches block startup. Bound them
 // well under the 30s hook ceiling so a slow server degrades to an empty
 // injection instead of a hung session start.
-const CONTEXT_FETCH_TIMEOUT_MS = 10000;
+const CARD_FETCH_TIMEOUT_MS = 10000;
 
 /** Resolve a promise with its value, or null if `ms` elapses or it rejects. */
 function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
@@ -116,8 +116,9 @@ export async function handleSessionStart(): Promise<void> {
     // New SDK: session() and peer() are async and create lazily
     // Scopes are attached when the chat starts, while the session is empty;
     // re-attaching after compaction would queue a backfill of its messages.
+    const scopes = getSessionScopes(cwd);
     const [session, userPeer, aiPeer] = await Promise.all([
-      source === "compact" ? honcho.session(sessionName) : honcho.session(sessionName, { scopes: getSessionScopes(cwd) }),
+      source === "compact" ? honcho.session(sessionName) : honcho.session(sessionName, { scopes }),
       honcho.peer(config.peerName),
       honcho.peer(config.aiPeer),
     ]);
@@ -157,56 +158,30 @@ export async function handleSessionStart(): Promise<void> {
       }
     }
 
-    // Step 5: Fetch only what the configured session-start components need —
-    // the context() representation + peer card.
-    // Nothing is cached here; the per-turn hook does its own fresh,
-    // prompt-scoped fetch, so a session with no context components pays for no
-    // context round-trip.
-    spinner.update(`${sessionName} · fetching context`);
+    // Step 5: Fetch the peer card if it's selected. No context() call: the rest
+    // of memory is recalled on demand through the chat tool.
+    spinner.update(`${sessionName} · fetching peer card`);
 
-    const injection = getInjectionConfig(config);
-    const startComponents = injection.sessionStart;
-    const wantContext =
-      startComponents.includes("peerCard") || startComponents.includes("peerRepresentation");
-
-    logAsync("context-fetch", "Starting context fetch");
+    const startComponents = getInjectionConfig(config).sessionStart;
+    const wantCard = startComponents.includes("peerCard");
 
     const fetchStart = Date.now();
-
-    // unified: user observes self — use userPeer, no target.
-    // directional: aiPeer observes user — use aiPeer with target.
-    const contextLabel = observationMode === "unified" ? "userPeer.context()" : "aiPeer.context(target=user)";
-    const [userContextResult] = await Promise.allSettled([
-      wantContext
-        ? raceTimeout(
-            observationMode === "unified"
-              ? userPeer.context({ maxConclusions: 25, includeMostFrequent: true })
-              : aiPeer.context({ target: config.peerName, maxConclusions: 25, includeMostFrequent: true }),
-            CONTEXT_FETCH_TIMEOUT_MS
-          )
-        : Promise.resolve(null),
-    ]);
-
-    const fetchDuration = Date.now() - fetchStart;
-    const asyncResults = [
-      ...(wantContext ? [{ name: contextLabel, success: userContextResult.status === "fulfilled" && userContextResult.value !== null }] : []),
-    ];
-    const successCount = asyncResults.filter(r => r.success).length;
-    logAsync("context-fetch", `Fetched ${successCount}/${asyncResults.length} in ${fetchDuration}ms`, asyncResults);
-
-    // Verbose output (file-based — ~/.honcho/verbose.log)
-    if (userContextResult.status === "fulfilled" && userContextResult.value) {
-      const ctx = userContextResult.value as any;
-      verboseApiResult(`${contextLabel} → representation`, ctx.representation);
-      verboseList(`${contextLabel} → peerCard`, ctx.peerCard);
+    // unified: the user's own card; directional: the AI peer's card of the user.
+    const cardLabel = observationMode === "unified" ? "userPeer.getCard()" : "aiPeer.getCard(target=user)";
+    const peerCard = wantCard
+      ? await raceTimeout(
+          (observationMode === "unified" ? userPeer.getCard() : aiPeer.getCard(config.peerName)).then((c) => c ?? []),
+          CARD_FETCH_TIMEOUT_MS
+        )
+      : null;
+    if (wantCard) {
+      logAsync("card-fetch", `${cardLabel} ${peerCard ? "ok" : "unavailable"} in ${Date.now() - fetchStart}ms`);
+      verboseList(`${cardLabel} → peerCard`, peerCard ?? undefined);
     }
 
-    // Compose the configured session-start injection. Default [] renders to an
-    // empty payload — nothing injected at session start.
-    const contextValue = userContextResult.status === "fulfilled" ? (userContextResult.value as any) : null;
     const rendered = renderSessionStart(startComponents, {
-      peerCard: contextValue ? (contextValue.peerCard ?? []) : null,
-      representation: contextValue ? (contextValue.representation ?? "") : null,
+      peerCard: wantCard ? peerCard : undefined,
+      scopes,
       remember: config.rememberTool === true,
     });
 
@@ -231,7 +206,7 @@ export async function handleSessionStart(): Promise<void> {
       console.log(JSON.stringify({ systemMessage }));
     }
 
-    logFlow("complete", `Cache warmed: ${successCount}/1 context · injected: ${rendered.labels.join(", ") || "none"}`);
+    logFlow("complete", `injected: ${rendered.labels.join(", ") || "none"}`);
     process.exit(0);
   } catch (error) {
     logHook("session-start", `Error: ${error}`, { error: String(error) });
