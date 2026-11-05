@@ -70,4 +70,5 @@ Notes to relay if relevant:
   `~/.honcho/backfill-state.json` and skipped on re-run, so it's safe to run again
   (e.g. with a wider `--days` window) to pull in more history later.
 - Each transcript becomes one Honcho session named after its Claude Code session id,
-  the same mapping the live hooks use.
+  the same mapping the live hooks use, and joins the same repo and hostname scopes
+  (repo taken from the transcript's working directory).

@@ -233,6 +233,8 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
 
 Each Claude Code chat maps to one Honcho session whose id is the Claude Code session id. Resuming a chat continues its session; `/clear` and new chats start a new one. Memory about you still carries across every chat in the workspace.
 
+New sessions also join two Honcho scopes: one named after the git repository (worktrees share the main repo's name; outside git, the directory name) and one named after the machine's hostname. Use them to query memory from just one project or one machine.
+
 This mapping isn't configurable. If you want a different session layout, connect to Honcho through the [Honcho MCP server](https://mcp.honcho.dev) and manage sessions yourself.
 
 ### Memory Injection

@@ -11,7 +11,7 @@ import {
 import { Spinner } from "../spinner.js";
 import { setMemoryState, setSessionLink } from "../state.js";
 import { honchoSessionUrl } from "../styles.js";
-import { captureGitState } from "../git.js";
+import { captureGitState, getSessionScopes } from "../git.js";
 import { logHook, logApiCall, logFlow, logAsync, setLogContext } from "../log.js";
 import { verboseApiResult, verboseList, clearVerboseLog, visComposedInjection } from "../visual.js";
 
@@ -114,8 +114,10 @@ export async function handleSessionStart(): Promise<void> {
 
     const startTime = Date.now();
     // New SDK: session() and peer() are async and create lazily
+    // Scopes are attached when the chat starts, while the session is empty;
+    // re-attaching after compaction would queue a backfill of its messages.
     const [session, userPeer, aiPeer] = await Promise.all([
-      honcho.session(sessionName),
+      source === "compact" ? honcho.session(sessionName) : honcho.session(sessionName, { scopes: getSessionScopes(cwd) }),
       honcho.peer(config.peerName),
       honcho.peer(config.aiPeer),
     ]);

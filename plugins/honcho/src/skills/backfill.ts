@@ -24,6 +24,7 @@ import {
 import { addMessagesBatched, chunkContent } from "../cache.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { parseTranscriptForBackfill, findTranscripts, type ParsedMessage } from "./transcript-parse.js";
+import { getSessionScopes } from "../git.js";
 import * as s from "../styles.js";
 import { homedir } from "os";
 import { join, basename } from "path";
@@ -71,6 +72,7 @@ function saveState(state: BackfillState): void {
 
 interface SessionGroup {
   name: string;
+  scopes: string[];
   messages: Array<ParsedMessage & { sourceTranscript: string }>;
 }
 
@@ -84,7 +86,7 @@ export function groupIntoSessions(
   let empty = 0;
 
   for (const { path } of transcripts) {
-    const { messages, sessionId } = parseTranscriptForBackfill(path);
+    const { messages, sessionId, cwd } = parseTranscriptForBackfill(path);
     if (messages.length === 0) {
       empty++;
       continue;
@@ -94,7 +96,7 @@ export function groupIntoSessions(
     const name = sanitizeForSessionName(sessionId || basename(path, ".jsonl"));
     let group = groups.get(name);
     if (!group) {
-      group = { name, messages: [] };
+      group = { name, scopes: cwd ? getSessionScopes(cwd) : [], messages: [] };
       groups.set(name, group);
     }
     for (const msg of messages) group.messages.push({ ...msg, sourceTranscript: source });
@@ -177,7 +179,7 @@ export async function run(): Promise<void> {
   for (const g of sorted) {
     try {
       const [session, userPeer, aiPeer] = await Promise.all([
-        honcho.session(g.name),
+        g.scopes.length ? honcho.session(g.name, { scopes: g.scopes }) : honcho.session(g.name),
         honcho.peer(config.peerName),
         honcho.peer(config.aiPeer),
       ]);

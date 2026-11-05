@@ -14,6 +14,7 @@ export interface TranscriptEntry {
   isMeta?: boolean;
   isSidechain?: boolean;
   sessionId?: string;
+  cwd?: string;
   message?: {
     role?: string;
     content: string | Array<{ type: string; text?: string; name?: string; input?: unknown }>;
@@ -72,9 +73,11 @@ function readLines(transcriptPath: string): string[] {
 export function parseTranscriptForBackfill(transcriptPath: string): {
   messages: ParsedMessage[];
   sessionId?: string;
+  cwd?: string;
 } {
   const messages: ParsedMessage[] = [];
   let sessionId: string | undefined;
+  let cwd: string | undefined;
 
   for (const line of readLines(transcriptPath)) {
     let entry: TranscriptEntry;
@@ -84,6 +87,7 @@ export function parseTranscriptForBackfill(transcriptPath: string): {
       continue;
     }
     if (entry.sessionId) sessionId = entry.sessionId;
+    if (!cwd && entry.cwd) cwd = entry.cwd;
 
     if (entry.isMeta || entry.isSidechain) continue;
     const type = entryType(entry);
@@ -109,7 +113,7 @@ export function parseTranscriptForBackfill(transcriptPath: string): {
     messages[i].isResponse = !next || next.role === "user";
   }
 
-  return { messages, sessionId };
+  return { messages, sessionId, cwd };
 }
 
 const PROJECTS_DIR = join(homedir(), ".claude", "projects");
