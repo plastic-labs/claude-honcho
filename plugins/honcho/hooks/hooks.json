@@ -70,28 +70,6 @@
         ]
       }
     ],
-    "PreCompact": [
-      {
-        "matcher": "auto",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.ts\"",
-            "timeout": 20
-          }
-        ]
-      },
-      {
-        "matcher": "manual",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.ts\"",
-            "timeout": 20
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [

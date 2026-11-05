@@ -51,7 +51,7 @@ synced = bool((load("context-cache.json").get("userContext", {}) or {}).get("dat
 link_url = (load(keyed("session")).get("url") or "")
 
 # --- live phase from the hooks ----------------------------------------------
-TTL = {"loading": 40, "compacting": 40, "recalling": 6, "querying": 8}
+TTL = {"loading": 40, "recalling": 6, "querying": 8}
 phase, detail = "idle", ""
 s = load(keyed("state"))
 ph = s.get("phase", "idle")
@@ -77,8 +77,7 @@ SEP = f"{DIM} · {R}"
 # point queries. Frame advances ~1 Hz off the wall clock so each repaint moves.
 SPIN = ["◐", "◓", "◑", "◒"]
 SPARK = ["✦", "✧"]
-LABEL = {"loading": "loading memory", "compacting": "anchoring memory",
-         "recalling": "recalling"}
+LABEL = {"loading": "loading memory", "recalling": "recalling"}
 
 def osc8(url, text):                       # clickable link, no raw URL shown
     return f"\x1b]8;;{url}\x07{text}\x1b]8;;\x07"

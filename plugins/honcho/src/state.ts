@@ -25,7 +25,6 @@ function sessionFile(sessionId?: string): string {
 export type MemoryPhase =
   | "idle"
   | "loading"
-  | "compacting"
   | "recalling"
   | "querying";    // an explicit honcho MCP tool call (search/chat/context/...)
 

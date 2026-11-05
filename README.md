@@ -452,7 +452,6 @@ The plugin hooks into Claude Code's lifecycle events:
 - **SessionStart**: Joins this chat's session to its repo and machine scopes, and injects the memory directives and your peer card
 - **UserPrompt**: Saves your messages (nothing is retrieved per turn; Claude calls `chat` when it needs memory)
 - **PostToolUse**: Logs Claude's actions (file edits, commands, etc.)
-- **PreCompact**: Anchors the session identity and your peer card before compaction so they survive summarization
 - **Stop**: Flushes any pending messages
 - **SessionEnd**: Clears local per-chat state
 

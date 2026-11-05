@@ -6,7 +6,7 @@
  * - PostToolUse — visCapture() outputs JSON with systemMessage
  * - Stop — visStopMessage() outputs JSON with systemMessage, on a failed upload only
  *
- * SessionStart, SessionEnd, and PreCompact output plain text to stdout (context injection),
+ * SessionStart and SessionEnd output plain text to stdout (context injection),
  * so they cannot show inline indicators. Their activity is logged to the verbose log file only.
  */
 
@@ -59,15 +59,6 @@ export function visMessage(direction: HookDirection, hookName: string, message: 
 export function visComposedInjection(hookName: string, labels: string[], notes: string[] = []): string {
   const head = labels.length ? `injected ${labels.join(" + ")}` : "nothing injected";
   return formatLine("in", hookName, [head, ...notes].join(" · "));
-}
-
-/**
- * One-line PreCompact summary of what the memory anchor carries, e.g.
- * "anchored peer card (12 items) (0.4s)".
- */
-export function visAnchorSummary(hookName: string, items: string[], elapsedMs: number): string {
-  const what = items.length ? items.join(" · ") : "session identity only";
-  return formatLine("in", hookName, `anchored ${what} (${(elapsedMs / 1000).toFixed(1)}s)`);
 }
 
 /**
