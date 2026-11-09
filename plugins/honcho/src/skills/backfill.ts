@@ -114,7 +114,7 @@ export async function run(): Promise<void> {
 
   const config = loadConfig();
   if (!config) {
-    console.log(s.warn("No Honcho config found — run /honcho:setup first."));
+    console.log(s.warn("No Honcho config found — run /honcho setup first."));
     process.exit(1);
   }
 

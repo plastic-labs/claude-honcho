@@ -196,7 +196,7 @@ function handleGetConfig() {
 
   // Check for legacy fields without hosts block
   if (cfgExists && !rawFile.hosts) {
-    warnings.push("Config uses legacy flat fields. Consider running /honcho:config to migrate to hosts block.");
+    warnings.push("Config uses legacy flat fields. Any /honcho set or set_config rewrites it into the hosts block.");
   }
 
   if (cfgExists && rawFile.hosts && rawFile.workspace && rawFile.globalOverride === undefined) {
@@ -621,7 +621,7 @@ function parseScope(value: unknown): string | string[] | undefined {
 }
 
 const NOT_CONFIGURED_RESULT = {
-  content: [{ type: "text", text: "Honcho isn't configured; run /honcho:setup to connect it, then try again." }],
+  content: [{ type: "text", text: "Honcho isn't configured; run /honcho setup to connect it, then try again." }],
   isError: true,
 };
 
@@ -655,7 +655,7 @@ export async function runMcpServer(): Promise<void> {
   // instructions until a config appears, then the clients are built on first use.
   let clients = createClients();
   if (!clients) {
-    console.error("[honcho-mcp] Not configured. Run /honcho:setup");
+    console.error("[honcho-mcp] Not configured. Run /honcho setup");
   }
 
   const server = new Server(

@@ -1,6 +1,6 @@
 /**
  * Parse Claude Code session transcripts (`~/.claude/projects/<dir>/<uuid>.jsonl`)
- * for the /honcho:import backfill.
+ * for the /honcho import backfill.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { homedir } from "os";

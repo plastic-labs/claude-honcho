@@ -44,75 +44,35 @@ Give Claude Code long-term memory that survives context wipes, session restarts,
 
 ## Prerequisites
 
-- A Honcho API key from [app.honcho.dev](https://app.honcho.dev)
+- Claude Code v2.1.287 or later
 - [Node.js](https://nodejs.org) on your PATH
+- A Honcho account at [app.honcho.dev](https://app.honcho.dev)
 
 The plugin ships as a self-contained bundle -- no other dependencies needed.
 
 ## Quick Start
 
-### Step 1: Get Your Honcho API Key
-
-1. Go to **[app.honcho.dev](https://app.honcho.dev)**
-2. Sign up or log in
-3. Copy your API key (starts with `hch-`)
-
-### Step 2: Set Environment Variables
-
-**macOS / Linux** -- add these to your shell config (`~/.zshrc`, `~/.bashrc`, or `~/.profile`):
-
-```bash
-# Required
-export HONCHO_API_KEY="hch-your-api-key-here"
-
-# Optional (defaults shown)
-export HONCHO_PEER_NAME="$USER"           # Your name/identity
-export HONCHO_WORKSPACE="claude_code"     # Workspace name
-```
-
-Then reload your shell:
-
-```bash
-source ~/.zshrc  # or ~/.bashrc
-```
-
-**Windows (PowerShell)** -- set a persistent user environment variable:
-
-```powershell
-# Required
-[Environment]::SetEnvironmentVariable("HONCHO_API_KEY", "hch-your-api-key-here", "User")
-
-# Optional
-[Environment]::SetEnvironmentVariable("HONCHO_PEER_NAME", $env:USERNAME, "User")
-[Environment]::SetEnvironmentVariable("HONCHO_WORKSPACE", "claude_code", "User")
-```
-
-Then restart your terminal so the new variables take effect.
-
-### Step 3: Install the Plugin
+### Step 1: Install the plugin
 
 ```
 /plugin marketplace add plastic-labs/claude-honcho
 /plugin install honcho@honcho
 ```
 
-### Step 4: Restart Claude Code
+Then run `/reload-plugins`, or restart Claude Code.
 
-```bash
-# Exit Claude Code (ctrl+c or /exit)
-# Start it again -- you should see the Honcho pixel art and memory loading on startup.
-claude
-```
+### Step 2: Connect Honcho
 
-### Step 5: (Optional) Kick off your conversation with an interview
+Click `○ honcho · set up` in the prompt footer, or run `/honcho setup`. Sign in with your browser, or paste an API key from [app.honcho.dev](https://app.honcho.dev). Your sign-in and key stay in the pane; they never go to Claude.
 
-```
-/honcho:interview
-```
+### Step 3: Start a new session
 
-Claude will interview you about your personal preferences in order to kickstart a representation
-of you. What it learns will be saved in Honcho and remembered forever. The interview is specific
-to the peer name you chose in your environment: it will carry across different projects!
+Run `/clear` or restart Claude Code. Memory loads at the start of each session, and `● honcho` in the footer opens the Honcho pane.
+
+### Step 4 (optional): Teach Honcho about you
+
+- `/honcho:interview` -- Claude asks about your preferences and saves what it learns. It carries across projects.
+- `/honcho import` -- add your past Claude Code sessions to Honcho.
 
 ## What You Get
 
@@ -145,18 +105,17 @@ The honcho plugin provides these tools via MCP:
 
 | Command             | Description                                                 |
 | ------------------- | ----------------------------------------------------------- |
-| `/honcho:status`    | Show current memory status and connection info              |
-| `/honcho:config`    | Interactive configuration menu                              |
-| `/honcho:setup`     | First-time setup — validate API key and create config       |
 | `/honcho:interview` | Interview to capture stable, cross-project user preferences |
-| `/honcho:import`    | Backfill past Claude Code sessions into Honcho memory        |
 | `/honcho:insights`  | Distill memory into CLAUDE.md edits, style rules, skill ideas |
+| `/honcho`           | Opens the Honcho pane. `/honcho setup` (sign in or enter an API key), `/honcho status`, `/honcho config`, `/honcho set <field> <value>` and `/honcho import` (backfill past sessions; `--yes` to upload) answer at once, without a Claude turn |
+
+**Honcho pane.** Click `● honcho` in the prompt footer, or run `/honcho`, to open a pane beside the chat with a link to this chat's session in Honcho, your dream history and your peer card. Select a dream or the peer card to see it in full.
 
 ---
 
 ## Configuration
 
-All configuration lives in a single global file at `~/.honcho/config.json`. You can edit it directly, use the `/honcho:config` skill, or use the `set_config` MCP tool. Environment variables work for initial setup but the config file takes precedence once it exists.
+All configuration lives in a single global file at `~/.honcho/config.json`. You can edit it directly, use `/honcho set <field> <value>`, or use the `set_config` MCP tool. Environment variables work for initial setup but the config file takes precedence once it exists.
 
 ### Config File Reference
 
@@ -211,7 +170,6 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
 
   // Miscellaneous
   "redactPatterns": [],               // Extra regexes redacted from tool summaries (additive to built-in secret patterns)
-  "statusline": "on",                 // Memory statusline visibility: "on" | "off"
   "enabled": true,
   "logging": true,
 
@@ -243,7 +201,7 @@ Nothing is injected per prompt, and nothing is fetched with `context()`. Tools t
 - **Within a scope**: pass `scope` (e.g. the repo name) to answer only from that scope's sessions.
 - **Across the workspace**: pass `workspace: true` to ask about every peer in the workspace.
 
-Configure it with `/honcho:config`, `set_config`, or by editing `~/.honcho/config.json`.
+Configure it with `/honcho set`, `set_config`, or by editing `~/.honcho/config.json`.
 
 ### The `honcho_remember` Tool
 
@@ -466,7 +424,7 @@ The plugin hooks into Claude Code's lifecycle events:
    echo $env:HONCHO_API_KEY      # Windows PowerShell
    ```
 
-   If empty, set it (see Step 2 in Quick Start) and restart your terminal.
+   If empty, run `/honcho setup`, or set it (see the environment-variable setup near the end) and restart your terminal.
 
 2. **Check the plugin is installed:**
 
@@ -478,7 +436,7 @@ The plugin hooks into Claude Code's lifecycle events:
 
 3. **Restart Claude Code** after making changes.
 
-4. **Run `/honcho:status`** to see connection state, workspace, and session info.
+4. **Run `/honcho status`** to see connection state, workspace, and session info.
 
 ### Memory not persisting between sessions
 
@@ -539,6 +497,48 @@ This plugin provides skills to help you integrate Honcho into your projects and 
 ```
 
 Then remove the environment variables from your shell config if desired.
+
+<details>
+<summary>Claude Code before v2.1.287: set up with environment variables</summary>
+
+Older Claude Code versions don't load the plugin's mod, so there is no `/honcho` command or Honcho pane. Memory still works once a key is set.
+
+1. Get an API key (starts with `hch-`) at [app.honcho.dev](https://app.honcho.dev).
+2. Set it in your environment.
+
+**macOS / Linux** -- add these to your shell config (`~/.zshrc`, `~/.bashrc`, or `~/.profile`):
+
+```bash
+# Required
+export HONCHO_API_KEY="hch-your-api-key-here"
+
+# Optional (defaults shown)
+export HONCHO_PEER_NAME="$USER"           # Your name/identity
+export HONCHO_WORKSPACE="claude_code"     # Workspace name
+```
+
+Then reload your shell:
+
+```bash
+source ~/.zshrc  # or ~/.bashrc
+```
+
+**Windows (PowerShell)** -- set a persistent user environment variable:
+
+```powershell
+# Required
+[Environment]::SetEnvironmentVariable("HONCHO_API_KEY", "hch-your-api-key-here", "User")
+
+# Optional
+[Environment]::SetEnvironmentVariable("HONCHO_PEER_NAME", $env:USERNAME, "User")
+[Environment]::SetEnvironmentVariable("HONCHO_WORKSPACE", "claude_code", "User")
+```
+
+Then restart your terminal so the new variables take effect.
+
+3. Install the plugin (Step 1 above) and restart Claude Code.
+
+</details>
 
 ---
 

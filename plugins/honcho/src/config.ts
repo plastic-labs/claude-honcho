@@ -101,7 +101,7 @@ export interface HostConfig {
    * against different Honcho orgs or workspaces.
    */
   apiKey?: string;
-  /** OAuth grant from this plugin's device sign-in (/honcho:setup). */
+  /** OAuth grant from this plugin's device sign-in (/honcho setup). */
   oauth?: OAuthTokens;
 
   /** Per-host overrides for settings that may differ across tools */
@@ -844,7 +844,7 @@ export function describeAuth(config: HonchoCLAUDEConfig): string {
 /** A user-facing notice when the OAuth sign-in needs attention, else undefined. */
 export function getAuthNotice(config: HonchoCLAUDEConfig): string | undefined {
   if (config.auth?.reauthRequired) {
-    return "[honcho] Your Honcho sign-in has expired. Run /honcho:setup to sign in again.";
+    return "[honcho] Your Honcho sign-in has expired. Run /honcho setup to sign in again.";
   }
   return undefined;
 }

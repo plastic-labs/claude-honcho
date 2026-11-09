@@ -4,7 +4,7 @@ import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, 
 import { getMessageCount, incrementMessageCount } from "../cache.js";
 import { logHook, setLogContext } from "../log.js";
 import { honchoSessionUrl } from "../styles.js";
-import { setSessionLink } from "../state.js";
+import { setSessionLink, isModActive, setNotice } from "../state.js";
 
 interface HookInput {
   prompt?: string;
@@ -74,6 +74,13 @@ export async function handleUserPrompt(): Promise<void> {
 
   const messageCountBefore = getMessageCount();
   incrementMessageCount();
+
+  // The mod shows the link in its pane and the nag as a toast.
+  if (isModActive()) {
+    const nag = messageCountBefore === 0 ? readVersionNag() : undefined;
+    if (nag && hookInput.session_id) setNotice(nag, hookInput.session_id);
+    process.exit(0);
+  }
 
   // Stagger the one-off banners so the first prompt isn't crowded. The
   // version-update nag (if stale) takes the first message and bumps the GUI

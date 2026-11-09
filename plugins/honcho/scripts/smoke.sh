@@ -55,10 +55,8 @@ TMP_HOME="$(mktemp -d)"
 export HOME="$TMP_HOME"
 unset HONCHO_API_KEY
 
-# Setup exits 1 by design when no key is found; assert it reached that
-# decision rather than expecting success.
-echo "smoke: dist/skills/setup-runner.js"
-(bounded node dist/skills/setup-runner.js </dev/null || true) | grep -q "No API key found"
+echo "smoke: dist/skills/pane-runner.js"
+bounded node dist/skills/pane-runner.js setup-state </dev/null | grep -q '"connected":false'
 echo "smoke: dist/skills/status-runner.js"
 bounded node dist/skills/status-runner.js </dev/null | grep -q "Not configured"
 
@@ -69,6 +67,6 @@ echo "smoke: dist/mcp-server.js (no key)"
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_config","arguments":{}}}'
   sleep 1
-} | bounded node dist/mcp-server.js 2>/dev/null | grep -q "run /honcho:setup"
+} | bounded node dist/mcp-server.js 2>/dev/null | grep -q "run /honcho setup"
 
 echo "smoke: all entry points OK"

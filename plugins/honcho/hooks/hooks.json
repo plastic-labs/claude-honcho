@@ -1,5 +1,8 @@
 {
   "description": "Honcho memory hooks for Claude Code sessions",
+  "modules": [
+    "./register.tsx"
+  ],
   "hooks": {
     "SessionStart": [
       {
