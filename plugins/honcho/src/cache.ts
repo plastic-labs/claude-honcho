@@ -1,10 +1,8 @@
 import { homedir } from "os";
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { getContextRefreshConfig } from "./config.js";
 
 const CACHE_DIR = join(homedir(), ".honcho");
-const ID_CACHE_FILE = join(CACHE_DIR, "cache.json");
 const CONTEXT_CACHE_FILE = join(CACHE_DIR, "context-cache.json");
 
 // Ensure cache directory exists
@@ -15,78 +13,16 @@ function ensureCacheDir(): void {
 }
 
 // ============================================
-// ID Cache - workspace, session, peer IDs
-// ============================================
-
-interface IdCache {
-  workspace?: { name: string; id: string };
-  peers?: Record<string, string>; // peerName -> peerId
-}
-
-export function loadIdCache(): IdCache {
-  ensureCacheDir();
-  if (!existsSync(ID_CACHE_FILE)) {
-    return {};
-  }
-  try {
-    return JSON.parse(readFileSync(ID_CACHE_FILE, "utf-8"));
-  } catch {
-    return {};
-  }
-}
-
-export function saveIdCache(cache: IdCache): void {
-  ensureCacheDir();
-  writeFileSync(ID_CACHE_FILE, JSON.stringify(cache, null, 2));
-}
-
-export function getCachedWorkspaceId(workspaceName: string): string | null {
-  const cache = loadIdCache();
-  if (cache.workspace?.name === workspaceName) {
-    return cache.workspace.id;
-  }
-  return null;
-}
-
-export function setCachedWorkspaceId(name: string, id: string): void {
-  const cache = loadIdCache();
-  cache.workspace = { name, id };
-  saveIdCache(cache);
-}
-
-export function getCachedPeerId(peerName: string): string | null {
-  const cache = loadIdCache();
-  return cache.peers?.[peerName] || null;
-}
-
-export function setCachedPeerId(peerName: string, peerId: string): void {
-  const cache = loadIdCache();
-  if (!cache.peers) cache.peers = {};
-  cache.peers[peerName] = peerId;
-  saveIdCache(cache);
-}
-
-// ============================================
-// Context Cache - user + claude context with TTL
+// Context Cache - prompt counter for the one-off banners
 // ============================================
 
 interface ContextCache {
-  userContext?: { data: any; fetchedAt: number };
-  claudeContext?: { data: any; fetchedAt: number };
-  summaries?: { data: any; fetchedAt: number };
-  messageCount?: number; // Track messages since last refresh
-}
-
-// Now configurable via config.json, with defaults in getContextRefreshConfig()
-function getContextTTL(): number {
-  const config = getContextRefreshConfig();
-  return (config.ttlSeconds ?? 300) * 1000; // Convert to ms
+  messageCount?: number; // Prompts since SessionStart
 }
 
 // Known keys in ContextCache — anything else is a ghost from older versions
-const CONTEXT_CACHE_KNOWN_KEYS = new Set([
-  "claudeContext", "summaries", "messageCount",
-]);
+// (e.g. the claudeContext/summaries caches from before recall moved to chat)
+const CONTEXT_CACHE_KNOWN_KEYS = new Set(["messageCount"]);
 
 export function loadContextCache(): ContextCache {
   ensureCacheDir();
@@ -117,21 +53,6 @@ export function saveContextCache(cache: ContextCache): void {
   writeFileSync(CONTEXT_CACHE_FILE, JSON.stringify(cache, null, 2));
 }
 
-export function getCachedClaudeContext(): any | null {
-  const cache = loadContextCache();
-  if (cache.claudeContext && Date.now() - cache.claudeContext.fetchedAt < getContextTTL()) {
-    return cache.claudeContext.data;
-  }
-  return null;
-}
-
-export function setCachedClaudeContext(data: any): void {
-  const cache = loadContextCache();
-  cache.claudeContext = { data, fetchedAt: Date.now() };
-  saveContextCache(cache);
-}
-
-// Track message count for threshold-based refresh
 export function incrementMessageCount(): number {
   const cache = loadContextCache();
   cache.messageCount = (cache.messageCount || 0) + 1;
@@ -327,42 +248,4 @@ export async function addMessagesBatched(
       await active.addMessages(batch);
     }
   }
-}
-
-// ============================================
-// Utility: Clear all caches (for debugging)
-// ============================================
-
-export function clearAllCaches(): void {
-  ensureCacheDir();
-  if (existsSync(ID_CACHE_FILE)) writeFileSync(ID_CACHE_FILE, "{}");
-  if (existsSync(CONTEXT_CACHE_FILE)) writeFileSync(CONTEXT_CACHE_FILE, "{}");
-  if (existsSync(GIT_STATE_FILE)) writeFileSync(GIT_STATE_FILE, "{}");
-}
-
-/** Clear only the ID cache (workspace, peer, session IDs) */
-export function clearIdCache(): void {
-  ensureCacheDir();
-  writeFileSync(ID_CACHE_FILE, "{}");
-}
-
-/** Clear only peer IDs from the ID cache */
-export function clearPeerCache(): void {
-  const cache = loadIdCache();
-  delete cache.peers;
-  saveIdCache(cache);
-}
-
-/** Clear only userContext from the context cache */
-export function clearUserContextOnly(): void {
-  const cache = loadContextCache();
-  delete cache.userContext;
-  saveContextCache(cache);
-}
-
-/** Clear only claudeContext from the context cache */
-export function clearClaudeContextOnly(): void {
-  const cache = loadContextCache();
-  delete cache.claudeContext;
-  saveContextCache(cache);
 }

@@ -35,12 +35,6 @@ import {
 import { setClientApiKey } from "../honcho-client.js";
 import { validateRedactPattern } from "../redact.js";
 import { honchoSessionUrl } from "../styles.js";
-import {
-  clearIdCache,
-  clearPeerCache,
-  clearUserContextOnly,
-  clearClaudeContextOnly,
-} from "../cache.js";
 
 // ============================================
 // Environment variable names that can shadow config fields
@@ -110,7 +104,6 @@ function handleGetConfig() {
     endpoint: getEndpointInfo(cfg),
     globalOverride,
     messageUpload: cfg.messageUpload ?? {},
-    contextRefresh: cfg.contextRefresh ?? {},
     reasoningLevel: cfg.reasoningLevel ?? "medium",
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
@@ -313,7 +306,6 @@ function handleSetConfig(args: Record<string, unknown>) {
   }
 
   let previousValue: unknown;
-  let cacheInvalidation: { cleared: string[]; reason: string } | null = null;
   const warnings: string[] = [];
 
   // Check env var shadowing
@@ -329,28 +321,16 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.peerName = String(value);
       // peerName is a global field — write to root (user-directed action)
       saveRootField("peerName", cfg.peerName);
-      clearPeerCache();
-      clearUserContextOnly();
-      cacheInvalidation = { cleared: ["peer IDs", "user context"], reason: "Peer name changed" };
       break;
 
     case "aiPeer":
       previousValue = cfg.aiPeer;
       cfg.aiPeer = String(value);
-      clearPeerCache();
-      clearClaudeContextOnly();
-      cacheInvalidation = { cleared: ["peer IDs", "claude context"], reason: "AI peer changed" };
       break;
 
     case "workspace":
       previousValue = cfg.workspace;
       cfg.workspace = String(value);
-      if (String(value) !== String(previousValue)) {
-        clearIdCache();
-        clearUserContextOnly();
-        clearClaudeContextOnly();
-        cacheInvalidation = { cleared: ["all IDs", "all context"], reason: "Workspace changed" };
-      }
       break;
 
     case "endpoint.environment": {
@@ -362,10 +342,6 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.endpoint.baseUrl = undefined;
       // endpoint is a global field — write to root (user-directed action)
       saveRootField("endpoint", cfg.endpoint);
-      clearIdCache();
-      clearUserContextOnly();
-      clearClaudeContextOnly();
-      cacheInvalidation = { cleared: ["all IDs", "all context"], reason: "Endpoint changed" };
       break;
     }
 
@@ -376,10 +352,6 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.endpoint.environment = undefined;
       // endpoint is a global field — write to root (user-directed action)
       saveRootField("endpoint", cfg.endpoint);
-      clearIdCache();
-      clearUserContextOnly();
-      clearClaudeContextOnly();
-      cacheInvalidation = { cleared: ["all IDs", "all context"], reason: "Endpoint URL changed" };
       break;
 
     case "globalOverride":
@@ -420,18 +392,6 @@ function handleSetConfig(args: Record<string, unknown>) {
       previousValue = cfg.messageUpload?.summarizeAssistant;
       if (!cfg.messageUpload) cfg.messageUpload = {};
       cfg.messageUpload.summarizeAssistant = coerceBoolean(value);
-      break;
-
-    case "contextRefresh.messageThreshold":
-      previousValue = cfg.contextRefresh?.messageThreshold;
-      if (!cfg.contextRefresh) cfg.contextRefresh = {};
-      cfg.contextRefresh.messageThreshold = Number(value);
-      break;
-
-    case "contextRefresh.ttlSeconds":
-      previousValue = cfg.contextRefresh?.ttlSeconds;
-      if (!cfg.contextRefresh) cfg.contextRefresh = {};
-      cfg.contextRefresh.ttlSeconds = Number(value);
       break;
 
     case "reasoningLevel":
@@ -516,7 +476,6 @@ function handleSetConfig(args: Record<string, unknown>) {
     workspace: cfg.workspace,
     endpoint: endpointInfo,
     messageUpload: cfg.messageUpload ?? {},
-    contextRefresh: cfg.contextRefresh ?? {},
     reasoningLevel: cfg.reasoningLevel ?? "medium",
     observationMode: cfg.observationMode ?? "unified",
     statusline: cfg.statusline ?? "on",
@@ -545,7 +504,6 @@ function handleSetConfig(args: Record<string, unknown>) {
         field,
         previousValue,
         newValue: value,
-        cacheInvalidation,
         restartWarning,
         sessionUrl,
         warnings: warnings.length ? warnings : undefined,
@@ -832,8 +790,6 @@ export async function runMcpServer(): Promise<void> {
                   "messageUpload.maxUserTokens",
                   "messageUpload.maxAssistantTokens",
                   "messageUpload.summarizeAssistant",
-                  "contextRefresh.messageThreshold",
-                  "contextRefresh.ttlSeconds",
                   "reasoningLevel",
                   "observationMode",
                   "redactPatterns",

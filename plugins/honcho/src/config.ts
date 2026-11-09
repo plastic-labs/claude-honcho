@@ -17,13 +17,6 @@ export interface MessageUploadConfig {
   summarizeAssistant?: boolean;
 }
 
-export interface ContextRefreshConfig {
-  /** Refresh context every N messages (default: 30) */
-  messageThreshold?: number;
-  /** Cache TTL in seconds (default: 300) */
-  ttlSeconds?: number;
-}
-
 // ============================================
 // Composable injection (DEV-2088 + DEV-2024)
 // ============================================
@@ -119,7 +112,6 @@ export interface HostConfig {
    */
   observationMode?: ObservationMode;
   messageUpload?: MessageUploadConfig;
-  contextRefresh?: ContextRefreshConfig;
   /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
   redactPatterns?: string[];
   endpoint?: HonchoEndpointConfig;
@@ -228,7 +220,6 @@ interface HonchoFileConfig {
   /** Save [Git External] state-change events to Honcho (default: false) */
   saveGitEvents?: boolean;
   messageUpload?: MessageUploadConfig;
-  contextRefresh?: ContextRefreshConfig;
   endpoint?: HonchoEndpointConfig;
   /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
   redactPatterns?: string[];
@@ -287,8 +278,6 @@ export interface HonchoCLAUDEConfig {
   statusline?: StatuslineMode;
   /** Token-based upload limits */
   messageUpload?: MessageUploadConfig;
-  /** Context retrieval settings */
-  contextRefresh?: ContextRefreshConfig;
   /** SaaS vs local instance config */
   endpoint?: HonchoEndpointConfig;
   /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
@@ -436,7 +425,6 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     reasoningLevel: hostBlock?.reasoningLevel ?? raw.reasoningLevel,
     observationMode: hostBlock?.observationMode ?? raw.observationMode,
     messageUpload: hostBlock?.messageUpload ?? raw.messageUpload,
-    contextRefresh: hostBlock?.contextRefresh ?? raw.contextRefresh,
     endpoint: hostBlock?.endpoint ?? raw.endpoint,
     redactPatterns: hostBlock?.redactPatterns ?? raw.redactPatterns,
     injection: hostBlock?.injection ?? raw.injection,
@@ -627,7 +615,6 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   setHostIfExplicit("reasoningLevel", config.reasoningLevel, existing.reasoningLevel);
   setHostIfExplicit("observationMode", config.observationMode, existing.observationMode);
   setHostIfExplicit("messageUpload", config.messageUpload, existing.messageUpload);
-  setHostIfExplicit("contextRefresh", config.contextRefresh, existing.contextRefresh);
   setHostIfExplicit("redactPatterns", config.redactPatterns, existing.redactPatterns);
   setHostIfExplicit("endpoint", config.endpoint, existing.endpoint);
   setHostIfExplicit("injection", config.injection, existing.injection);
@@ -692,14 +679,6 @@ export function getMessageUploadConfig(): MessageUploadConfig {
     maxUserTokens: config?.messageUpload?.maxUserTokens ?? undefined,
     maxAssistantTokens: config?.messageUpload?.maxAssistantTokens ?? undefined,
     summarizeAssistant: config?.messageUpload?.summarizeAssistant ?? false,
-  };
-}
-
-export function getContextRefreshConfig(): ContextRefreshConfig {
-  const config = loadConfig();
-  return {
-    messageThreshold: config?.contextRefresh?.messageThreshold ?? 30,
-    ttlSeconds: config?.contextRefresh?.ttlSeconds ?? 300,
   };
 }
 

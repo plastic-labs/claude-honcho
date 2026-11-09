@@ -51,8 +51,6 @@ AskUserQuestion:
   options:
     - label: "Host"
       description: "Platform / local / custom URL (currently: {current.host})"
-    - label: "Context refresh"
-      description: "TTL, message threshold, dialectic settings"
     - label: "Message upload"
       description: "Token limits, summarization settings"
     - label: "Statusline"
@@ -137,23 +135,6 @@ Map the selections to `injection.sessionStart` ("Memory directives"→`directive
 
 Host changes require confirmation. First call `set_config` WITHOUT `confirm: true`. The tool will return a description of what will happen. Use `AskUserQuestion` to confirm, then call again WITH `confirm: true`.
 
-### Context refresh
-
-Use `AskUserQuestion` to pick which setting to change:
-
-```
-AskUserQuestion:
-  question: "Which context refresh setting?"
-  header: "Refresh"
-  options:
-    - label: "TTL"
-      description: "Cache lifetime — currently {contextRefresh.ttlSeconds}s (default: 300)"
-    - label: "Message threshold"
-      description: "Refresh every N messages — currently {contextRefresh.messageThreshold} (default: 30)"
-```
-
-Then ask for the new value and call `set_config`.
-
 ### Statusline
 
 ```
@@ -208,7 +189,7 @@ If "Configure more", go back to Step 2. If "Done", show the final status header 
 ## Guardrails
 
 - ALWAYS use AskUserQuestion for menus and confirmations. Never present numbered text lists.
-- Always show the result of `set_config` including any cache invalidation that occurred.
+- Always show the result of `set_config`.
 - If a warning about env var shadowing is returned, explain that the env var takes precedence at runtime.
 - Never guess values — always ask the user.
 - Include current values in option descriptions so the user sees what's set without expanding anything.
