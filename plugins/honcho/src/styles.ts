@@ -1,4 +1,4 @@
-import { isProductionEndpoint, type HonchoCLAUDEConfig } from "./config.js";
+import type { HonchoCLAUDEConfig } from "./config.js";
 
 /**
  * Shared color scheme and styling utilities for honcho CLI
@@ -148,9 +148,8 @@ export function highlight(text: string): string {
   return `${colors.peach}${text}${colors.reset}`;
 }
 
-/** Honcho app URL for a session, or null when the endpoint isn't the production API. */
-export function honchoSessionUrl(config: HonchoCLAUDEConfig, sessionName: string): string | null {
-  if (!isProductionEndpoint(config)) return null;
+/** Honcho app URL for a session. */
+export function honchoSessionUrl(config: HonchoCLAUDEConfig, sessionName: string): string {
   return `https://app.honcho.dev/explore?workspace=${encodeURIComponent(config.workspace)}&view=sessions&session=${encodeURIComponent(sessionName)}`;
 }
 

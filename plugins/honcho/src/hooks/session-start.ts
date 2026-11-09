@@ -40,7 +40,7 @@ function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
 export async function handleSessionStart(): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    console.log(JSON.stringify({ systemMessage: "[honcho] Not configured. Run /honcho:setup to connect Honcho memory." }));
+    console.log(JSON.stringify({ systemMessage: "[honcho] Not configured. Run /honcho setup to connect Honcho memory." }));
     process.exit(0);
   }
 

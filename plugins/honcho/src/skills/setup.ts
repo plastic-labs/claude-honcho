@@ -1,110 +1,24 @@
-import { Honcho } from "@honcho-ai/sdk";
+import { readFileSync } from "fs";
+import { isCloud } from "@honcho-ai/harness-plugin-core";
 import {
   loadConfig,
   loadConfigFromEnv,
   saveConfig,
   getConfigPath,
-  getConfigDir,
-  getHonchoClientOptions,
-  getDetectedHost,
-  getDefaultWorkspace,
-  getDefaultAiPeer,
   configExists,
   setDetectedHost,
-  getClaudeSettingsPath,
-  getClaudeSettingsDir,
   saveRootField,
   describeAuth,
   getConfiguredOrigin,
+  type HonchoCLAUDEConfig,
 } from "../config.js";
-import { finishSignIn, hasPendingSignIn, startSignIn } from "./login.js";
-import { isCloud } from "@honcho-ai/harness-plugin-core";
 import { createHonchoClient } from "../honcho-client.js";
-import * as s from "../styles.js";
+import { checkSignIn, startSignIn } from "./login.js";
 import { findTranscripts } from "./transcript-parse.js";
-import { copyFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
 
-// Installs the memory statusLine: ships the renderer to a stable path and
-// registers it in the user's global Claude Code settings. Plugins can't
-// self-register a statusLine and ${CLAUDE_PLUGIN_ROOT} isn't expanded in
-// settings.json, so an absolute path under ~/.honcho is the portable target.
-// Idempotent and non-destructive: never clobbers an existing statusLine.
-function installStatusline(): void {
-  console.log(s.section("Installing memory statusLine"));
+type Reply = { ok: true; [k: string]: unknown } | { ok: false; error: string; status?: string };
 
-  const src = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "scripts", "honcho-statusline.sh");
-  const dest = join(getConfigDir(), "honcho-statusline.sh");
-  try {
-    if (!existsSync(getConfigDir())) mkdirSync(getConfigDir(), { recursive: true });
-    copyFileSync(src, dest);
-    chmodSync(dest, 0o755);
-    console.log(s.success(`Renderer installed at ${dest}`));
-  } catch (err) {
-    console.log(s.warn(`Could not install renderer: ${err instanceof Error ? err.message : String(err)}`));
-    return;
-  }
-
-  // Default visibility to "full" only on first run — respect an existing choice.
-  try {
-    const raw = existsSync(getConfigPath()) ? JSON.parse(readFileSync(getConfigPath(), "utf-8")) : {};
-    if (raw.statusline === undefined) saveRootField("statusline", "on");
-  } catch {
-    // leave config as-is; the renderer defaults to "full" when the key is absent
-  }
-
-  // Register in ~/.claude/settings.json without disturbing an existing line.
-  const settingsPath = getClaudeSettingsPath();
-  let settings: Record<string, unknown> = {};
-  try {
-    if (existsSync(settingsPath)) settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-  } catch {
-    console.log(s.warn(`Could not parse ${settingsPath} — add the statusLine entry manually:`));
-    console.log(s.dim(`  "statusLine": { "type": "command", "command": "${dest}" }`));
-    return;
-  }
-
-  // refreshInterval re-runs the renderer on a timer so the working glyph can
-  // animate at rest; without it Claude Code only repaints on conversation
-  // activity and the statusLine looks frozen. 1s is the host minimum.
-  const REFRESH = 1;
-  const existing = settings.statusLine as { command?: string; refreshInterval?: number } | undefined;
-  if (existing?.command === dest) {
-    if (existing.refreshInterval === REFRESH) {
-      console.log(s.dim("statusLine already points at the honcho renderer"));
-      return;
-    }
-    // Upgrade an older registration that predates the animated renderer.
-    settings.statusLine = { type: "command", command: dest, refreshInterval: REFRESH };
-    try {
-      writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-      console.log(s.success("statusLine refreshInterval enabled — memory glyph now animates"));
-    } catch (err) {
-      console.log(s.warn(`Could not update settings.json: ${err instanceof Error ? err.message : String(err)}`));
-    }
-    return;
-  }
-  if (existing) {
-    console.log(s.warn("A different statusLine is already configured — leaving it untouched."));
-    console.log(s.dim("  To use honcho's instead, set settings.json statusLine.command to:"));
-    console.log(s.dim(`  ${dest}`));
-    console.log(s.dim(`  and add  "refreshInterval": ${REFRESH}  so the glyph animates.`));
-    return;
-  }
-
-  settings.statusLine = { type: "command", command: dest, refreshInterval: REFRESH };
-  try {
-    if (!existsSync(getClaudeSettingsDir())) mkdirSync(getClaudeSettingsDir(), { recursive: true });
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-    console.log(s.success("statusLine registered in ~/.claude/settings.json"));
-  } catch (err) {
-    console.log(s.warn(`Could not write settings.json: ${err instanceof Error ? err.message : String(err)}`));
-    console.log(s.dim(`  Add manually: "statusLine": { "type": "command", "command": "${dest}" }`));
-  }
-}
-
-/** True when the config file holds nothing but sign-in grants (login ran before setup). */
+/** True when the config file holds nothing but sign-in grants. */
 function configHasOnlyGrants(): boolean {
   try {
     const file = JSON.parse(readFileSync(getConfigPath(), "utf-8"));
@@ -116,120 +30,92 @@ function configHasOnlyGrants(): boolean {
   }
 }
 
-export async function setup(): Promise<void> {
-  // Default to claude_code for this runner
-  setDetectedHost("claude_code");
-
-  console.log("");
-  console.log(s.header("honcho setup"));
-  console.log("");
-
-  const firstRun = !configExists() || configHasOnlyGrants();
-
-  // Credential: HONCHO_API_KEY env, a Honcho sign-in, or an apiKey in the
-  // config file. With none, the user picks: browser sign-in or an API key.
-  // Exit 2 = not connected (ask which), exit 3 = sign-in waiting for approval.
-  let config = loadConfig() || loadConfigFromEnv();
-  if (!config && process.argv.includes("--sign-in")) {
-    process.exit(await startSignIn(getConfiguredOrigin()) ? 3 : 2);
-  }
-  if (!config && hasPendingSignIn()) {
-    if (!(await finishSignIn())) process.exit(3);
-    config = loadConfig();
-  }
-  if (!config) {
-    const cloud = isCloud(getConfiguredOrigin());
-    console.log(s.warn("Not connected to Honcho"));
-    console.log("");
-    if (cloud) {
-      console.log("  Connect one of two ways:");
-      console.log("  - Sign in with your browser (Honcho cloud)");
-    } else {
-      console.log("  This plugin points at a self-hosted Honcho, which uses an API key:");
-    }
-    console.log(`  ${cloud ? "- " : ""}Use an API key from https://app.honcho.dev, set in your shell:`);
-    if (process.platform === "win32") {
-      console.log(s.dim('       setx HONCHO_API_KEY "your-key-here"'));
-    } else {
-      console.log(s.dim('       export HONCHO_API_KEY="your-key-here"   # in ~/.zshrc or ~/.bashrc'));
-    }
-    console.log("    then restart Claude Code and run /honcho:setup again.");
-    process.exit(2);
-  }
-
-  console.log(s.success(`Credential found: ${describeAuth(config)}`));
-  console.log("");
-
-  // Validate connection
-  console.log(s.section("Validating connection"));
+async function validate(config: HonchoCLAUDEConfig): Promise<string | null> {
   try {
-    const honcho = await createHonchoClient(config);
-    await honcho.workspaces();
-    console.log(s.success("Connected to Honcho API"));
-    console.log(`  ${s.label("Workspace")}: ${config.workspace}`);
-    console.log(`  ${s.label("Peer")}:      ${config.peerName}`);
-    console.log(`  ${s.label("AI Peer")}:   ${config.aiPeer}`);
-    console.log("");
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.log(s.warn(`Connection failed: ${msg}`));
-    if (msg.includes("401") || msg.includes("auth")) {
-      const oauth = config.auth?.source === "oauth";
-      console.log(s.dim(oauth
-        ? "  Your Honcho sign-in was rejected. Run /honcho:setup to sign in again."
-        : "  API key may be invalid. Get a new one at https://app.honcho.dev"));
+    await (await createHonchoClient(config)).workspaces();
+    return null;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/401|auth|invalid api key/i.test(msg)) {
+      return config.auth?.source === "oauth" ? "Your Honcho sign-in was rejected. Sign in again." : "That API key was rejected.";
     }
-    process.exit(1);
+    return `Could not reach Honcho: ${msg.slice(0, 200)}`;
   }
-
-  // Write config if it doesn't exist
-  if (firstRun) {
-    console.log(s.section("Creating config"));
-    try {
-      // Root-level globals (owned by user/CLI, written only at initial setup).
-      // An OAuth access token is never written as apiKey; it lives in its grant.
-      if (config.auth?.source === "env" || config.auth?.source === "apiKey") {
-        saveRootField("apiKey", config.apiKey);
-      }
-      saveRootField("peerName", config.peerName);
-      // Per-host config goes in hosts.claude_code via saveConfig
-      saveConfig({
-        apiKey: config.apiKey,
-        peerName: config.peerName,
-        workspace: config.workspace,
-        aiPeer: config.aiPeer,
-        saveMessages: true,
-        enabled: true,
-        logging: true,
-      });
-      console.log(s.success(`Written to ${getConfigPath()}`));
-    } catch (err) {
-      console.log(s.warn(`Failed to write config: ${err instanceof Error ? err.message : String(err)}`));
-      process.exit(1);
-    }
-    console.log("");
-  } else {
-    console.log(s.dim(`Config already exists at ${getConfigPath()}`));
-    console.log("");
-  }
-
-  installStatusline();
-  console.log("");
-
-  // Report availability only — importing lives in /honcho:import.
-  try {
-    const transcripts = findTranscripts(30);
-    if (transcripts.length > 0) {
-      console.log(s.section("Import past sessions (optional)"));
-      console.log(s.listItem(`Found ${transcripts.length} local Claude Code session(s) from the last 30 days.`));
-      console.log(s.dim("  Run /honcho:import whenever you'd like to add your past work to Honcho."));
-      console.log("");
-    }
-  } catch {
-    // Non-fatal — the import is optional.
-  }
-
-  console.log(s.success("Setup complete -- Honcho memory is ready"));
-  console.log("");
 }
 
+/** Validate the credential and write the config on first run. */
+async function finish(config: HonchoCLAUDEConfig): Promise<Reply> {
+  const problem = await validate(config);
+  if (problem) return { ok: false, error: problem };
+  if (!configExists() || configHasOnlyGrants()) {
+    // An OAuth access token is never written as apiKey; it lives in its grant.
+    if (config.auth?.source === "env" || config.auth?.source === "apiKey") saveRootField("apiKey", config.apiKey);
+    saveRootField("peerName", config.peerName);
+    saveConfig({
+      apiKey: config.apiKey,
+      peerName: config.peerName,
+      workspace: config.workspace,
+      aiPeer: config.aiPeer,
+      saveMessages: true,
+      enabled: true,
+      logging: true,
+    });
+  }
+  return { ok: true, ...(await state()) };
+}
+
+/** Whether Honcho is connected, and which ways to connect are open. */
+export async function state(): Promise<Record<string, unknown>> {
+  setDetectedHost("claude_code");
+  const config = loadConfig() || loadConfigFromEnv();
+  let transcripts = 0;
+  try { transcripts = findTranscripts(30).length; } catch { /* optional */ }
+  return {
+    connected: !!config,
+    canSignIn: isCloud(getConfiguredOrigin()),
+    auth: config ? describeAuth(config) : null,
+    workspace: config?.workspace ?? null,
+    peer: config?.peerName ?? null,
+    transcripts,
+  };
+}
+
+export async function connectExisting(): Promise<Reply> {
+  setDetectedHost("claude_code");
+  const config = loadConfig() || loadConfigFromEnv();
+  return config ? finish(config) : { ok: false, error: "Not connected." };
+}
+
+export async function beginSignIn(): Promise<Reply> {
+  try {
+    return { ok: true, ...(await startSignIn()) };
+  } catch (e) {
+    return { ok: false, error: `Could not start sign-in: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+export async function pollSignIn(): Promise<Reply> {
+  setDetectedHost("claude_code");
+  const status = await checkSignIn();
+  if (status !== "approved") return { ok: true, status };
+  const config = loadConfig();
+  if (!config) return { ok: false, error: "Signed in, but the config could not be read." };
+  return { ...(await finish(config)), status };
+}
+
+/** Save an API key typed into the pane; put back the old value if it doesn't work. */
+export async function saveApiKey(key: string): Promise<Reply> {
+  setDetectedHost("claude_code");
+  key = key.trim();
+  if (!key) return { ok: false, error: "Enter an API key." };
+  let previous: unknown;
+  try { previous = JSON.parse(readFileSync(getConfigPath(), "utf-8")).apiKey; } catch { /* no config yet */ }
+  saveRootField("apiKey", key);
+  const config = loadConfig();
+  const problem = config ? await validate(config) : "Could not read the config.";
+  if (problem) {
+    saveRootField("apiKey", previous);
+    return { ok: false, error: problem };
+  }
+  return finish(config!);
+}

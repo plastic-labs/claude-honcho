@@ -16,7 +16,7 @@ export async function status(): Promise<void> {
   const config = loadConfig();
   if (!config) {
     console.log(s.warn("Not configured"));
-    console.log(s.dim("Run /honcho:setup to sign in, or set the HONCHO_API_KEY environment variable"));
+    console.log(s.dim("Run /honcho setup to sign in, or set the HONCHO_API_KEY environment variable"));
     return;
   }
 
@@ -73,7 +73,7 @@ export async function status(): Promise<void> {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes("401") || message.includes("Unauthorized")) {
-      console.log(`  ${s.label("Connection")}:  ${s.error("auth failed")} ${s.dim(`${describeAuth(config)}; run /honcho:setup`)}`);
+      console.log(`  ${s.label("Connection")}:  ${s.error("auth failed")} ${s.dim(`${describeAuth(config)}; run /honcho setup`)}`);
     } else if (message.includes("ECONNREFUSED") || message.includes("fetch failed")) {
       console.log(`  ${s.label("Connection")}:  ${s.error("unreachable")} ${s.dim(endpointInfo.url)}`);
     } else {
