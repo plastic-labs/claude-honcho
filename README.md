@@ -121,15 +121,21 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
   "schemaVersion": 2,
   "hosts": {
     "claude_code": {
-      "apiKey": "hch-v2-...",          // or an OAuth sign-in from /honcho setup
-      "peerName": "alice",             // your name (default: the one another plugin uses, else $USER)
+      "oauth": { "accessToken": "…", "refreshToken": "…", "accessExpiresAt": 1794263473, "clientId": "claude-honcho", "scope": "write" },
+      "peerName": "alice",             // asked during /honcho setup
       "workspace": "claude_code",
-      "aiPeer": "claude",
-      "baseUrl": "http://localhost:8000" // only for a self-hosted Honcho (default: Honcho cloud)
+      "aiPeer": "claude"
     }
   }
 }
 ```
+
+`/honcho setup` writes one of two credentials:
+
+- `oauth`: "Sign in with your browser". Your Claude Code sign-in to Honcho cloud, refreshed automatically. Other Honcho plugins keep their own.
+- `apiKey`: "Use an API key", for a key from app.honcho.dev or a self-hosted Honcho (`"baseUrl": "http://localhost:8000"`; browser sign-in is cloud-only).
+
+`HONCHO_API_KEY` overrides both.
 
 Each plugin keeps its settings in its own block under `hosts`; nothing at the top level is read. If your file still has top-level settings or old key names, the plugin copies them into `hosts.claude_code` at session start and says so once; `honcho doctor` in the Honcho CLI cleans up the rest. Logs go to `~/.honcho/activity.log`. To turn the plugin off, disable it in Claude Code's `/plugin` menu.
 
