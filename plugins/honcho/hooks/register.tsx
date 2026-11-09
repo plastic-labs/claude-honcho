@@ -221,18 +221,31 @@ function clip(text: string | null | undefined, width: number): string {
   return t.length > width ? t.slice(0, width - 1) + '…' : t
 }
 
-async function openUrl($: EngineInterface, url: string): Promise<void> {
+async function tryOpen($: EngineInterface, url: string): Promise<boolean> {
   for (const opener of ['open', 'xdg-open']) {
     try {
-      if ((await $.process.run([opener, url])).exitCode === 0) return
+      if ((await $.process.run([opener, url])).exitCode === 0) return true
     } catch { /* not on this platform */ }
   }
-  $.ui.toast(url)
+  return false
 }
 
-async function copyUrl($: EngineInterface, url: string, press: UiPressArgument): Promise<void> {
-  const r = await $.ui.copy({ text: url, surface: press.surface }).catch(() => ({ isCopied: false }))
-  $.ui.toast(r.isCopied ? 'Honcho link copied.' : url)
+async function openUrl($: EngineInterface, url: string): Promise<void> {
+  if (!(await tryOpen($, url))) $.ui.toast(url)
+}
+
+// Opens the page and also copies the link, so it can be pasted elsewhere.
+async function openSession($: EngineInterface, url: string, press: UiPressArgument): Promise<void> {
+  const [opened, copy] = await Promise.all([
+    tryOpen($, url),
+    $.ui.copy({ text: url, surface: press.surface }).catch(() => ({ isCopied: false })),
+  ])
+  $.ui.toast(
+    opened && copy.isCopied ? 'Opened in your browser; link copied.'
+    : opened ? 'Opened in your browser.'
+    : copy.isCopied ? 'Link copied.'
+    : url,
+  )
 }
 
 function textOf(result: { content: { type: string; text?: string }[] }): string {
@@ -492,7 +505,7 @@ export const register: Register = (on) => {
             {dreams.peer ?? '…'} @ {dreams.workspace ?? '…'}
             {dreams.at ? ` · updated ${ago(new Date(dreams.at).toISOString())}` : ''}
           </Text>
-          {o?.sessionUrl && <Button key="copy" label="copy honcho link" plain onPress={(press) => void copyUrl($, o.sessionUrl!, press)} />}
+          {o?.sessionUrl && <Button key="open" label="open in Honcho" plain onPress={(press) => void openSession($, o.sessionUrl!, press)} />}
           <Button key="refresh" label="refresh" plain onPress={() => void loadAll($)} />
         </Box>
         {overview.error && <Text color="red">{overview.error}</Text>}
