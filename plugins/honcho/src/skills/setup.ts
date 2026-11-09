@@ -7,7 +7,7 @@ import {
   getConfigPath,
   configExists,
   setDetectedHost,
-  saveRootField,
+  saveHostApiKey,
   describeAuth,
   getConfiguredOrigin,
   type HonchoCLAUDEConfig,
@@ -18,13 +18,13 @@ import { findTranscripts } from "./transcript-parse.js";
 
 type Reply = { ok: true; [k: string]: unknown } | { ok: false; error: string; status?: string };
 
-/** True when the config file holds nothing but sign-in grants. */
+/** True when the config file holds nothing but sign-in credentials. */
 function configHasOnlyGrants(): boolean {
   try {
     const file = JSON.parse(readFileSync(getConfigPath(), "utf-8"));
     const hosts = file.hosts ?? {};
     return Object.keys(file).every((k) => k === "hosts" || k === "oauth")
-      && Object.values<any>(hosts).every((b) => Object.keys(b ?? {}).every((k) => k === "oauth"));
+      && Object.values<any>(hosts).every((b) => Object.keys(b ?? {}).every((k) => k === "oauth" || k === "apiKey"));
   } catch {
     return false;
   }
@@ -49,17 +49,8 @@ async function finish(config: HonchoCLAUDEConfig): Promise<Reply> {
   if (problem) return { ok: false, error: problem };
   if (!configExists() || configHasOnlyGrants()) {
     // An OAuth access token is never written as apiKey; it lives in its grant.
-    if (config.auth?.source === "env" || config.auth?.source === "apiKey") saveRootField("apiKey", config.apiKey);
-    saveRootField("peerName", config.peerName);
-    saveConfig({
-      apiKey: config.apiKey,
-      peerName: config.peerName,
-      workspace: config.workspace,
-      aiPeer: config.aiPeer,
-      saveMessages: true,
-      enabled: true,
-      logging: true,
-    });
+    if (config.auth?.source === "env") saveHostApiKey(config.apiKey);
+    saveConfig(config);
   }
   return { ok: true, ...(await state()) };
 }
@@ -108,13 +99,13 @@ export async function saveApiKey(key: string): Promise<Reply> {
   setDetectedHost("claude_code");
   key = key.trim();
   if (!key) return { ok: false, error: "Enter an API key." };
-  let previous: unknown;
-  try { previous = JSON.parse(readFileSync(getConfigPath(), "utf-8")).apiKey; } catch { /* no config yet */ }
-  saveRootField("apiKey", key);
+  let previous: string | undefined;
+  try { previous = JSON.parse(readFileSync(getConfigPath(), "utf-8")).hosts?.claude_code?.apiKey; } catch { /* no config yet */ }
+  saveHostApiKey(key);
   const config = loadConfig();
   const problem = config ? await validate(config) : "Could not read the config.";
   if (problem) {
-    saveRootField("apiKey", previous);
+    saveHostApiKey(previous);
     return { ok: false, error: problem };
   }
   return finish(config!);

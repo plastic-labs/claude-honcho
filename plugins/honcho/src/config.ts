@@ -8,71 +8,7 @@ export function sanitizeForSessionName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
-export interface MessageUploadConfig {
-  /** Truncate user messages to this many tokens (undefined = no limit) */
-  maxUserTokens?: number;
-  /** Truncate assistant messages to this many tokens (undefined = no limit) */
-  maxAssistantTokens?: number;
-  /** Summarize assistant messages instead of sending full text (default: false) */
-  summarizeAssistant?: boolean;
-}
-
-// ============================================
-// Composable injection (DEV-2088 + DEV-2024)
-// ============================================
-
-/**
- * Components the SessionStart hook may emit once per session. The tuple is the
- * single source of truth: the union type derives from it, and set_config
- * validation builds its allow-set and error text from the same array — so
- * adding a component is a one-line edit with no drift between layers.
- * - "directives": static memory-usage guidance (treat injected memory as
- *   background, recall with the chat tool) — formerly a manual "paste
- *   this into your CLAUDE.md" README step; now shipped every session instead.
- * - "peerCard": the user's peer card (getCard), injected at full length.
- *
- * Nothing is injected per turn: recall happens when the model calls the
- * `chat` tool.
- */
-export const SESSION_START_COMPONENTS = ["directives", "peerCard"] as const;
-export type SessionStartComponent = (typeof SESSION_START_COMPONENTS)[number];
-
-/** Removed components: "briefing" carried the peer card, so it maps to
- *  "peerCard"; "summary" and "peerRepresentation" are dropped. */
-export function normalizeSessionStart(components: string[]): SessionStartComponent[] {
-  const out = components.map((c) => (c === "briefing" ? "peerCard" : c));
-  return [...new Set(out)].filter((c): c is SessionStartComponent =>
-    (SESSION_START_COMPONENTS as readonly string[]).includes(c));
-}
-
-/** The `injection` config block: which components are emitted at session start. */
-export interface InjectionConfig {
-  /** Components emitted once at session open (default: ["directives", "peerCard"]). */
-  sessionStart?: SessionStartComponent[];
-}
-
-export const DEFAULT_INJECTION: Required<InjectionConfig> = {
-  sessionStart: ["directives", "peerCard"],
-};
-
-export const REASONING_LEVELS = ["minimal", "low", "medium", "high", "max"] as const;
-export type ReasoningLevel = (typeof REASONING_LEVELS)[number];
-
-export type StatuslineMode = "on" | "off";
-
-export type HonchoEnvironment = "production" | "local";
-
-export interface HonchoEndpointConfig {
-  /** "production" (SaaS) or "local" (localhost:8000) */
-  environment?: HonchoEnvironment;
-  /** Custom URL override (takes precedence over environment) */
-  baseUrl?: string;
-}
-
-const HONCHO_BASE_URLS = {
-  production: "https://api.honcho.dev/v3",
-  local: "http://localhost:8000/v3",
-} as const;
+const HONCHO_CLOUD_URL = "https://api.honcho.dev/v3";
 
 // ============================================
 // Host Detection
@@ -80,45 +16,22 @@ const HONCHO_BASE_URLS = {
 
 export type HonchoHost = "cursor" | "claude_code" | "obsidian";
 
-export type ObservationMode = "unified" | "directional";
-
 export interface HostConfig {
+  /** The user's peer name */
+  peerName?: string;
   /** Honcho workspace name for this host */
   workspace?: string;
   /** AI peer name for this host (e.g. "claude", "cursor") */
   aiPeer?: string;
   /**
-   * Honcho API key scoped to this host. Takes precedence over the root
-   * `apiKey` field, but is still overridden by the HONCHO_API_KEY env var.
-   * Useful when different hosts (claude_code, cursor, opencode) authenticate
-   * against different Honcho orgs or workspaces.
+   * Honcho API key for this host. HONCHO_API_KEY overrides it.
    */
   apiKey?: string;
   /** OAuth grant from this plugin's device sign-in (/honcho setup). */
   oauth?: OAuthTokens;
 
-  /** Per-host overrides for settings that may differ across tools */
-  enabled?: boolean;
-  logging?: boolean;
-  saveMessages?: boolean;
-  saveToolUse?: boolean;
-  saveGitEvents?: boolean;
-  /** Default reasoning level for Honcho dialectic calls (default: "medium") */
-  reasoningLevel?: ReasoningLevel;
-  /**
-   * Observation mode (default: "unified").
-   * "unified": all agents write to user's self-observation collection (observer=user, observed=user).
-   * "directional": this AI keeps its own view of the user (observer=aiPeer, observed=user).
-   */
-  observationMode?: ObservationMode;
-  messageUpload?: MessageUploadConfig;
-  /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
-  redactPatterns?: string[];
-  endpoint?: HonchoEndpointConfig;
-  /** Composable injection config (session-start + per-turn component menus). */
-  injection?: InjectionConfig;
-  /** Register the on-demand `honcho_remember` MCP tool (default: false). */
-  rememberTool?: boolean;
+  /** Honcho API URL (default: Honcho cloud) */
+  baseUrl?: string;
 }
 
 let _detectedHost: HonchoHost | null = null;
@@ -160,15 +73,6 @@ export function getDefaultWorkspace(host?: HonchoHost): string {
 
 export function getDefaultAiPeer(host?: HonchoHost): string {
   return DEFAULT_AI_PEER[host ?? getDetectedHost()];
-}
-
-// MCP tool arguments may arrive as strings; Boolean("false") is true.
-export function coerceBoolean(value: unknown): boolean {
-  if (typeof value === "string") {
-    const v = value.trim().toLowerCase();
-    return v !== "false" && v !== "0" && v !== "";
-  }
-  return Boolean(value);
 }
 
 // Stdin cache: entry points read stdin once via initHook(),
@@ -214,31 +118,10 @@ interface HonchoFileConfig {
   peerName?: string;
   workspace?: string;
   aiPeer?: string;
-  saveMessages?: boolean;
-  /** Save [Tool] action summaries to Honcho (default: false) */
-  saveToolUse?: boolean;
-  /** Save [Git External] state-change events to Honcho (default: false) */
-  saveGitEvents?: boolean;
-  messageUpload?: MessageUploadConfig;
-  endpoint?: HonchoEndpointConfig;
-  /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
-  redactPatterns?: string[];
-  enabled?: boolean;
-  logging?: boolean;
-  /** Default reasoning level for Honcho dialectic calls (default: "medium") */
-  reasoningLevel?: ReasoningLevel;
-  /** Observation mode (default: "unified") */
-  observationMode?: ObservationMode;
-  /** Memory statusLine visibility: "on" (default) · "off" */
-  statusline?: StatuslineMode;
-  /** Composable injection config (session-start + per-turn component menus). */
-  injection?: InjectionConfig;
-  /** Register the on-demand `honcho_remember` MCP tool (default: false). */
-  rememberTool?: boolean;
+  /** Honcho API URL (default: Honcho cloud) */
+  baseUrl?: string;
   hosts?: Record<string, HostConfig>;
-  /** When true, flat workspace/aiPeer fields apply to ALL hosts,
-   *  ignoring host-specific blocks. When false (default), each host
-   *  uses its own block and flat fields are fallbacks only. */
+  /** Removed. Still read so session start can flag the workspace it used to pick. */
   globalOverride?: boolean;
   // Legacy flat fields (read-only fallbacks when no hosts block)
   cursorPeer?: string;
@@ -260,39 +143,10 @@ export interface HonchoCLAUDEConfig {
   /** AI peer name (resolved per-host, e.g. "claude" for claude-code) */
   aiPeer: string;
 
-  /** Save messages to Honcho (default: true) */
-  saveMessages?: boolean;
-  /** Save [Tool] action summaries to Honcho (default: false — low signal, redundant with assistant reasoning) */
-  saveToolUse?: boolean;
-  /** Save [Git External] state-change events to Honcho (default: false — machine plumbing, not user input) */
-  saveGitEvents?: boolean;
-  /** Default reasoning level for Honcho dialectic calls (default: "medium") */
-  reasoningLevel?: ReasoningLevel;
-  /**
-   * Observation mode (default: "unified").
-   * "unified": all agents write to user's self-observation collection.
-   * "directional": this AI keeps its own per-AI view of the user.
-   */
-  observationMode?: ObservationMode;
-  /** Memory statusLine visibility: "on" (default) · "off" */
-  statusline?: StatuslineMode;
-  /** Token-based upload limits */
-  messageUpload?: MessageUploadConfig;
-  /** SaaS vs local instance config */
-  endpoint?: HonchoEndpointConfig;
-  /** Extra regex patterns redacted from tool summaries (additive to built-in defaults) */
-  redactPatterns?: string[];
-  /** Composable injection config (session-start + per-turn component menus) */
-  injection?: InjectionConfig;
-  /** Register the on-demand `honcho_remember` MCP tool (default: false).
-   *  Not a hook-injection surface — a deliberate, model-invoked recall tool. */
-  rememberTool?: boolean;
-  /** Temporarily disable plugin (default: true) */
-  enabled?: boolean;
-  /** Enable file logging to ~/.honcho/ (default: true) */
-  logging?: boolean;
-  /** When true, flat workspace/aiPeer fields apply to ALL hosts */
-  globalOverride?: boolean;
+  /** Honcho API URL (default: Honcho cloud) */
+  baseUrl?: string;
+  /** Workspace a removed `globalOverride: true` would have used, when it differs */
+  legacyWorkspace?: string;
 }
 
 function deepEqual(a: unknown, b: unknown): boolean {
@@ -377,23 +231,23 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
   const hostKey = [host, host.replace(/_/g, "-"), host.replace(/-/g, "_")].find((k) => raw.hosts?.[k]) ?? host;
   const cred = pickCredential(raw, {
     host: hostKey,
-    baseUrl: honchoOrigin(hostBlock?.endpoint ?? raw.endpoint),
+    baseUrl: honchoOrigin(hostBlock?.baseUrl ?? raw.baseUrl),
     env: process.env,
   });
   if (!cred) return null;
   const { token: apiKey, ...authState } = cred;
 
-  const peerName = raw.peerName || process.env.HONCHO_PEER_NAME || process.env.USER || process.env.USERNAME || "user";
+  // This host's peerName, else the legacy root one, else one another host
+  // already uses, so plugins sharing a workspace stay one peer.
+  const otherHostPeer = Object.values(raw.hosts ?? {}).find((b) => b?.peerName)?.peerName;
+  const peerName = hostBlock?.peerName || raw.peerName || otherHostPeer
+    || process.env.HONCHO_PEER_NAME || process.env.USER || process.env.USERNAME || "user";
 
   // Resolve host-specific fields
   let workspace: string;
   let aiPeer: string;
 
-  if (raw.globalOverride === true) {
-    // Global override: flat fields apply to ALL hosts
-    workspace = raw.workspace ?? DEFAULT_WORKSPACE[host];
-    aiPeer = raw.aiPeer ?? hostBlock?.aiPeer ?? DEFAULT_AI_PEER[host];
-  } else if (hostBlock) {
+  if (hostBlock) {
     // Host-specific block takes precedence
     workspace = hostBlock.workspace ?? DEFAULT_WORKSPACE[host];
     aiPeer = hostBlock.aiPeer ?? DEFAULT_AI_PEER[host];
@@ -419,19 +273,8 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     peerName,
     workspace,
     aiPeer,
-    saveMessages: hostBlock?.saveMessages ?? raw.saveMessages,
-    saveToolUse: hostBlock?.saveToolUse ?? raw.saveToolUse,
-    saveGitEvents: hostBlock?.saveGitEvents ?? raw.saveGitEvents,
-    reasoningLevel: hostBlock?.reasoningLevel ?? raw.reasoningLevel,
-    observationMode: hostBlock?.observationMode ?? raw.observationMode,
-    messageUpload: hostBlock?.messageUpload ?? raw.messageUpload,
-    endpoint: hostBlock?.endpoint ?? raw.endpoint,
-    redactPatterns: hostBlock?.redactPatterns ?? raw.redactPatterns,
-    injection: hostBlock?.injection ?? raw.injection,
-    rememberTool: hostBlock?.rememberTool ?? raw.rememberTool,
-    enabled: hostBlock?.enabled ?? raw.enabled,
-    logging: hostBlock?.logging ?? raw.logging,
-    globalOverride: raw.globalOverride,
+    baseUrl: hostBlock?.baseUrl ?? raw.baseUrl,
+    legacyWorkspace: raw.globalOverride === true && raw.workspace && raw.workspace !== workspace ? raw.workspace : undefined,
   };
 
   return mergeWithEnvVars(config);
@@ -455,27 +298,15 @@ export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null 
     ? process.env.HONCHO_CURSOR_PEER
     : process.env.HONCHO_CLAUDE_PEER;
   const aiPeer = process.env.HONCHO_AI_PEER || hostPeerEnv || DEFAULT_AI_PEER[resolvedHost];
-  const endpoint = process.env.HONCHO_ENDPOINT;
 
   const config: HonchoCLAUDEConfig = {
     apiKey,
     peerName,
     workspace,
     aiPeer,
-    saveMessages: process.env.HONCHO_SAVE_MESSAGES !== "false",
-    saveToolUse: process.env.HONCHO_SAVE_TOOL_USE === "true",
-    saveGitEvents: process.env.HONCHO_SAVE_GIT_EVENTS === "true",
-    enabled: process.env.HONCHO_ENABLED !== "false",
-    logging: process.env.HONCHO_LOGGING !== "false",
   };
 
-  if (endpoint) {
-    if (endpoint === "local") {
-      config.endpoint = { environment: "local" };
-    } else if (endpoint.startsWith("http")) {
-      config.endpoint = { baseUrl: endpoint };
-    }
-  }
+  if (process.env.HONCHO_ENDPOINT?.startsWith("http")) config.baseUrl = process.env.HONCHO_ENDPOINT;
 
   return config;
 }
@@ -494,21 +325,6 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
   }
   if (process.env.HONCHO_PEER_NAME) {
     config.peerName = process.env.HONCHO_PEER_NAME;
-  }
-  if (process.env.HONCHO_ENABLED === "false") {
-    config.enabled = false;
-  }
-  if (process.env.HONCHO_LOGGING === "false") {
-    config.logging = false;
-  }
-  if (process.env.HONCHO_SAVE_MESSAGES === "false") {
-    config.saveMessages = false;
-  }
-  if (process.env.HONCHO_SAVE_TOOL_USE !== undefined) {
-    config.saveToolUse = process.env.HONCHO_SAVE_TOOL_USE === "true";
-  }
-  if (process.env.HONCHO_SAVE_GIT_EVENTS !== undefined) {
-    config.saveGitEvents = process.env.HONCHO_SAVE_GIT_EVENTS === "true";
   }
   return config;
 }
@@ -543,15 +359,7 @@ function writeConfigFile(data: Record<string, any>): void {
 
 /**
  * Write-back: read-merge-write to avoid clobbering other hosts' config.
- *
- * Convention:
- *   - Root-level keys (apiKey, peerName, enabled, etc.) are owned by
- *     the user or the honcho CLI.  This integration NEVER writes them.
- *   - hosts.<this-host> is owned by this integration and carries all
- *     per-host settings (workspace, aiPeer, enabled, logging, ...).
- *
- * resolveConfig() reads host block first, falls back to root, so the
- * user's root-level defaults still apply until overridden per-host.
+ * This integration writes only hosts.<this-host>, never root keys.
  */
 export function saveConfig(config: HonchoCLAUDEConfig): void {
   if (!existsSync(CONFIG_DIR)) {
@@ -595,34 +403,12 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   setHostIfExplicit("workspace", config.workspace, existing.workspace ?? DEFAULT_WORKSPACE[host]);
   setHostIfExplicit("aiPeer", config.aiPeer, existing.aiPeer ?? DEFAULT_AI_PEER[host]);
 
-  // Don't persist env-only overrides to the host block.
-  // mergeWithEnvVars() may have set enabled, logging or saveMessages to false
-  // from HONCHO_ENABLED / HONCHO_LOGGING / HONCHO_SAVE_MESSAGES env vars —
-  // those are runtime overrides that should not be materialized to disk.
-  const enabledForSave = process.env.HONCHO_ENABLED === "false" && config.enabled === false
-    ? existingHost.enabled  // preserve what was on disk
-    : config.enabled;
-  const loggingForSave = process.env.HONCHO_LOGGING === "false" && config.logging === false
-    ? existingHost.logging
-    : config.logging;
-  const saveMessagesForSave = process.env.HONCHO_SAVE_MESSAGES === "false" && config.saveMessages === false
-    ? existingHost.saveMessages
-    : config.saveMessages;
+  // peerName lives in the host block; an env-only HONCHO_PEER_NAME is not persisted.
+  setHostIfExplicit("peerName", process.env.HONCHO_PEER_NAME ? existingHost.peerName : config.peerName, undefined);
+  setHostIfExplicit("baseUrl", config.baseUrl, existing.baseUrl);
 
-  setHostIfExplicit("enabled", enabledForSave, existing.enabled);
-  setHostIfExplicit("logging", loggingForSave, existing.logging);
-  setHostIfExplicit("saveMessages", saveMessagesForSave, existing.saveMessages);
-  setHostIfExplicit("reasoningLevel", config.reasoningLevel, existing.reasoningLevel);
-  setHostIfExplicit("observationMode", config.observationMode, existing.observationMode);
-  setHostIfExplicit("messageUpload", config.messageUpload, existing.messageUpload);
-  setHostIfExplicit("redactPatterns", config.redactPatterns, existing.redactPatterns);
-  setHostIfExplicit("endpoint", config.endpoint, existing.endpoint);
-  setHostIfExplicit("injection", config.injection, existing.injection);
-  setHostIfExplicit("rememberTool", config.rememberTool, existing.rememberTool);
-
-  // Preserve a host-scoped apiKey already on disk. This integration never writes
-  // apiKey (config.apiKey is the *resolved* key — env/root — and must not be
-  // materialized here), but must not drop hosts.<host>.apiKey on rewrite.
+  // config.apiKey is the resolved credential (maybe an OAuth token or the env
+  // var), so never write it here; keep the key saveHostApiKey() stored.
   if (existingHost.apiKey !== undefined) {
     hostEntry.apiKey = existingHost.apiKey;
   }
@@ -635,25 +421,16 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
   writeConfigFile(existing);
 }
 
-/**
- * Write a single root-level field to config.json.
- * ONLY for explicit user-directed actions (MCP set_config) on fields
- * that are genuinely global (apiKey, peerName, globalOverride).
- * Hooks and routine operations must NEVER call this.
- */
-export function saveRootField(field: string, value: unknown): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
-  }
-
-  let existing: Record<string, unknown> = {};
-  if (existsSync(CONFIG_FILE)) {
-    try {
-      existing = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
-    } catch {}
-  }
-
-  existing[field] = value;
+/** Set or clear this host's API key (setup pane). */
+export function saveHostApiKey(key: string | undefined): void {
+  if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
+  let existing: HonchoFileConfig = {};
+  try { existing = JSON.parse(readFileSync(CONFIG_FILE, "utf-8")); } catch {}
+  const host = getDetectedHost();
+  existing.hosts ??= {};
+  const block = { ...(existing.hosts[host] ?? {}) };
+  if (key) block.apiKey = key; else delete block.apiKey;
+  existing.hosts[host] = block;
   writeConfigFile(existing);
 }
 
@@ -672,53 +449,6 @@ export function getSessionName(sessionId?: string): string | null {
   const id = sessionId || process.env.CLAUDE_CODE_SESSION_ID;
   return id ? sanitizeForSessionName(id) : null;
 }
-
-export function getMessageUploadConfig(): MessageUploadConfig {
-  const config = loadConfig();
-  return {
-    maxUserTokens: config?.messageUpload?.maxUserTokens ?? undefined,
-    maxAssistantTokens: config?.messageUpload?.maxAssistantTokens ?? undefined,
-    summarizeAssistant: config?.messageUpload?.summarizeAssistant ?? false,
-  };
-}
-
-/**
- * Resolved injection config with every field defaulted. Callers get a fully
- * populated object so they never repeat the fallback literals. Config comes
- * from parsed JSON, so absent keys simply don't appear — the spread over
- * DEFAULT_INJECTION defaults them, while an explicit `[]` is preserved.
- *
- * Pass the already-loaded config (hooks have it in scope) to avoid a second
- * disk read + parse on the per-turn hot path; omit it for a standalone lookup.
- */
-export function getInjectionConfig(config?: HonchoCLAUDEConfig | null): Required<InjectionConfig> {
-  const injection = (config === undefined ? loadConfig() : config)?.injection;
-  const resolved = { ...DEFAULT_INJECTION, ...(injection ?? {}) } as Required<InjectionConfig>;
-  // Guard hand-edited configs: a non-array component list falls back to the default.
-  resolved.sessionStart = Array.isArray(resolved.sessionStart)
-    ? normalizeSessionStart(resolved.sessionStart)
-    : DEFAULT_INJECTION.sessionStart;
-  return { sessionStart: resolved.sessionStart };
-}
-
-export function isLoggingEnabled(): boolean {
-  const config = loadConfig();
-  return config?.logging !== false;
-}
-
-export function isPluginEnabled(): boolean {
-  const config = loadConfig();
-  return config?.enabled !== false;
-}
-
-export function setPluginEnabled(enabled: boolean): void {
-  const config = loadConfig();
-  if (!config) return;
-  config.enabled = enabled;
-  saveConfig(config);
-}
-
-
 
 /**
  * Get all known host keys from the config file's hosts block.
@@ -756,33 +486,26 @@ export interface HonchoClientOptions {
   defaultHeaders?: Record<string, string>;
 }
 
-/** Get the base URL for Honcho API. Priority: baseUrl > environment > production */
-export function getHonchoBaseUrlForEndpoint(endpoint?: HonchoEndpointConfig): string {
-  if (endpoint?.baseUrl) {
-    const url = endpoint.baseUrl;
-    return url.endsWith("/v3") ? url : `${url}/v3`;
-  }
-  if (endpoint?.environment === "local") {
-    return HONCHO_BASE_URLS.local;
-  }
-  return HONCHO_BASE_URLS.production;
+/** Get the base URL for Honcho API: baseUrl, else Honcho cloud. */
+export function getHonchoBaseUrlFor(baseUrl?: string): string {
+  if (!baseUrl) return HONCHO_CLOUD_URL;
+  return baseUrl.endsWith("/v3") ? baseUrl : `${baseUrl}/v3`;
 }
 
 /** API origin (no /v3), the form harness-plugin-core compares against Honcho cloud. */
-function honchoOrigin(endpoint?: HonchoEndpointConfig): string {
-  return getHonchoBaseUrlForEndpoint(endpoint).replace(/\/v3$/, "");
+function honchoOrigin(baseUrl?: string): string {
+  return getHonchoBaseUrlFor(baseUrl).replace(/\/v3$/, "");
 }
 
 /** The API origin this plugin targets, even when no credential is configured yet. */
 export function getConfiguredOrigin(host: HonchoHost = getDetectedHost()): string {
   const env = process.env.HONCHO_ENDPOINT;
-  if (env === "local") return honchoOrigin({ environment: "local" });
-  if (env?.startsWith("http")) return honchoOrigin({ baseUrl: env });
+  if (env?.startsWith("http")) return honchoOrigin(env);
   let raw: HonchoFileConfig = {};
   try {
     raw = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
   } catch {}
-  return honchoOrigin(raw.hosts?.[host]?.endpoint ?? raw.endpoint);
+  return honchoOrigin(raw.hosts?.[host]?.baseUrl ?? raw.baseUrl);
 }
 
 /**
@@ -796,7 +519,7 @@ export async function refreshCredential(config: HonchoCLAUDEConfig): Promise<voi
   const cred = await ensureFreshCredential({
     path: CONFIG_FILE,
     host,
-    baseUrl: honchoOrigin(config.endpoint),
+    baseUrl: honchoOrigin(config.baseUrl),
     env: process.env,
   });
   if (!cred) return;
@@ -828,9 +551,15 @@ export function getAuthNotice(config: HonchoCLAUDEConfig): string | undefined {
   return undefined;
 }
 
+/** One-line notice for configs that still rely on the removed `globalOverride`. */
+export function getGlobalOverrideNotice(config: HonchoCLAUDEConfig): string | undefined {
+  if (!config.legacyWorkspace) return undefined;
+  return `[honcho] globalOverride is no longer supported, so this chat uses workspace "${config.workspace}", not "${config.legacyWorkspace}". Run \`honcho doctor\` with the Honcho CLI to fix it, or ask Claude to set your Honcho workspace to "${config.legacyWorkspace}".`;
+}
+
 /** Get the base URL for a resolved runtime config. */
 export function getHonchoBaseUrl(config: HonchoCLAUDEConfig): string {
-  return getHonchoBaseUrlForEndpoint(config.endpoint);
+  return getHonchoBaseUrlFor(config.baseUrl);
 }
 
 /** Client identity headers (`X-Honcho-Host`, `X-Honcho-Plugin`) for telemetry attribution. */
@@ -855,30 +584,11 @@ export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClient
 
 /** Whether the config targets the hosted production API. */
 export function isProductionEndpoint(config: HonchoCLAUDEConfig): boolean {
-  return getHonchoBaseUrl(config) === HONCHO_BASE_URLS.production;
+  return getHonchoBaseUrl(config) === HONCHO_CLOUD_URL;
 }
 
 export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url: string } {
-  if (config.endpoint?.baseUrl) {
-    return { type: "custom", url: config.endpoint.baseUrl };
-  }
-  if (config.endpoint?.environment === "local") {
-    return { type: "local", url: HONCHO_BASE_URLS.local };
-  }
-  return { type: "production", url: HONCHO_BASE_URLS.production };
+  if (config.baseUrl) return { type: "custom", url: config.baseUrl };
+  return { type: "production", url: HONCHO_CLOUD_URL };
 }
 
-const VALID_ENVIRONMENTS = new Set<HonchoEnvironment>(["production", "local"]);
-
-/** Returns the resolved observation mode, defaulting to "unified". */
-export function getObservationMode(config: HonchoCLAUDEConfig): ObservationMode {
-  return config.observationMode ?? "unified";
-}
-
-export function setEndpoint(environment?: HonchoEnvironment, baseUrl?: string): void {
-  const config = loadConfig();
-  if (!config) return;
-  if (environment && !VALID_ENVIRONMENTS.has(environment)) return;
-  config.endpoint = { environment, baseUrl };
-  saveConfig(config);
-}

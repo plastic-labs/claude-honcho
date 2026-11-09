@@ -3,7 +3,6 @@
  *
  * Only hooks that output JSON with `systemMessage` show inline indicators in Claude Code:
  * - UserPromptSubmit — addSystemMessage() adds to existing JSON output
- * - PostToolUse — visCapture() outputs JSON with systemMessage
  * - Stop — visStopMessage() outputs JSON with systemMessage, on a failed upload only
  *
  * SessionStart and SessionEnd output plain text to stdout (context injection),
@@ -11,7 +10,6 @@
  */
 
 import { arrows, symbols } from "./unicode.js";
-import { isLoggingEnabled } from "./config.js";
 
 // Plain text (no ANSI) for systemMessage — shown in Claude Code's UI
 const sym = {
@@ -42,7 +40,7 @@ function formatLine(direction: HookDirection, hookName: string, message: string)
 
 /**
  * Output a systemMessage JSON to stdout — shown to the user in Claude Code's UI
- * Use this for hooks that don't already write to stdout (PostToolUse, Stop)
+ * Use this for hooks that don't already write to stdout (Stop)
  */
 export function visMessage(direction: HookDirection, hookName: string, message: string): void {
   const line = formatLine(direction, hookName, message);
@@ -59,13 +57,6 @@ export function visMessage(direction: HookDirection, hookName: string, message: 
 export function visComposedInjection(hookName: string, labels: string[], notes: string[] = []): string {
   const head = labels.length ? `injected ${labels.join(" + ")}` : "nothing injected";
   return formatLine("in", hookName, [head, ...notes].join(" · "));
-}
-
-/**
- * Output tool capture as systemMessage (for post-tool-use — no existing stdout)
- */
-export function visCapture(summary: string): void {
-  visMessage("out", "post-tool-use", `captured: ${summary}`);
 }
 
 /**
@@ -98,7 +89,6 @@ function ensureVerboseLog(): void {
 }
 
 function writeVerbose(text: string): void {
-  if (!isLoggingEnabled()) return;
   ensureVerboseLog();
   const timestamp = new Date().toISOString().split("T")[1].split(".")[0];
   appendFileSync(VERBOSE_LOG, `[${timestamp}] ${text}\n`);
@@ -118,7 +108,6 @@ export function verboseList(label: string, items: string[] | null | undefined): 
  * Clear the verbose log (call at session start)
  */
 export function clearVerboseLog(): void {
-  if (!isLoggingEnabled()) return;
   ensureVerboseLog();
   writeFileSync(VERBOSE_LOG, "");
 }

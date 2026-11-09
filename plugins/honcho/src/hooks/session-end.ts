@@ -1,4 +1,4 @@
-import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText } from "../config.js";
 import { clearSessionFiles } from "../state.js";
 import { logHook, setLogContext } from "../log.js";
 
@@ -21,10 +21,6 @@ interface HookInput {
 export async function handleSessionEnd(): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    process.exit(0);
-  }
-
-  if (!isPluginEnabled()) {
     process.exit(0);
   }
 

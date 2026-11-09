@@ -78,10 +78,8 @@ Run `/clear` or restart Claude Code. Memory loads at the start of each session, 
 
 - **Persistent Memory** — Claude remembers your preferences, projects, and context across sessions
 - **Survives Context Wipes** — Even when Claude's context window resets, memory persists
-- **Git Awareness** — Detects branch switches, commits, and changes made outside Claude
 - **One session per chat** — Each Claude Code chat maps to its own Honcho session
 - **AI Self-Awareness** — Claude knows what it was working on, even after restarts
-- **Configurable Memory Injection** — Choose exactly what context is injected at session start and per turn
 - **Team Support** — Multiple people can share a workspace and build context together
 - **MCP Tools** — Search memory and ask Honcho about you, a project scope, or the whole workspace
 
@@ -99,7 +97,6 @@ The honcho plugin provides these tools via MCP:
 | `delete_conclusion`  | Delete a conclusion by ID                                      |
 | `get_config`         | View current configuration and status                          |
 | `set_config`         | Change any configuration field programmatically                |
-| `honcho_remember`    | Fan-out dialectic recall (only registered when `rememberTool: true`) |
 
 ## Skills
 
@@ -121,62 +118,19 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
 
 ```jsonc
 {
-  // Required
-  "apiKey": "hch-v2-...",
-
-  // Identity
-  "peerName": "alice",              // Your name (default: $USER)
-
-  // Host-specific settings — each tool gets its own workspace and AI peer
   "hosts": {
     "claude_code": {
-      "workspace": "claude_code",   // Workspace for Claude Code sessions
-      "aiPeer": "claude",           // AI identity in this workspace
-    },
-    "cursor": {
-      "workspace": "cursor",
-      "aiPeer": "cursor"
+      "apiKey": "hch-v2-...",          // or an OAuth sign-in from /honcho setup
+      "peerName": "alice",             // your name (default: the one another plugin uses, else $USER)
+      "workspace": "claude_code",
+      "aiPeer": "claude",
+      "baseUrl": "http://localhost:8000" // only for a self-hosted Honcho (default: Honcho cloud)
     }
-  },
-
-  // Message handling
-  "saveMessages": true,
-  "saveToolUse": false,               // Save [Tool] action summaries (default: false)
-  "saveGitEvents": false,             // Save [Git External] state-change events (default: false)
-  "messageUpload": {
-    "maxUserTokens": null,            // Truncate user messages (null = no limit)
-    "maxAssistantTokens": null,       // Truncate assistant messages (null = no limit)
-    "summarizeAssistant": false       // Summarize instead of sending full assistant text
-  },
-
-  "reasoningLevel": "medium",         // Default reasoning tier for the chat tool: "minimal" | "low" | "medium" | "high" | "max"
-
-  // Memory injection (see "Memory Injection" below)
-  "injection": {
-    "sessionStart": ["directives", "peerCard"]
-  },
-
-  // On-demand recall tool (see "The honcho_remember Tool" below)
-  "rememberTool": false,
-
-  // Observation mode
-  "observationMode": "unified",       // "unified" (default) | "directional"
-
-  // Endpoint
-  "endpoint": {
-    "environment": "production"       // "production" | "local"
-    // or: "baseUrl": "http://your-server:8000/v3"
-  },
-
-  // Miscellaneous
-  "redactPatterns": [],               // Extra regexes redacted from tool summaries (additive to built-in secret patterns)
-  "enabled": true,
-  "logging": true,
-
-  // Advanced: force all hosts to use the same workspace
-  "globalOverride": false
+  }
 }
 ```
+
+Each plugin keeps its settings in its own block under `hosts`. Logs go to `~/.honcho/activity.log`. To turn the plugin off, disable it in Claude Code's `/plugin` menu.
 
 ### Sessions
 
@@ -188,12 +142,10 @@ This mapping isn't configurable. If you want a different session layout, connect
 
 ### Memory Injection
 
-At session start the plugin injects at most two things, chosen by `injection.sessionStart` (default: `["directives", "peerCard"]`):
+At session start the plugin injects two things:
 
-| Component | What it injects |
-| --- | --- |
-| `directives` | Static memory-usage guidance — treat Honcho memory as background, recall with the `chat` tool (it names this chat's repo and machine scopes), save insights with `create_conclusion` |
-| `peerCard` | Your peer card — a structured identity/attribute list |
+- **Directives**: how to use Honcho memory. Treat it as background, recall with the `chat` tool (naming this chat's repo and machine scopes), and save insights with `create_conclusion`.
+- **Your peer card**: a structured identity/attribute list.
 
 Nothing is injected per prompt, and nothing is fetched with `context()`. Tools that read conclusions (`search`, `list_conclusions`, `query_conclusions`) return only derived conclusions; explicit ones are filtered out. Claude recalls memory when it needs it by calling `chat`:
 
@@ -202,110 +154,6 @@ Nothing is injected per prompt, and nothing is fetched with `context()`. Tools t
 - **Across the workspace**: pass `workspace: true` to ask about every peer in the workspace.
 
 Configure it with `/honcho set`, `set_config`, or by editing `~/.honcho/config.json`.
-
-### The `honcho_remember` Tool
-
-An experimental on-demand recall tool. When enabled, Claude gets a `honcho_remember` MCP tool that fans out up to 5 parallel dialectic queries about you and returns per-question answers — useful before starting a task, when catching up ("where were we?"), or whenever your history could shape the response.
-
-To enable it, just ask Claude: *"Set my Honcho rememberTool config to true"* (it uses the `set_config` tool). Or set it in `~/.honcho/config.json`:
-
-```json
-{
-  "hosts": {
-    "claude_code": { "rememberTool": true }
-  }
-}
-```
-
-Then restart Claude Code — MCP tools register at startup.
-
-When it's on, the injected session-start directives steer Claude to use it proactively as the primary recall path.
-
-### Observation Mode
-
-Controls how Honcho stores and retrieves conclusions about you. Change it via `set_config` or edit `config.json` directly. Requires a Claude Code restart.
-
-| Mode | Behavior | Best for |
-| --- | --- | --- |
-| `unified` (default) | All agents write to your self-observation collection (`observer=you, observed=you`). Conclusions are portable — switch between Claude, Hermes, or any agent without losing memory. | Most users, when you want to build a unified context hub, agent-switching |
-| `directional` | Each AI peer keeps its own separate view of you (`observer=aiPeer, observed=you`). Claude's observations stay with Claude, Hermes' with Hermes. | Multi-peer workspaces where you want isolated per-peer(agent) representations |
-
-> **Peer defaults:** The plugin does not explicitly set `observeMe` or `observeOthers` on peers — it uses the server-side defaults. If you want to change how a peer observes (e.g., disable self-observation), update the peer's defaults via API or on [app.honcho.dev](https://app.honcho.dev). The only override the plugin applies is `observeOthers: true` on the AI peer in `directional` mode.
-
-To change:
-
-- Ask Claude: *"Set my observation mode to directional"*
-- Or edit `~/.honcho/config.json`:
-  ```json
-  { "observationMode": "directional" }
-  ```
-- Or per-host:
-  ```json
-  {
-    "hosts": {
-      "claude_code": { "observationMode": "directional" }
-    }
-  }
-  ```
-
-> **Note:** Switching modes doesn't automatically migrate existing conclusions. Each mode reads from a different collection. See [Migrating Observations](#migrating-observations) below to move conclusions between collections.
-
-### Migrating Observations
-
-When switching observation modes, conclusions stored under the old mode's collection won't be visible to the new mode. Use the migration script to copy them over:
-
-```bash
-# Requires: pip install honcho-ai
-# Set your API key: export HONCHO_API_KEY="hch-..."
-
-# Dry run — see what would be migrated (directional → unified)
-python scripts/migrate-observations.py \
-  --workspace agents \
-  --from-observer claude \
-  --user ajspig \
-  --dry-run
-
-# Execute the migration
-python scripts/migrate-observations.py \
-  --workspace agents \
-  --from-observer claude \
-  --user ajspig
-
-# Execute and delete the source conclusions after migration
-python scripts/migrate-observations.py \
-  --workspace agents \
-  --from-observer claude \
-  --user ajspig \
-  --delete-source
-```
-
-The script:
-- Reads all conclusions from the source collection (e.g., `observer=claude, observed=ajspig`)
-- Deduplicates by content against the destination (e.g., `observer=ajspig, observed=ajspig`)
-- Creates only the conclusions that don't already exist in the destination
-- Handles rate limiting with automatic retries
-
-To migrate in the other direction (unified → directional):
-
-```bash
-python scripts/migrate-observations.py \
-  --workspace agents \
-  --from-observer ajspig \
-  --to-observer claude \
-  --user ajspig
-```
-
-If you use multiple AI agents, run the script once per agent:
-
-```bash
-# Migrate Claude's observations to unified
-python scripts/migrate-observations.py -w agents --from-observer claude --user ajspig
-
-# Migrate Hermes' observations to unified
-python scripts/migrate-observations.py -w agents --from-observer hermes --user ajspig
-```
-
-Run with `--help` for all options.
 
 ### Host-Aware Configuration
 
@@ -317,23 +165,6 @@ The plugin auto-detects which tool is running it (Claude Code, Cursor, etc.) and
 3. `CURSOR_PROJECT_DIR` env var (Cursor child process)
 4. Default: `claude_code`
 
-### Global Override
-
-If you want all hosts to share a single workspace (instead of per-host isolation), set `globalOverride: true` and a flat `workspace` field:
-
-```jsonc
-{
-  "globalOverride": true,
-  "workspace": "shared",
-  "hosts": {
-    "claude_code": { "aiPeer": "claude" },
-    "cursor": { "aiPeer": "cursor" }
-  }
-}
-```
-
-All tools will read and write to the `shared` workspace. Each tool still uses its own AI peer name.
-
 ### Team Setup with Shared Context
 
 Multiple people can share context by pointing to the same workspace. Each person uses their own `peerName` as identity.
@@ -341,10 +172,10 @@ Multiple people can share context by pointing to the same workspace. Each person
 **Person A** (`~/.honcho/config.json`):
 ```json
 {
-  "apiKey": "hch-v2-team-key...",
-  "peerName": "alice",
   "hosts": {
     "claude_code": {
+      "apiKey": "hch-v2-team-key...",
+      "peerName": "alice",
       "workspace": "team-acme",
       "aiPeer": "claude"
     }
@@ -355,10 +186,10 @@ Multiple people can share context by pointing to the same workspace. Each person
 **Person B** (`~/.honcho/config.json`):
 ```json
 {
-  "apiKey": "hch-v2-team-key...",
-  "peerName": "bob",
   "hosts": {
     "claude_code": {
+      "apiKey": "hch-v2-team-key...",
+      "peerName": "bob",
       "workspace": "team-acme",
       "aiPeer": "claude"
     }
@@ -379,10 +210,7 @@ Environment variables work for initial bootstrap (before a config file exists). 
 | `HONCHO_WORKSPACE`     | No       | `claude_code` | Workspace name (used only when no config file exists)             |
 | `HONCHO_AI_PEER`       | No       | `claude`      | AI peer name                                                      |
 | `HONCHO_HOST`          | No       | auto-detected | Force host detection: `claude_code`, `cursor`, or `obsidian`      |
-| `HONCHO_ENDPOINT`      | No       | `production`  | `production`, `local`, or a full URL                              |
-| `HONCHO_ENABLED`       | No       | `true`        | Set to `false` to disable                                         |
-| `HONCHO_SAVE_MESSAGES` | No       | `true`        | Set to `false` to stop saving messages                            |
-| `HONCHO_LOGGING`       | No       | `true`        | Set to `false` to disable file logging to `~/.honcho/`            |
+| `HONCHO_ENDPOINT`      | No       | Honcho cloud  | Honcho API URL                                                    |
 
 ## How It Works
 
@@ -390,17 +218,17 @@ Environment variables work for initial bootstrap (before a config file exists). 
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Claude Code                              │
 ├─────────────────────────────────────────────────────────────────┤
-│  SessionStart   │  UserPrompt     │  PostToolUse   │ SessionEnd │
+│  SessionStart   │  UserPrompt     │  Stop          │ SessionEnd │
 │  ───────────    │  ───────────    │  ────────────  │ ────────── │
-│  Load peer card │  Save message   │  Log activity  │ Clean up   │
-│  + directives   │  to Honcho      │  to Honcho     │            │
+│  Load peer card │  Save message   │  Save Claude's │ Clean up   │
+│  + directives   │  to Honcho      │  reply         │            │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Honcho API                              │
 │                                                                 │
-│   Your messages and Claude's work → Persistent Memory →         │
+│   Your messages and Claude's replies → Persistent Memory →      │
 │   Recalled on demand through the chat tool                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -409,8 +237,7 @@ The plugin hooks into Claude Code's lifecycle events:
 
 - **SessionStart**: Joins this chat's session to its repo and machine scopes, and injects the memory directives and your peer card
 - **UserPrompt**: Saves your messages (nothing is retrieved per turn; Claude calls `chat` when it needs memory)
-- **PostToolUse**: Logs Claude's actions (file edits, commands, etc.)
-- **Stop**: Flushes any pending messages
+- **Stop**: Saves Claude's replies
 - **SessionEnd**: Clears local per-chat state
 
 ## Troubleshooting
@@ -438,31 +265,21 @@ The plugin hooks into Claude Code's lifecycle events:
 
 4. **Run `/honcho status`** to see connection state, workspace, and session info.
 
-### Memory not persisting between sessions
-
-Make sure `saveMessages` is not set to `false` in your config (or `HONCHO_SAVE_MESSAGES` in env).
-
 ### Using a local Honcho instance
 
 Via config file:
 ```json
-{ "endpoint": { "environment": "local" } }
+{ "baseUrl": "http://localhost:8000" }
 ```
 
 Or via env var:
 ```bash
-export HONCHO_ENDPOINT="local"  # Uses localhost:8000
-# or
-export HONCHO_ENDPOINT="http://your-server:8000/v3"
+export HONCHO_ENDPOINT="http://localhost:8000"
 ```
 
 ### Temporarily disabling memory
 
-```bash
-export HONCHO_ENABLED="false"
-```
-
-Or set `"enabled": false` in your config file. Restart Claude Code to take effect.
+Disable the plugin in Claude Code's `/plugin` menu, and enable it again when you're done.
 
 ---
 

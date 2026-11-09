@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText } from "../config.js";
 import { getMessageCount, incrementMessageCount } from "../cache.js";
 import { logHook, setLogContext } from "../log.js";
 import { honchoSessionUrl } from "../styles.js";
@@ -38,10 +38,6 @@ function readVersionNag(): string | undefined {
 export async function handleUserPrompt(): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    process.exit(0);
-  }
-
-  if (!isPluginEnabled()) {
     process.exit(0);
   }
 

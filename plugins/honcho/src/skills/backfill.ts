@@ -16,7 +16,6 @@ import { Honcho } from "@honcho-ai/sdk";
 import {
   loadConfig,
   getHonchoClientOptions,
-  getObservationMode,
   sanitizeForSessionName,
   getConfigDir,
   setDetectedHost,
@@ -168,7 +167,6 @@ export async function run(): Promise<void> {
   // Upload
   // Backfilling large histories: give the network more headroom than the hooks.
   const honcho = await createHonchoClient(config, { workspaceId: targetWorkspace, timeout: 60_000, maxRetries: 3 });
-  const observationMode = getObservationMode(config);
 
   console.log(s.section(`Uploading to ${targetWorkspace}`));
 
@@ -184,9 +182,7 @@ export async function run(): Promise<void> {
         honcho.peer(config.aiPeer),
       ]);
 
-      const peers: Parameters<typeof session.addPeers>[0] =
-        observationMode === "directional" ? [userPeer, [aiPeer, { observeOthers: true }]] : [userPeer, aiPeer];
-      await session.addPeers(peers);
+      await session.addPeers([userPeer, aiPeer]);
 
       const fallbackTs = new Date().toISOString();
       const messages = g.messages.flatMap((m) => {

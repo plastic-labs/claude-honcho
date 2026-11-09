@@ -9,11 +9,8 @@ import { existsSync, readFileSync } from "fs";
 import {
   loadConfig,
   saveConfig,
-  saveRootField,
-  coerceBoolean,
   getHonchoClientOptions,
   getSessionName,
-  getInjectionConfig,
   getConfigPath,
   configExists,
   getDetectedHost,
@@ -21,19 +18,10 @@ import {
   getKnownHosts,
   setDetectedHost,
   type HonchoCLAUDEConfig,
-  type ReasoningLevel,
-  type HonchoEnvironment,
-  type ObservationMode,
-  type StatuslineMode,
-  type SessionStartComponent,
-  SESSION_START_COMPONENTS,
-  REASONING_LEVELS,
-  getObservationMode,
   getPluginVersion,
   refreshCredential,
 } from "../config.js";
 import { setClientApiKey } from "../honcho-client.js";
-import { validateRedactPattern } from "../redact.js";
 import { honchoSessionUrl } from "../styles.js";
 
 // ============================================
@@ -44,20 +32,16 @@ const ENV_SHADOW_MAP: Record<string, string> = {
   peerName: "HONCHO_PEER_NAME",
   workspace: "HONCHO_WORKSPACE",
   aiPeer: "HONCHO_AI_PEER",
-  enabled: "HONCHO_ENABLED",
-  logging: "HONCHO_LOGGING",
-  saveMessages: "HONCHO_SAVE_MESSAGES",
-  "endpoint.baseUrl": "HONCHO_ENDPOINT",
-  "endpoint.environment": "HONCHO_ENDPOINT",
+  baseUrl: "HONCHO_ENDPOINT",
 };
 
 // Fields that require confirm=true to change
-const DANGEROUS_FIELDS = new Set(["workspace", "endpoint.environment", "endpoint.baseUrl"]);
+const DANGEROUS_FIELDS = new Set(["workspace", "baseUrl"]);
 
 // Fields that affect session identity/routing — stale sessions risk cross-contamination
 const SESSION_AFFECTING_FIELDS = new Set([
   "workspace", "aiPeer", "peerName",
-  "endpoint.environment", "endpoint.baseUrl", "globalOverride", "observationMode",
+  "baseUrl",
 ]);
 
 // ============================================
@@ -96,23 +80,11 @@ function handleGetConfig() {
   }
 
   // Resolved config
-  const globalOverride = rawFile.globalOverride === true;
   const resolved = cfg ? {
     peerName: cfg.peerName,
     aiPeer: cfg.aiPeer,
     workspace: cfg.workspace,
     endpoint: getEndpointInfo(cfg),
-    globalOverride,
-    messageUpload: cfg.messageUpload ?? {},
-    reasoningLevel: cfg.reasoningLevel ?? "medium",
-    observationMode: cfg.observationMode ?? "unified",
-    statusline: cfg.statusline ?? "on",
-    redactPatterns: cfg.redactPatterns ?? [],
-    injection: getInjectionConfig(cfg),
-    rememberTool: cfg.rememberTool === true,
-    enabled: cfg.enabled !== false,
-    logging: cfg.logging !== false,
-    saveMessages: cfg.saveMessages !== false,
   } : null;
 
   // Current status header values
@@ -192,17 +164,15 @@ function handleGetConfig() {
     warnings.push("Config uses legacy flat fields. Any /honcho set or set_config rewrites it into the hosts block.");
   }
 
-  if (cfgExists && rawFile.hosts && rawFile.workspace && rawFile.globalOverride === undefined) {
-    warnings.push("Config has flat 'workspace' alongside hosts block but no 'globalOverride' set. The flat field is unused. Set globalOverride=true to apply it globally, or remove it.");
+  if (cfg?.legacyWorkspace) {
+    warnings.push(`globalOverride is no longer supported, so this chat uses workspace "${cfg.workspace}", not "${cfg.legacyWorkspace}". Run \`honcho doctor\` with the Honcho CLI, or set workspace to "${cfg.legacyWorkspace}", to keep using it.`);
   }
 
   // Pre-render the status card
   const hostLabel = endpointInfo
     ? endpointInfo.type === "production"
       ? `platform (app.honcho.dev)`
-      : endpointInfo.type === "local"
-        ? `local (${endpointInfo.url})`
-        : endpointInfo.url
+      : endpointInfo.url
     : "unknown";
 
   const card = cfg ? renderCard([
@@ -211,8 +181,6 @@ function handleGetConfig() {
     ["session", sessionName ?? "unknown"],
     ["peer", `${cfg.peerName} / ${cfg.aiPeer}`],
     ["host", hostLabel],
-    ["messages", cfg.saveMessages !== false ? "saving enabled" : "saving disabled"],
-    ["obs mode", cfg.observationMode ?? "unified"],
   ], "current honcho config") : null;
 
   return {
@@ -226,42 +194,6 @@ function handleGetConfig() {
 // ============================================
 // set_config handler
 // ============================================
-
-/**
- * Coerce a set_config `value` into a string array. The `value` field is
- * schema-less, so MCP clients may deliver an array as a real array OR as a
- * JSON-encoded string (e.g. '["directives","peerCard"]'); accept both. Returns
- * null when the value is neither, so the caller can report a shape error.
- */
-function coerceStringArray(value: unknown): string[] | null {
-  let v = value;
-  if (typeof v === "string") {
-    try { v = JSON.parse(v); } catch { return null; }
-  }
-  return Array.isArray(v) ? v.map(String) : null;
-}
-
-/**
- * Validate a component-array set_config value against the allowed component
- * names (the SESSION_START_COMPONENTS tuple). Returns the
- * validated array, or an isError tool result describing the shape/enum problem.
- */
-function validateComponentArray(
-  value: unknown,
-  allowed: readonly string[],
-  field: string,
-): string[] | { content: { type: "text"; text: string }[]; isError: true } {
-  const example = JSON.stringify(allowed.slice(0, 2));
-  const err = (msg: string) => ({
-    content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: msg }, null, 2) }],
-    isError: true as const,
-  });
-  const arr = coerceStringArray(value);
-  if (!arr) return err(`${field} must be an array of component names, e.g. ${example}`);
-  const bad = arr.filter((v) => !allowed.includes(v));
-  if (bad.length) return err(`${field} entries must be one of: ${allowed.join(", ")} (got: ${bad.join(", ")})`);
-  return arr;
-}
 
 function handleSetConfig(args: Record<string, unknown>) {
   const field = args.field;
@@ -278,8 +210,7 @@ function handleSetConfig(args: Record<string, unknown>) {
   if (DANGEROUS_FIELDS.has(field) && !confirm) {
     const descriptions: Record<string, string> = {
       workspace: "Switches to a different workspace.",
-      "endpoint.environment": "Switches the Honcho backend.",
-      "endpoint.baseUrl": "Switches the Honcho backend URL.",
+      baseUrl: "Switches the Honcho backend URL.",
     };
     return {
       content: [{
@@ -319,8 +250,6 @@ function handleSetConfig(args: Record<string, unknown>) {
     case "peerName":
       previousValue = cfg.peerName;
       cfg.peerName = String(value);
-      // peerName is a global field — write to root (user-directed action)
-      saveRootField("peerName", cfg.peerName);
       break;
 
     case "aiPeer":
@@ -333,126 +262,9 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.workspace = String(value);
       break;
 
-    case "endpoint.environment": {
-      previousValue = cfg.endpoint?.environment;
-      if (!cfg.endpoint) cfg.endpoint = {};
-      // Accept "platform" as alias for "production"
-      const envVal = String(value) === "platform" ? "production" : String(value);
-      cfg.endpoint.environment = envVal as HonchoEnvironment;
-      cfg.endpoint.baseUrl = undefined;
-      // endpoint is a global field — write to root (user-directed action)
-      saveRootField("endpoint", cfg.endpoint);
-      break;
-    }
-
-    case "endpoint.baseUrl":
-      previousValue = cfg.endpoint?.baseUrl;
-      if (!cfg.endpoint) cfg.endpoint = {};
-      cfg.endpoint.baseUrl = String(value);
-      cfg.endpoint.environment = undefined;
-      // endpoint is a global field — write to root (user-directed action)
-      saveRootField("endpoint", cfg.endpoint);
-      break;
-
-    case "globalOverride":
-      previousValue = cfg.globalOverride ?? false;
-      cfg.globalOverride = coerceBoolean(value);
-      // globalOverride is a root-level flag — write to root (user-directed)
-      saveRootField("globalOverride", cfg.globalOverride);
-      break;
-
-    case "enabled":
-      previousValue = cfg.enabled;
-      cfg.enabled = coerceBoolean(value);
-      break;
-
-    case "logging":
-      previousValue = cfg.logging;
-      cfg.logging = coerceBoolean(value);
-      break;
-
-    case "saveMessages":
-      previousValue = cfg.saveMessages;
-      cfg.saveMessages = coerceBoolean(value);
-      break;
-
-    case "messageUpload.maxUserTokens":
-      previousValue = cfg.messageUpload?.maxUserTokens;
-      if (!cfg.messageUpload) cfg.messageUpload = {};
-      cfg.messageUpload.maxUserTokens = value === null ? undefined : Number(value);
-      break;
-
-    case "messageUpload.maxAssistantTokens":
-      previousValue = cfg.messageUpload?.maxAssistantTokens;
-      if (!cfg.messageUpload) cfg.messageUpload = {};
-      cfg.messageUpload.maxAssistantTokens = value === null ? undefined : Number(value);
-      break;
-
-    case "messageUpload.summarizeAssistant":
-      previousValue = cfg.messageUpload?.summarizeAssistant;
-      if (!cfg.messageUpload) cfg.messageUpload = {};
-      cfg.messageUpload.summarizeAssistant = coerceBoolean(value);
-      break;
-
-    case "reasoningLevel":
-      previousValue = cfg.reasoningLevel ?? "medium";
-      cfg.reasoningLevel = String(value) as ReasoningLevel;
-      break;
-
-    case "observationMode":
-      previousValue = cfg.observationMode ?? "unified";
-      cfg.observationMode = String(value) as ObservationMode;
-      break;
-
-    case "statusline": {
-      const mode = String(value).toLowerCase();
-      if (mode !== "on" && mode !== "off") {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "statusline must be one of: on, off" }, null, 2) }],
-          isError: true,
-        };
-      }
-      previousValue = cfg.statusline ?? "on";
-      cfg.statusline = mode as StatuslineMode;
-      // statusline is a global field — write to root (user-directed action)
-      saveRootField("statusline", cfg.statusline);
-      break;
-    }
-
-    case "redactPatterns": {
-      const arr = coerceStringArray(value);
-      if (!arr) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "redactPatterns must be an array of regex strings" }, null, 2) }],
-          isError: true,
-        };
-      }
-      for (const source of arr) {
-        const err = validateRedactPattern(source);
-        if (err) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({ success: false, error: err }, null, 2) }],
-            isError: true,
-          };
-        }
-      }
-      previousValue = cfg.redactPatterns;
-      cfg.redactPatterns = arr;
-      break;
-    }
-
-    case "injection.sessionStart": {
-      const arr = validateComponentArray(value, SESSION_START_COMPONENTS, field);
-      if (!Array.isArray(arr)) return arr;
-      previousValue = cfg.injection?.sessionStart;
-      if (!cfg.injection) cfg.injection = {};
-      cfg.injection.sessionStart = arr as SessionStartComponent[];
-      break;
-    }
-
-    case "rememberTool":
-      previousValue = cfg.rememberTool;
-      cfg.rememberTool = coerceBoolean(value);
+    case "baseUrl":
+      previousValue = cfg.baseUrl;
+      cfg.baseUrl = String(value);
       break;
 
     default:
@@ -475,16 +287,6 @@ function handleSetConfig(args: Record<string, unknown>) {
     aiPeer: cfg.aiPeer,
     workspace: cfg.workspace,
     endpoint: endpointInfo,
-    messageUpload: cfg.messageUpload ?? {},
-    reasoningLevel: cfg.reasoningLevel ?? "medium",
-    observationMode: cfg.observationMode ?? "unified",
-    statusline: cfg.statusline ?? "on",
-    redactPatterns: cfg.redactPatterns ?? [],
-    injection: getInjectionConfig(cfg),
-    rememberTool: cfg.rememberTool === true,
-    enabled: cfg.enabled !== false,
-    logging: cfg.logging !== false,
-    saveMessages: cfg.saveMessages !== false,
   };
 
   // Warn about stale sessions when changing fields that affect session routing
@@ -515,54 +317,6 @@ function handleSetConfig(args: Record<string, unknown>) {
 
 /** Client-side ceiling for dialectic chat calls. */
 const DIALECTIC_TIMEOUT_MS = 120_000;
-
-/** Reasoning tiers the remember tool exposes. `minimal` is too weak to be
- *  worth a fan-out slot; `max` runs ≈80s, unusable when a batch blocks a turn. */
-const REMEMBER_REASONING_LEVELS = ["low", "medium", "high"] as const;
-/** Hard bound on the fan-out — not a config knob. */
-const REMEMBER_MAX_QUERIES = 5;
-
-/** The honcho_remember tool definition. Registered only when the root
- *  `rememberTool` config is on; its description is where the use-often
- *  pressure lives, so the encouragement rides the schema itself. */
-const REMEMBER_TOOL = {
-  name: "honcho_remember",
-  description:
-    "Recall what Honcho knows about the user by asking several questions at once. " +
-    "Fans out up to 5 parallel dialectic queries and returns a labeled, per-question answer. " +
-    "Use this liberally and proactively — before starting a task, whenever the user's " +
-    "preferences, past decisions, or history could shape your response, when you're " +
-    "about to guess at something they've likely told you before, or when the user asks to " +
-    "catch up, resume, or recall what you were working on together ('where are we', " +
-    "'what did we just do'). Prefer asking several " +
-    "focused questions in one call over one broad question. Pick reasoning_level by need: " +
-    "'low' for quick factual lookups, 'medium' for general recall, 'high' for questions " +
-    "that need real reasoning over the user's context.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      queries: {
-        type: "array",
-        items: { type: "string" },
-        minItems: 1,
-        maxItems: REMEMBER_MAX_QUERIES,
-        description: `1–${REMEMBER_MAX_QUERIES} natural-language questions about the user, dispatched concurrently.`,
-      },
-      scope: {
-        anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
-        description: "Optional scope name, or several, to limit every answer to (e.g. a repository or machine name).",
-      },
-      reasoning_level: {
-        type: "string",
-        enum: [...REMEMBER_REASONING_LEVELS],
-        description:
-          "Reasoning budget applied to every query in this call. 'low' = quick lookups, " +
-          "'medium' = general recall, 'high' = complex reasoning over the user's context.",
-      },
-    },
-    required: ["queries", "reasoning_level"],
-  },
-};
 
 /** Conclusion reads skip explicit conclusions (facts restated from messages)
  *  and return only what Honcho derived: deductive, inductive, contradiction. */
@@ -628,16 +382,10 @@ export async function runMcpServer(): Promise<void> {
     }
   );
 
-  // honcho_remember is opt-in. Resolved once at startup — toggling rememberTool
-  // takes effect on next restart, consistent with the plugin's "restart Claude
-  // Code after MCP changes" policy.
-  const rememberEnabled = clients?.config.rememberTool === true;
-
   // List available tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
       tools: [
-        ...(rememberEnabled ? [REMEMBER_TOOL] : []),
         {
           name: "search",
           description: "Semantic search across messages and derived conclusions. Messages default to the current session; use scope='workspace' to search across all sessions. Conclusions are always searched workspace-wide.",
@@ -688,7 +436,7 @@ export async function runMcpServer(): Promise<void> {
               reasoning_level: {
                 type: "string",
                 enum: ["minimal", "low", "medium", "high", "max"],
-                description: "Reasoning budget for this query. Use 'low' for simple lookups, 'medium' for general questions, 'high'/'max' for complex reasoning. Defaults to config value or 'medium'.",
+                description: "Reasoning budget for this query. Use 'low' for simple lookups, 'medium' for general questions, 'high'/'max' for complex reasoning. Defaults to 'medium'.",
               },
             },
             required: ["query"],
@@ -770,7 +518,7 @@ export async function runMcpServer(): Promise<void> {
         },
         {
           name: "set_config",
-          description: "Update a Honcho plugin configuration field. Dangerous changes (workspace, endpoint) require confirm=true.",
+          description: "Update a Honcho plugin configuration field. Dangerous changes (workspace, baseUrl) require confirm=true.",
           inputSchema: {
             type: "object",
             properties: {
@@ -781,28 +529,15 @@ export async function runMcpServer(): Promise<void> {
                   "peerName",
                   "aiPeer",
                   "workspace",
-                  "globalOverride",
-                  "endpoint.environment",
-                  "endpoint.baseUrl",
-                  "enabled",
-                  "logging",
-                  "saveMessages",
-                  "messageUpload.maxUserTokens",
-                  "messageUpload.maxAssistantTokens",
-                  "messageUpload.summarizeAssistant",
-                  "reasoningLevel",
-                  "observationMode",
-                  "redactPatterns",
-                  "injection.sessionStart",
-                  "rememberTool",
+                  "baseUrl",
                 ],
               },
               value: {
-                description: "New value. For injection.sessionStart: a string array of component names (e.g. [\"directives\",\"peerCard\"]). For redactPatterns: a string array of regexes redacted from tool summaries in addition to the built-in secret patterns.",
+                description: "New value.",
               },
               confirm: {
                 type: "boolean",
-                description: "Required true for dangerous changes (workspace, endpoint). Without it, returns a warning instead of applying.",
+                description: "Required true for dangerous changes (workspace, baseUrl). Without it, returns a warning instead of applying.",
               },
             },
             required: ["field", "value"],
@@ -841,12 +576,8 @@ export async function runMcpServer(): Promise<void> {
 
     if (name === "list_conclusions" || name === "delete_conclusion" || name === "query_conclusions") {
       try {
-        const observationMode = getObservationMode(config);
-        // unified: (observer=user, observed=user); directional: (observer=aiPeer, observed=user)
-        const scopePeer = observationMode === "unified"
-          ? await honcho.peer(config.peerName)
-          : await honcho.peer(config.aiPeer);
-        const conclusionScope = scopePeer.conclusionsOf(config.peerName);
+        const userPeer = await honcho.peer(config.peerName);
+        const conclusionScope = userPeer.conclusionsOf(config.peerName);
 
         if (name === "list_conclusions") {
           const page = (args?.page as number) ?? 1;
@@ -907,14 +638,8 @@ export async function runMcpServer(): Promise<void> {
 
     try {
       const session = needsSession && sessionName ? await honcho.session(sessionName) : undefined;
-      const observationMode = getObservationMode(config);
-
-      // unified: user observes self — all ops go through userPeer.
-      // directional: aiPeer observes user — ops use aiPeer with target.
+      // Recall reads the user's own view of themselves.
       const userPeer = await honcho.peer(config.peerName);
-      const aiPeer = observationMode === "directional" ? await honcho.peer(config.aiPeer) : null;
-      const activePeer = observationMode === "unified" ? userPeer : aiPeer!;
-      const chatTarget = observationMode === "unified" ? undefined : config.peerName;
       const scope = parseScope(args?.scope);
 
       switch (name) {
@@ -926,7 +651,7 @@ export async function runMcpServer(): Promise<void> {
             scope === "workspace"
               ? honcho.search(query, { limit })
               : session!.search(query, { limit }),
-            activePeer.conclusionsOf(config.peerName).query(query, limit, undefined, DERIVED_ONLY).catch(() => []),
+            userPeer.conclusionsOf(config.peerName).query(query, limit, undefined, DERIVED_ONLY).catch(() => []),
           ]);
 
           const results = {
@@ -954,7 +679,7 @@ export async function runMcpServer(): Promise<void> {
 
         case "chat": {
           const query = args?.query as string;
-          const reasoningLevel = (args?.reasoning_level as string) ?? config.reasoningLevel ?? "medium";
+          const reasoningLevel = (args?.reasoning_level as string) ?? "medium";
 
           // Single deadline for the whole flow (peer resolve + chat), so
           // sequential requests can't stack past the harness's 150s budget
@@ -970,12 +695,11 @@ export async function runMcpServer(): Promise<void> {
             if (args?.workspace === true) {
               return honchoDialectic.chat(query, {
                 ...(scope ? { scope } : {}),
-                reasoningLevel: reasoningLevel as ReasoningLevel,
+                reasoningLevel: reasoningLevel as "minimal" | "low" | "medium" | "high" | "max",
               });
             }
-            const dialecticPeer = await honchoDialectic.peer(activePeer.id);
+            const dialecticPeer = await honchoDialectic.peer(userPeer.id);
             return dialecticPeer.chat(query, {
-              ...(chatTarget ? { target: chatTarget } : {}),
               ...(scope ? { scope } : {}),
               reasoningLevel,
             });
@@ -997,96 +721,10 @@ export async function runMcpServer(): Promise<void> {
           }
         }
 
-        case "honcho_remember": {
-          const queries = Array.isArray(args?.queries)
-            ? (args.queries as unknown[]).map(String).map((q) => q.trim()).filter(Boolean)
-            : [];
-          const reasoningLevel = args?.reasoning_level as string;
-
-          if (queries.length === 0) {
-            return {
-              content: [{ type: "text", text: "honcho_remember requires a non-empty `queries` array." }],
-              isError: true,
-            };
-          }
-          if (queries.length > REMEMBER_MAX_QUERIES) {
-            return {
-              content: [{ type: "text", text: `honcho_remember accepts at most ${REMEMBER_MAX_QUERIES} queries (got ${queries.length}).` }],
-              isError: true,
-            };
-          }
-          if (!(REMEMBER_REASONING_LEVELS as readonly string[]).includes(reasoningLevel)) {
-            return {
-              content: [{ type: "text", text: `reasoning_level must be one of: ${REMEMBER_REASONING_LEVELS.join(", ")}` }],
-              isError: true,
-            };
-          }
-
-          // One dialectic peer, one deadline spanning the whole fan-out — mirrors
-          // the `chat` case so a batch can't stack past the harness's turn budget.
-          let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
-          const deadline = new Promise<never>((_, reject) => {
-            deadlineTimer = setTimeout(
-              () => reject(new Error(`honcho_remember exceeded ${DIALECTIC_TIMEOUT_MS}ms`)),
-              DIALECTIC_TIMEOUT_MS
-            );
-          });
-
-          const batchStart = Date.now();
-          // allSettled: one failed dialectic degrades to a labeled miss rather
-          // than sinking the whole batch.
-          const fanOut = (async () => {
-            const dialecticPeer = await honchoDialectic.peer(activePeer.id);
-            return Promise.allSettled(
-              queries.map(async (q) => {
-                const qStart = Date.now();
-                const answer = await dialecticPeer.chat(q, {
-                  ...(chatTarget ? { target: chatTarget } : {}),
-                  ...(scope ? { scope } : {}),
-                  reasoningLevel,
-                });
-                return { answer, ms: Date.now() - qStart };
-              })
-            );
-          })();
-
-          try {
-            const settled = await Promise.race([fanOut, deadline]);
-            const totalMs = Date.now() - batchStart;
-            const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
-
-            const hits = settled.filter(
-              (r) => r.status === "fulfilled" && r.value.answer
-            ).length;
-
-            const header =
-              `recalled ${hits} insight${hits === 1 ? "" : "s"} · ` +
-              `${queries.length} dialectic${queries.length === 1 ? "" : "s"} @ ${reasoningLevel} · ${secs(totalMs)}`;
-
-            const blocks = settled.map((r, i) => {
-              const label = `q${i + 1} "${queries[i]}"`;
-              if (r.status === "rejected") {
-                const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
-                return `${label} — failed\n→ (error: ${msg})`;
-              }
-              const { answer, ms } = r.value;
-              const body = answer && answer.trim() ? answer.trim() : "(no memory found)";
-              return `${label} — ${secs(ms)}\n→ ${body}`;
-            });
-
-            return {
-              content: [{ type: "text", text: `${header}\n\n${blocks.join("\n\n")}` }],
-            };
-          } finally {
-            clearTimeout(deadlineTimer);
-            fanOut.catch(() => {});
-          }
-        }
-
         case "create_conclusion": {
           const content = args?.content as string;
 
-          const conclusions = await activePeer.conclusionsOf(config.peerName).create({
+          const conclusions = await userPeer.conclusionsOf(config.peerName).create({
             content,
             sessionId: session!.id,
           });

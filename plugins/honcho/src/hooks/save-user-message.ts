@@ -1,9 +1,9 @@
 import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText } from "../config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
-import { isHarnessInjected, isSlashCommand, isTerseReply, stripLeadingReminders } from "../prompt-filters.js";
+import { isHarnessInjected, isSlashCommand, stripLeadingReminders } from "../prompt-filters.js";
 
 interface HookInput {
   prompt?: string;
@@ -17,9 +17,8 @@ interface HookInput {
  * prompt to Honcho off the turn's critical path.
  *
  * This runs as a separate `async: true` hook so the write never blocks the
- * model's response. It's the write half of UserPromptSubmit; user-prompt.ts is
- * the read half (context/dialectic injection), which stays synchronous because
- * its additionalContext must reach the model before it answers this turn.
+ * model's response. user-prompt.ts is the synchronous half; it only shows the
+ * session link and update banners.
  *
  * Being async, it runs detached — it awaits the upload to completion here
  * rather than racing process exit, so a slow POST still lands.
@@ -27,10 +26,6 @@ interface HookInput {
 export async function handleSaveUserMessage(): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    process.exit(0);
-  }
-
-  if (!isPluginEnabled() || config.saveMessages === false) {
     process.exit(0);
   }
 
@@ -85,13 +80,7 @@ async function postUserMessage(
 
   const userPeer = new Peer(config.peerName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
   const createdAt = new Date().toISOString();
-  const configuration = isTerseReply(prompt) ? { reasoning: { enabled: false } } : undefined;
-  const messages = chunkContent(prompt).map((chunk) =>
-    userPeer.message(chunk, {
-      createdAt,
-      ...(configuration ? { configuration } : {}),
-    })
-  );
+  const messages = chunkContent(prompt).map((chunk) => userPeer.message(chunk, { createdAt }));
 
   logApiCall("session.addMessages", "POST", `user prompt (${prompt.length} chars, ${messages.length} msg, direct)`);
   const session = new Session(sessionName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);

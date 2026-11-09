@@ -1,17 +1,12 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig, getAuthNotice } from "../config.js";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, getAuthNotice, getGlobalOverrideNotice } from "../config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { renderSessionStart } from "../injection.js";
-import {
-  resetMessageCount,
-  getCachedGitState,
-  setCachedGitState,
-  detectGitChanges,
-} from "../cache.js";
+import { resetMessageCount } from "../cache.js";
 import { Spinner } from "../spinner.js";
 import { setMemoryState, setSessionLink } from "../state.js";
 import { honchoSessionUrl } from "../styles.js";
-import { captureGitState, getSessionScopes } from "../git.js";
+import { getSessionScopes } from "../git.js";
 import { logHook, logApiCall, logFlow, logAsync, setLogContext } from "../log.js";
 import { verboseList, clearVerboseLog, visComposedInjection } from "../visual.js";
 
@@ -41,11 +36,6 @@ export async function handleSessionStart(): Promise<void> {
   const config = loadConfig();
   if (!config) {
     console.log(JSON.stringify({ systemMessage: "[honcho] Not configured. Run /honcho setup to connect Honcho memory." }));
-    process.exit(0);
-  }
-
-  // Early exit if plugin is disabled
-  if (!isPluginEnabled()) {
     process.exit(0);
   }
 
@@ -86,16 +76,6 @@ export async function handleSessionStart(): Promise<void> {
     resetMessageCount();
   }
 
-  // Capture git state (before any API calls for speed)
-  const previousGitState = getCachedGitState(cwd);
-  const currentGitState = captureGitState(cwd);
-  const gitChanges = currentGitState ? detectGitChanges(previousGitState, currentGitState) : [];
-
-  // Update git state cache
-  if (currentGitState) {
-    setCachedGitState(cwd, currentGitState);
-  }
-
   // Start loading animation with session name visible in the spinner message
   const spinner = new Spinner({ style: "neural" });
   spinner.start(`${sessionName} · loading memory`);
@@ -103,7 +83,7 @@ export async function handleSessionStart(): Promise<void> {
   setSessionLink(honchoSessionUrl(config, sessionName), sessionName, claudeInstanceId);
 
   try {
-    logHook("session-start", `Starting session in ${cwd}`, { branch: currentGitState?.branch });
+    logHook("session-start", `Starting session in ${cwd}`);
     logFlow("init", `workspace: ${config.workspace}, peers: ${config.peerName}/${config.aiPeer}`);
 
     // New SDK: workspace is provided at construction time
@@ -125,72 +105,26 @@ export async function handleSessionStart(): Promise<void> {
     logApiCall("honcho.session/peer", "GET", `session + 2 peers`, Date.now() - startTime, true);
 
     // Step 4: Add peers to session (materializes session server-side).
-    // Peer defaults (observeMe, observeOthers) are managed server-side —
-    // configure them via API or on app.honcho.dev. We only override observeOthers
-    // for the AI peer in directional mode so it can observe the user.
-    const observationMode = getObservationMode(config);
-    const peers: Parameters<typeof session.addPeers>[0] = observationMode === "directional"
-      ? [userPeer, [aiPeer, { observeOthers: true }]]
-      : [userPeer, aiPeer];
-    await session.addPeers(peers);
+    // Observation uses Honcho's defaults: both peers observe themselves only.
+    await session.addPeers([userPeer, aiPeer]);
 
-    // Upload git changes as observations (fire-and-forget)
-    // These capture external activity that happened OUTSIDE of Claude sessions
-    if (config.saveGitEvents === true && gitChanges.length > 0) {
-      const gitObservations = gitChanges
-        .filter((c) => c.type !== "initial") // Don't log initial state as observation
-        .map((change) =>
-          userPeer.message(`[Git External] ${change.description}`, {
-            metadata: {
-              type: "git_change",
-              change_type: change.type,
-              from: change.from,
-              to: change.to,
-              external: true,
-            },
-          })
-        );
-
-      if (gitObservations.length > 0) {
-        session.addMessages(gitObservations).catch((e) =>
-          logHook("session-start", `Git observations upload failed: ${e}`)
-        );
-      }
-    }
-
-    // Step 5: Fetch the peer card if it's selected. No context() call: the rest
-    // of memory is recalled on demand through the chat tool.
+    // Step 5: Fetch the peer card. No context() call: the rest of memory is
+    // recalled on demand through the chat tool.
     spinner.update(`${sessionName} · fetching peer card`);
 
-    const startComponents = getInjectionConfig(config).sessionStart;
-    const wantCard = startComponents.includes("peerCard");
-
     const fetchStart = Date.now();
-    // unified: the user's own card; directional: the AI peer's card of the user.
-    const cardLabel = observationMode === "unified" ? "userPeer.getCard()" : "aiPeer.getCard(target=user)";
-    const peerCard = wantCard
-      ? await raceTimeout(
-          (observationMode === "unified" ? userPeer.getCard() : aiPeer.getCard(config.peerName)).then((c) => c ?? []),
-          CARD_FETCH_TIMEOUT_MS
-        )
-      : null;
-    if (wantCard) {
-      logAsync("card-fetch", `${cardLabel} ${peerCard ? "ok" : "unavailable"} in ${Date.now() - fetchStart}ms`);
-      verboseList(`${cardLabel} → peerCard`, peerCard ?? undefined);
-    }
+    const peerCard = await raceTimeout(userPeer.getCard().then((c) => c ?? []), CARD_FETCH_TIMEOUT_MS);
+    logAsync("card-fetch", `userPeer.getCard() ${peerCard ? "ok" : "unavailable"} in ${Date.now() - fetchStart}ms`);
+    verboseList("userPeer.getCard() → peerCard", peerCard ?? undefined);
 
-    const rendered = renderSessionStart(startComponents, {
-      peerCard: wantCard ? peerCard : undefined,
-      scopes,
-      remember: config.rememberTool === true,
-    });
+    const rendered = renderSessionStart({ peerCard, scopes });
 
     // Stop the spinner before any stdout write — a live spinner would corrupt
     // the hook's JSON and leave UI artifacts.
     spinner.stop();
     setMemoryState("idle", undefined, claudeInstanceId);
 
-    const authNotice = getAuthNotice(config);
+    const authNotice = [getAuthNotice(config), getGlobalOverrideNotice(config)].filter(Boolean).join("\n");
     const systemMessage = [authNotice, visComposedInjection("session-start", rendered.labels, rendered.notes)]
       .filter(Boolean)
       .join("\n") || undefined;
@@ -212,7 +146,7 @@ export async function handleSessionStart(): Promise<void> {
     logHook("session-start", `Error: ${error}`, { error: String(error) });
     spinner.stop();
     setMemoryState("idle", undefined, claudeInstanceId);
-    const authNotice = getAuthNotice(config);
+    const authNotice = [getAuthNotice(config), getGlobalOverrideNotice(config)].filter(Boolean).join("\n");
     if (authNotice) console.log(JSON.stringify({ systemMessage: authNotice }));
     process.exit(0);
   }

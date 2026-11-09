@@ -10,6 +10,9 @@ All notable changes to claude-honcho will be documented in this file.
 
 ### Changed
 
+- `peerName` and the API key from `/honcho setup` are stored in the plugin's own block, `hosts.claude_code`, not at the top of `~/.honcho/config.json`. With no `peerName` of its own, the plugin uses the top-level one, then one another plugin already uses, then your login name, so plugins sharing a workspace stay one peer.
+- The base URL setting is `baseUrl`, the same key every other Honcho plugin reads.
+- Short replies ("ok", "yes", "go ahead") are saved and reasoned over like any other message. They were saved with reasoning turned off.
 - The plugin is distributed as the npm package `@honcho-ai/claude-honcho` and the marketplace installs from it. Releases ship a self-contained bundle that runs under Node, so Bun is no longer a prerequisite for using the plugin — it remains the development toolchain.
 
 ### Fixed
@@ -22,6 +25,15 @@ All notable changes to claude-honcho will be documented in this file.
 
 ### Removed
 
+- Config settings that no longer did anything: `reasoningLevel` (the `chat` tool defaults to `medium`; pass `reasoning_level` per call), `contextRefresh`, `messageUpload` and `statusline`, plus the context cache `contextRefresh` fed.
+- Tool-use capture (`saveToolUse`, the PostToolUse hook and `redactPatterns`) and git-event capture (`saveGitEvents`). The plugin saves your messages and Claude's replies, nothing else.
+- The opt-in `honcho_remember` tool and its `rememberTool` setting. `chat` is the one recall tool; Claude can call it several times in parallel.
+- `globalOverride`. Each plugin now uses the `workspace` in its own block under `hosts`. If your config still sets `globalOverride: true` with a different top-level `workspace`, session start shows a one-line notice; run `honcho doctor` with the Honcho CLI, or ask Claude to set your Honcho workspace.
+- `observationMode`. Recall, conclusions and the peer card always read your own view (what was `unified`).
+- `saveMessages` and `HONCHO_SAVE_MESSAGES`. Every message is saved; to stop, set `enabled: false` or uninstall the plugin.
+- `injection.sessionStart`. Session start always injects the directives and your peer card.
+- `enabled`, `logging`, `HONCHO_ENABLED` and `HONCHO_LOGGING`. Turn the plugin off from Claude Code's `/plugin` menu; logging to `~/.honcho/` is always on (the activity log caps itself at 100KB).
+- `endpoint.environment`. Set `baseUrl` instead (`http://localhost:8000` for a local Honcho), the same key every other Honcho plugin reads. `honcho doctor` rewrites an existing `endpoint`.
 - The PreCompact hook. Claude Code writes PreCompact stdout only to its debug log, so the "memory anchor" never reached the model or the compaction summary. SessionStart already re-injects memory after compaction (`source: "compact"`).
 - `install-local.sh` / `install-local.ps1`. Develop against a working tree with `claude --plugin-dir plugins/honcho` instead.
 - Vendored `node_modules` are no longer committed.

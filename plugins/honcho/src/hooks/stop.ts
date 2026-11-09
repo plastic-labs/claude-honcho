@@ -1,5 +1,5 @@
 import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, isPluginEnabled, isLoggingEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText } from "../config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { existsSync, readFileSync } from "fs";
 import { chunkContent, addMessagesBatched } from "../cache.js";
@@ -128,16 +128,6 @@ export async function handleStop(): Promise<void> {
     process.exit(0);
   }
 
-  // Early exit if plugin is disabled
-  if (!isPluginEnabled()) {
-    process.exit(0);
-  }
-
-  // Skip if message saving is disabled
-  if (config.saveMessages === false) {
-    process.exit(0);
-  }
-
   let hookInput: HookInput = {};
   try {
     const input = getCachedStdin() ?? await readStdinText();
@@ -204,7 +194,7 @@ export async function handleStop(): Promise<void> {
     logHook("stop", `Saved ${turnMessages.length} assistant message(s)`);
   } catch (error) {
     logHook("stop", `Upload failed: ${error}`, { error: String(error) });
-    const seeLog = isLoggingEnabled() ? " (see ~/.honcho/activity.log)" : "";
+    const seeLog = " (see ~/.honcho/activity.log)";
     visStopMessage("warn", `upload failed, ${turnMessages.length} assistant msg(s) not saved${seeLog}`);
   }
 

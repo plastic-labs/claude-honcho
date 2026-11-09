@@ -31,19 +31,6 @@
         ]
       }
     ],
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit|Bash|Task",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-use.ts\"",
-            "timeout": 10,
-            "async": true
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
         "matcher": "mcp__plugin_honcho_honcho__.*",
