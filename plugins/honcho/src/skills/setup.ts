@@ -2,7 +2,6 @@ import { readFileSync } from "fs";
 import { isCloud } from "@honcho-ai/harness-plugin-core";
 import {
   loadConfig,
-  loadConfigFromEnv,
   saveConfig,
   getConfigPath,
   configExists,
@@ -49,8 +48,8 @@ async function finish(config: HonchoCLAUDEConfig): Promise<Reply> {
   if (problem) return { ok: false, error: problem };
   if (!configExists() || configHasOnlyGrants()) {
     // An OAuth access token is never written as apiKey; it lives in its grant.
-    if (config.auth?.source === "env") saveHostApiKey(config.apiKey);
-    saveConfig(config);
+    if (config.auth?.source === "env") await saveHostApiKey(config.apiKey);
+    await saveConfig(config);
   }
   return { ok: true, ...(await state()) };
 }
@@ -58,7 +57,7 @@ async function finish(config: HonchoCLAUDEConfig): Promise<Reply> {
 /** Whether Honcho is connected, and which ways to connect are open. */
 export async function state(): Promise<Record<string, unknown>> {
   setDetectedHost("claude_code");
-  const config = loadConfig() || loadConfigFromEnv();
+  const config = loadConfig();
   let transcripts = 0;
   try { transcripts = findTranscripts(30).length; } catch { /* optional */ }
   return {
@@ -73,7 +72,7 @@ export async function state(): Promise<Record<string, unknown>> {
 
 export async function connectExisting(): Promise<Reply> {
   setDetectedHost("claude_code");
-  const config = loadConfig() || loadConfigFromEnv();
+  const config = loadConfig();
   return config ? finish(config) : { ok: false, error: "Not connected." };
 }
 
@@ -101,11 +100,11 @@ export async function saveApiKey(key: string): Promise<Reply> {
   if (!key) return { ok: false, error: "Enter an API key." };
   let previous: string | undefined;
   try { previous = JSON.parse(readFileSync(getConfigPath(), "utf-8")).hosts?.claude_code?.apiKey; } catch { /* no config yet */ }
-  saveHostApiKey(key);
+  await saveHostApiKey(key);
   const config = loadConfig();
   const problem = config ? await validate(config) : "Could not read the config.";
   if (problem) {
-    saveHostApiKey(previous);
+    await saveHostApiKey(previous);
     return { ok: false, error: problem };
   }
   return finish(config!);

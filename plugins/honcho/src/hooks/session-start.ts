@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, getAuthNotice, getGlobalOverrideNotice } from "../config.js";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, getAuthNotice, migrateConfig } from "../config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { renderSessionStart } from "../injection.js";
 import { resetMessageCount } from "../cache.js";
@@ -33,6 +33,7 @@ function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
 }
 
 export async function handleSessionStart(): Promise<void> {
+  const migrated = await migrateConfig();
   const config = loadConfig();
   if (!config) {
     console.log(JSON.stringify({ systemMessage: "[honcho] Not configured. Run /honcho setup to connect Honcho memory." }));
@@ -124,7 +125,7 @@ export async function handleSessionStart(): Promise<void> {
     spinner.stop();
     setMemoryState("idle", undefined, claudeInstanceId);
 
-    const authNotice = [getAuthNotice(config), getGlobalOverrideNotice(config)].filter(Boolean).join("\n");
+    const authNotice = [migrated, getAuthNotice(config)].filter(Boolean).join("\n");
     const systemMessage = [authNotice, visComposedInjection("session-start", rendered.labels, rendered.notes)]
       .filter(Boolean)
       .join("\n") || undefined;
@@ -146,7 +147,7 @@ export async function handleSessionStart(): Promise<void> {
     logHook("session-start", `Error: ${error}`, { error: String(error) });
     spinner.stop();
     setMemoryState("idle", undefined, claudeInstanceId);
-    const authNotice = [getAuthNotice(config), getGlobalOverrideNotice(config)].filter(Boolean).join("\n");
+    const authNotice = [migrated, getAuthNotice(config)].filter(Boolean).join("\n");
     if (authNotice) console.log(JSON.stringify({ systemMessage: authNotice }));
     process.exit(0);
   }

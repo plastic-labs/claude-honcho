@@ -16,6 +16,7 @@ import {
   getDetectedHost,
   getEndpointInfo,
   getKnownHosts,
+  getConfigIssues,
   setDetectedHost,
   type HonchoCLAUDEConfig,
   getPluginVersion,
@@ -32,7 +33,7 @@ const ENV_SHADOW_MAP: Record<string, string> = {
   peerName: "HONCHO_PEER_NAME",
   workspace: "HONCHO_WORKSPACE",
   aiPeer: "HONCHO_AI_PEER",
-  baseUrl: "HONCHO_ENDPOINT",
+  baseUrl: "HONCHO_BASE_URL",
 };
 
 // Fields that require confirm=true to change
@@ -123,20 +124,9 @@ function handleGetConfig() {
   // Warnings
   const warnings: string[] = [];
 
-  // Host-specific fields (workspace, aiPeer) are NOT overridden by env vars
-  // when a hosts block exists. Only warn about env vars that actually apply.
-  const hasHostsBlock = !!rawFile.hosts?.[host];
-  const hostSpecificFields = new Set(["workspace", "aiPeer"]);
-
   for (const [field, envVar] of Object.entries(ENV_SHADOW_MAP)) {
     const envVal = process.env[envVar];
-    if (!envVal) continue;
-    if (hasHostsBlock && hostSpecificFields.has(field)) {
-      // Env var is set but hosts block takes precedence — not actually shadowed
-      warnings.push(`env var ${envVar}="${envVal}" is set but ignored (hosts block takes precedence). Remove it from your shell config.`);
-    } else {
-      warnings.push(`${field} is shadowed by env var ${envVar}="${envVal}"`);
-    }
+    if (envVal) warnings.push(`${field} is shadowed by env var ${envVar}="${envVal}"`);
   }
 
   // HONCHO_API_KEY is omitted from ENV_SHADOW_MAP and handled specially: an API
@@ -146,11 +136,12 @@ function handleGetConfig() {
   // than config.json names. That's far more surprising than a normal override,
   // so surface it whenever the env var is set — loudly on a mismatch.
   const envApiKey = process.env.HONCHO_API_KEY;
-  if (envApiKey && rawFile.apiKey) {
+  const fileApiKey = rawFile.hosts?.[host]?.apiKey;
+  if (envApiKey && fileApiKey) {
     const mask = (k: string) => `${k.slice(0, 10)}…${k.slice(-4)}`;
-    if (envApiKey !== rawFile.apiKey) {
+    if (envApiKey !== fileApiKey) {
       warnings.push(
-        `HONCHO_API_KEY env var (${mask(envApiKey)}) overrides config.json apiKey (${mask(rawFile.apiKey)}) and is the key actually in use. ` +
+        `HONCHO_API_KEY env var (${mask(envApiKey)}) overrides config.json apiKey (${mask(fileApiKey)}) and is the key actually in use. ` +
         `An API key selects the Honcho environment, so reads/writes go to the env var's environment, NOT the one config.json names. ` +
         `Unset HONCHO_API_KEY in your shell to use config.json's key.`
       );
@@ -159,14 +150,7 @@ function handleGetConfig() {
     }
   }
 
-  // Check for legacy fields without hosts block
-  if (cfgExists && !rawFile.hosts) {
-    warnings.push("Config uses legacy flat fields. Any /honcho set or set_config rewrites it into the hosts block.");
-  }
-
-  if (cfg?.legacyWorkspace) {
-    warnings.push(`globalOverride is no longer supported, so this chat uses workspace "${cfg.workspace}", not "${cfg.legacyWorkspace}". Run \`honcho doctor\` with the Honcho CLI, or set workspace to "${cfg.legacyWorkspace}", to keep using it.`);
-  }
+  for (const issue of getConfigIssues(host)) warnings.push(`${issue} Run \`honcho doctor\` with the Honcho CLI to fix it.`);
 
   // Pre-render the status card
   const hostLabel = endpointInfo
@@ -195,7 +179,7 @@ function handleGetConfig() {
 // set_config handler
 // ============================================
 
-function handleSetConfig(args: Record<string, unknown>) {
+async function handleSetConfig(args: Record<string, unknown>) {
   const field = args.field;
   if (typeof field !== "string" || !field) {
     return {
@@ -278,7 +262,7 @@ function handleSetConfig(args: Record<string, unknown>) {
   }
 
   // Persist
-  saveConfig(cfg);
+  await saveConfig(cfg);
 
   // Return updated resolved config
   const endpointInfo = getEndpointInfo(cfg);

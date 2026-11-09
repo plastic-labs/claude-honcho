@@ -112,12 +112,13 @@ The honcho plugin provides these tools via MCP:
 
 ## Configuration
 
-All configuration lives in a single global file at `~/.honcho/config.json`. You can edit it directly, use `/honcho set <field> <value>`, or use the `set_config` MCP tool. Environment variables work for initial setup but the config file takes precedence once it exists.
+All configuration lives in a single global file at `~/.honcho/config.json`. You can edit it directly, use `/honcho set <field> <value>`, or use the `set_config` MCP tool. Environment variables override the file.
 
 ### Config File Reference
 
 ```jsonc
 {
+  "schemaVersion": 2,
   "hosts": {
     "claude_code": {
       "apiKey": "hch-v2-...",          // or an OAuth sign-in from /honcho setup
@@ -130,7 +131,7 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
 }
 ```
 
-Each plugin keeps its settings in its own block under `hosts`. Logs go to `~/.honcho/activity.log`. To turn the plugin off, disable it in Claude Code's `/plugin` menu.
+Each plugin keeps its settings in its own block under `hosts`; nothing at the top level is read. If your file still has top-level settings or old key names, the plugin copies them into `hosts.claude_code` at session start and says so once; `honcho doctor` in the Honcho CLI cleans up the rest. Logs go to `~/.honcho/activity.log`. To turn the plugin off, disable it in Claude Code's `/plugin` menu.
 
 ### Sessions
 
@@ -201,16 +202,16 @@ Both Alice and Bob write to the `team-acme` workspace. Each chat has its own ses
 
 ### Environment Variables
 
-Environment variables work for initial bootstrap (before a config file exists). Once `~/.honcho/config.json` is written, the config file takes precedence for host-specific fields like `workspace`.
+Environment variables override `hosts.claude_code` in `~/.honcho/config.json`.
 
 | Variable               | Required | Default       | Description                                                       |
 | ---------------------- | -------- | ------------- | ----------------------------------------------------------------- |
 | `HONCHO_API_KEY`       | **Yes**  | —             | Your Honcho API key from [app.honcho.dev](https://app.honcho.dev) |
 | `HONCHO_PEER_NAME`     | No       | `$USER`       | Your identity in the memory system                                |
-| `HONCHO_WORKSPACE`     | No       | `claude_code` | Workspace name (used only when no config file exists)             |
+| `HONCHO_WORKSPACE`     | No       | `claude_code` | Workspace name                                                    |
 | `HONCHO_AI_PEER`       | No       | `claude`      | AI peer name                                                      |
 | `HONCHO_HOST`          | No       | auto-detected | Force host detection: `claude_code`, `cursor`, or `obsidian`      |
-| `HONCHO_ENDPOINT`      | No       | Honcho cloud  | Honcho API URL                                                    |
+| `HONCHO_BASE_URL`      | No       | Honcho cloud  | Honcho API URL                                                    |
 
 ## How It Works
 
@@ -269,12 +270,12 @@ The plugin hooks into Claude Code's lifecycle events:
 
 Via config file:
 ```json
-{ "baseUrl": "http://localhost:8000" }
+{ "hosts": { "claude_code": { "baseUrl": "http://localhost:8000" } } }
 ```
 
 Or via env var:
 ```bash
-export HONCHO_ENDPOINT="http://localhost:8000"
+export HONCHO_BASE_URL="http://localhost:8000"
 ```
 
 ### Temporarily disabling memory
