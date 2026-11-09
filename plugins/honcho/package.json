@@ -18,7 +18,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@honcho-ai/harness-plugin-core": "^0.3.0",
+    "@honcho-ai/harness-plugin-core": "^0.2.0",
     "@honcho-ai/sdk": "^2.8.0",
     "@modelcontextprotocol/sdk": "^1.26.0"
   },
