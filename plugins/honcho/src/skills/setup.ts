@@ -1,5 +1,5 @@
 import { readFileSync } from "fs";
-import { isCloud } from "@honcho-ai/harness-plugin-core";
+import { isCloud, readConfigFile, suggestPeerName } from "@honcho-ai/harness-plugin-core";
 import {
   loadConfig,
   saveConfig,
@@ -49,7 +49,6 @@ async function finish(config: HonchoCLAUDEConfig): Promise<Reply> {
   if (!configExists() || configHasOnlyGrants()) {
     // An OAuth access token is never written as apiKey; it lives in its grant.
     if (config.auth?.source === "env") await saveHostApiKey(config.apiKey);
-    await saveConfig(config);
   }
   return { ok: true, ...(await state()) };
 }
@@ -60,9 +59,17 @@ export async function state(): Promise<Record<string, unknown>> {
   const config = loadConfig();
   let transcripts = 0;
   try { transcripts = findTranscripts(30).length; } catch { /* optional */ }
+  const file = readConfigFile();
+  const hosts: Record<string, { peerName?: string }> = file.hosts ?? {};
+  const others = Object.entries(hosts)
+    .filter(([h, b]) => h !== "claude_code" && typeof b?.peerName === "string")
+    .map(([h, b]) => ({ host: h, peerName: b.peerName as string }));
   return {
     connected: !!config,
     canSignIn: isCloud(getConfiguredOrigin()),
+    hasName: typeof hosts.claude_code?.peerName === "string",
+    suggestedName: suggestPeerName(file),
+    others,
     auth: config ? describeAuth(config) : null,
     workspace: config?.workspace ?? null,
     peer: config?.peerName ?? null,
@@ -91,6 +98,17 @@ export async function pollSignIn(): Promise<Reply> {
   const config = loadConfig();
   if (!config) return { ok: false, error: "Signed in, but the config could not be read." };
   return { ...(await finish(config)), status };
+}
+
+/** Save the name Honcho knows the user by. */
+export async function saveName(name: string): Promise<Reply> {
+  setDetectedHost("claude_code");
+  name = name.trim();
+  if (!name) return { ok: false, error: "Enter a name." };
+  const config = loadConfig();
+  if (!config) return { ok: false, error: "Not connected." };
+  await saveConfig({ ...config, peerName: name });
+  return { ok: true, ...(await state()) };
 }
 
 /** Save an API key typed into the pane; put back the old value if it doesn't work. */

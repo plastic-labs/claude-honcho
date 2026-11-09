@@ -2,7 +2,7 @@
 import { loadConfig, getSessionName, getHonchoBaseUrl, getTelemetryHeaders, refreshCredential } from "../config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { honchoSessionUrl } from "../styles.js";
-import { state, connectExisting, beginSignIn, pollSignIn, saveApiKey } from "./setup.js";
+import { state, connectExisting, beginSignIn, pollSignIn, saveApiKey, saveName } from "./setup.js";
 
 type Reply = { ok: true; [k: string]: unknown } | { ok: false; status?: number; error: string };
 
@@ -60,6 +60,7 @@ export async function run(cmd?: string, arg?: string): Promise<void> {
     : cmd === "signin-check" ? await pollSignIn()
     // The key arrives on stdin so it never shows in a process list.
     : cmd === "setup-key" ? await saveApiKey(await new Response(process.stdin as any).text())
+    : cmd === "setup-name" ? await saveName(await new Response(process.stdin as any).text())
     : { ok: false, error: `unknown command: ${cmd ?? ""}` };
   console.log(JSON.stringify(reply));
 }

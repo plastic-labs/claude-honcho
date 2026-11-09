@@ -35,13 +35,14 @@ let cardOpen = false
 type SetupState = {
   connected: boolean; canSignIn: boolean; auth: string | null
   workspace: string | null; peer: string | null; transcripts: number
+  hasName: boolean; suggestedName: string; others: { host: string; peerName: string }[]
 }
 type SetupReply = { ok: boolean; error?: string; status?: string; url?: string; code?: string } & Partial<SetupState>
 // Undefined until the first check at session start.
 let connected: boolean | undefined
 let setup: {
   busy?: string; error?: string; state?: SetupState; done?: boolean
-  signIn?: { url: string; code: string }; askKey?: boolean
+  signIn?: { url: string; code: string }; askKey?: boolean; askName?: boolean
 } | undefined
 let poller: { cancel: () => void } | undefined
 let paneOpen = false
@@ -154,7 +155,24 @@ function setSetup($: EngineInterface, next: NonNullable<typeof setup>): void {
 function finishSetup($: EngineInterface, r: SetupReply): void {
   if (!r.ok) return setSetup($, { ...setup, busy: undefined, signIn: undefined, error: r.error })
   connected = true
-  setSetup($, { state: r as SetupState, done: true })
+  const state = r as SetupState
+  if (state.hasName) return setSetup($, { state, done: true })
+  // First connection: ask what Honcho should call the user.
+  setSetup($, { state, askName: true })
+  void $.ui.open({ id: PANE, title: 'Honcho setup', focus: true })
+    .then(() => $.ui.focus({ requestId: PANE, key: 'name' })).catch(() => {})
+}
+
+async function saveName($: EngineInterface, name: string): Promise<void> {
+  setSetup($, { ...setup, busy: 'Saving…', error: undefined })
+  finishSetup($, (await runner($, ['setup-name'], name)) as SetupReply)
+}
+
+function otherNames(others: SetupState['others']): string {
+  const names = new Set(others.map((o) => o.peerName))
+  if (names.size !== 1) return others.map((o) => `${o.host} calls you ${o.peerName}`).join('; ') + '.'
+  const hosts = others.map((o) => o.host)
+  return `${hosts.length > 1 ? hosts.slice(0, -1).join(', ') + ' and ' + hosts[hosts.length - 1] : hosts[0]} ${hosts.length > 1 ? 'call' : 'calls'} you ${[...names][0]}.`
 }
 
 async function signIn($: EngineInterface): Promise<void> {
@@ -419,6 +437,14 @@ export const register: Register = (on) => {
                 <Button key="cancel" label="cancel" onPress={() => setSetup($, { state: st })} />
               </Box>
               <Text dimColor>Waiting for approval…</Text>
+            </Box>
+          )}
+          {setup.askName && st && !setup.busy && (
+            <Box flexDirection="column" gap={1}>
+              <Text><Text color="green">● </Text>Connected. What should Honcho call you?</Text>
+              <Input key="name" label="Your name in Honcho" value={st.suggestedName} submitLabel="save" autoFocus onSubmit={(v) => void saveName($, v)} />
+              {st.others.length > 0 && <Text dimColor>Your other Honcho plugins: {otherNames(st.others)}</Text>}
+              <Text dimColor>Use the same name everywhere you use Honcho, so it builds one picture of you.</Text>
             </Box>
           )}
           {setup.askKey && !setup.busy && (
