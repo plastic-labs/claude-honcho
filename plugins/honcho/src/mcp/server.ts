@@ -37,7 +37,7 @@ import {
 import { validateRedactPattern } from "../redact.js";
 import { honchoSessionUrl } from "../styles.js";
 import {
-  getLastActiveCwd,
+  resolveToolCwd,
   clearIdCache,
   clearPeerCache,
   clearUserContextOnly,
@@ -694,7 +694,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     : undefined;
 
   // Include session URL when session-affecting fields change
-  const cwd = getLastActiveCwd() || process.cwd();
+  const cwd = resolveToolCwd();
   const newSessionName = SESSION_AFFECTING_FIELDS.has(field) ? getSessionName(cwd) : undefined;
   const sessionUrl = newSessionName ? honchoSessionUrl(cfg, newSessionName) ?? undefined : undefined;
 
@@ -1036,7 +1036,7 @@ export async function runMcpServer(): Promise<void> {
   // Handle tool calls
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const cwd = getLastActiveCwd() || process.cwd();
+    const cwd = resolveToolCwd();
 
     clients ??= createClients();
     if (!clients) {
