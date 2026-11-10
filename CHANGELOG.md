@@ -31,7 +31,7 @@ All notable changes to claude-honcho will be documented in this file.
 - The opt-in `honcho_remember` tool and its `rememberTool` setting. `chat` is the one recall tool; Claude can call it several times in parallel.
 - `globalOverride`. Each plugin now uses the `workspace` in its own block under `hosts`. If your config still sets `globalOverride: true` with a different top-level `workspace`, session start shows a one-line notice; run `honcho doctor` with the Honcho CLI, or ask Claude to set your Honcho workspace.
 - `observationMode`. Recall, conclusions and the peer card always read your own view (what was `unified`).
-- `saveMessages` and `HONCHO_SAVE_MESSAGES`. Every message is saved; to stop, set `enabled: false` or uninstall the plugin.
+- `saveMessages` and `HONCHO_SAVE_MESSAGES`. Every message is saved; to stop, disable the plugin in Claude Code's `/plugin` menu or uninstall it.
 - `injection.sessionStart`. Session start always injects the directives and your peer card.
 - `enabled`, `logging`, `HONCHO_ENABLED` and `HONCHO_LOGGING`. Turn the plugin off from Claude Code's `/plugin` menu; logging to `~/.honcho/` is always on (the activity log caps itself at 100KB).
 - `endpoint.environment`. Set `baseUrl` instead (`http://localhost:8000` for a local Honcho), the same key every other Honcho plugin reads. `honcho doctor` rewrites an existing `endpoint`.

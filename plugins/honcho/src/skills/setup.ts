@@ -67,7 +67,7 @@ export async function state(): Promise<Record<string, unknown>> {
   return {
     connected: !!config,
     canSignIn: isCloud(getConfiguredOrigin()),
-    hasName: typeof hosts.claude_code?.peerName === "string",
+    hasName: typeof hosts.claude_code?.peerName === "string" || !!process.env.HONCHO_PEER_NAME,
     suggestedName: suggestPeerName(file),
     others,
     auth: config ? describeAuth(config) : null,

@@ -160,8 +160,6 @@ Nothing is injected per prompt, and nothing is fetched with `context()`. Tools t
 - **Within a scope**: pass `scope` (e.g. the repo name) to answer only from that scope's sessions.
 - **Across the workspace**: pass `workspace: true` to ask about every peer in the workspace.
 
-Configure it with `/honcho set`, `set_config`, or by editing `~/.honcho/config.json`.
-
 ### Host-Aware Configuration
 
 The plugin auto-detects which tool is running it (Claude Code, Cursor, etc.) and reads the matching block from `hosts`. Each host gets its own workspace and AI peer name, so data stays separated by default.

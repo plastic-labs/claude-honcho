@@ -8,7 +8,7 @@ import { setMemoryState, setSessionLink } from "../state.js";
 import { honchoSessionUrl } from "../styles.js";
 import { getSessionScopes } from "../git.js";
 import { logHook, logApiCall, logFlow, logAsync, setLogContext } from "../log.js";
-import { verboseList, clearVerboseLog, visComposedInjection } from "../visual.js";
+import { clearVerboseLog, visComposedInjection } from "../visual.js";
 
 
 interface HookInput {
@@ -115,8 +115,7 @@ export async function handleSessionStart(): Promise<void> {
 
     const fetchStart = Date.now();
     const peerCard = await raceTimeout(userPeer.getCard().then((c) => c ?? []), CARD_FETCH_TIMEOUT_MS);
-    logAsync("card-fetch", `userPeer.getCard() ${peerCard ? "ok" : "unavailable"} in ${Date.now() - fetchStart}ms`);
-    verboseList("userPeer.getCard() → peerCard", peerCard ?? undefined);
+    logAsync("card-fetch", `userPeer.getCard() ${peerCard ? "ok (${peerCard.length} items)" : "unavailable"} in ${Date.now() - fetchStart}ms`);
 
     const rendered = renderSessionStart({ peerCard, scopes });
 

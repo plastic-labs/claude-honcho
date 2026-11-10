@@ -95,16 +95,6 @@ function writeVerbose(text: string): void {
 }
 
 /**
- * Log a list of items (like peerCard) to verbose log file (~/.honcho/verbose.log).
- * Used by SessionStart and UserPromptSubmit hooks (stdout always visible).
- */
-export function verboseList(label: string, items: string[] | null | undefined): void {
-  if (!items || items.length === 0) return;
-  const formatted = items.map(item => `  • ${item}`).join("\n");
-  writeVerbose(`${label} (${items.length} items)\n${formatted}`);
-}
-
-/**
  * Clear the verbose log (call at session start)
  */
 export function clearVerboseLog(): void {
