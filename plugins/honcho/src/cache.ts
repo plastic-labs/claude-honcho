@@ -80,6 +80,31 @@ export function setCachedSessionId(cwd: string, name: string, id: string, instan
   saveIdCache(cache);
 }
 
+/**
+ * The directory an MCP tool call belongs to.
+ *
+ * Claude Code starts one MCP server per session, in that session's project
+ * directory, and also passes it as CLAUDE_PROJECT_DIR. That directory is the
+ * caller. getLastActiveCwd() is only a fallback for a server started outside a
+ * project (for example from the plugin's own folder): it reads the shared
+ * ~/.honcho/cache.json, so with several sessions open it names whichever one
+ * wrote last, not the one making the call (#136, #144).
+ */
+export function resolveToolCwd(
+  env: NodeJS.ProcessEnv = process.env,
+  processCwd: string = process.cwd(),
+  lastActive: () => string | null = getLastActiveCwd,
+): string {
+  const own = env.CLAUDE_PROJECT_DIR || processCwd;
+  if (own && !isPluginInstallDir(own)) return own;
+  return lastActive() || processCwd;
+}
+
+/** A plugin install or cache folder is never a project directory. */
+function isPluginInstallDir(dir: string): boolean {
+  return /[\\/]\.claude[\\/]plugins[\\/]/i.test(dir);
+}
+
 /** Find the most recently active CWD from cached sessions (fallback for MCP servers without project dir) */
 export function getLastActiveCwd(): string | null {
   const cache = loadIdCache();
