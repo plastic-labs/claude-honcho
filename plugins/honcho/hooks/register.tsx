@@ -121,9 +121,18 @@ async function loadDetail($: EngineInterface, id: string): Promise<void> {
   $.ui.invalidate('ui.render')
 }
 
+function paneClosed(): void {
+  poller?.cancel()
+  poller = undefined
+  paneOpen = false
+  setup = undefined
+}
+
 async function togglePane($: EngineInterface): Promise<string> {
   if (paneOpen) {
     await $.ui.close({ id: PANE })
+    // Our own ui.close hook is skipped for a close we raise, so reset here.
+    paneClosed()
     return 'Honcho pane closed.'
   }
   return openPane($)
@@ -230,11 +239,7 @@ async function tryOpen($: EngineInterface, url: string): Promise<boolean> {
   return false
 }
 
-async function openUrl($: EngineInterface, url: string): Promise<void> {
-  if (!(await tryOpen($, url))) $.ui.toast(url)
-}
-
-// Opens the page and also copies the link, so it can be pasted elsewhere.
+// Opens a page and also copies its link, so it can be pasted elsewhere.
 async function openSession($: EngineInterface, url: string, press: UiPressArgument): Promise<void> {
   const [opened, copy] = await Promise.all([
     tryOpen($, url),
@@ -366,10 +371,7 @@ export const register: Register = (on) => {
   })
 
   on('ui.close', { id: PANE }, async ($, e, next) => {
-    poller?.cancel()
-    poller = undefined
-    paneOpen = false
-    setup = undefined
+    paneClosed()
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -415,7 +417,7 @@ export const register: Register = (on) => {
             <Box flexDirection="column" gap={1}>
               <Text>Approve the sign-in in your browser. Check the code matches: <Text weight="semibold">{setup.signIn.code}</Text></Text>
               <Box flexDirection="row" gap={2}>
-                <Button key="open" label="open sign-in page ↗" onPress={() => void openUrl($, setup!.signIn!.url)} />
+                <Button key="open" label="open sign-in page ↗" onPress={(press) => void openSession($, setup!.signIn!.url, press)} />
                 <Button key="cancel" label="cancel" onPress={() => setSetup($, { state: st })} />
               </Box>
               <Text dimColor>Waiting for approval…</Text>
