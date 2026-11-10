@@ -1,5 +1,6 @@
 // Pane data for hooks/register.tsx, which has no Node. Prints one JSON object.
-import { loadConfig, getSessionName, getHonchoBaseUrl, getTelemetryHeaders, refreshCredential } from "../config.js";
+import { HonchoError, type Honcho } from "@honcho-ai/sdk";
+import { loadConfig, getSessionName } from "../config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { honchoSessionUrl } from "../styles.js";
 import { state, connectExisting, beginSignIn, pollSignIn, saveApiKey, saveName } from "./setup.js";
@@ -26,24 +27,18 @@ async function overview(): Promise<Reply> {
   }
 }
 
-// No SDK client for dreams yet, so call the API directly.
-async function dreams(path: string, init: RequestInit = {}): Promise<Reply> {
+// Dream history (Representation History). The pane renders the API's JSON as is.
+async function dreams(read: (honcho: Honcho) => Promise<unknown>): Promise<Reply> {
   const config = loadConfig();
   if (!config) return { ok: false, error: "Honcho is not configured; run /honcho setup" };
-  await refreshCredential(config);
-  const base = getHonchoBaseUrl(config);
-  let res: Response;
   try {
-    res = await fetch(`${base}/workspaces/${encodeURIComponent(config.workspace)}${path}`, {
-      ...init,
-      headers: { ...getTelemetryHeaders(), Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(15000),
-    });
+    const data = await read(await createHonchoClient(config, { timeout: 15000 }));
+    return { ok: true, workspace: config.workspace, peer: config.peerName, data };
   } catch (err) {
-    return { ok: false, error: `unreachable: ${err instanceof Error ? err.message : String(err)}` };
+    // Timeouts and connection failures carry status 0.
+    const status = err instanceof HonchoError && err.status > 0 ? err.status : undefined;
+    return { ok: false, status, error: (err instanceof Error ? err.message : String(err)).slice(0, 300) };
   }
-  if (!res.ok) return { ok: false, status: res.status, error: (await res.text()).slice(0, 300) };
-  return { ok: true, workspace: config.workspace, peer: config.peerName, data: await res.json() };
 }
 
 /** Runs one pane command and prints its reply as JSON. */
@@ -52,8 +47,8 @@ export async function run(cmd?: string, arg?: string): Promise<void> {
   const reply =
     cmd === "overview" ? await overview()
     : cmd === "dreams-list"
-      ? await dreams("/dreams/list?page=1&size=20", { method: "POST", body: JSON.stringify(peerName ? { observed_id: peerName } : {}) })
-    : cmd === "dreams-get" && arg ? await dreams(`/dreams/${encodeURIComponent(arg)}`)
+      ? await dreams(async (honcho) => ({ items: (await honcho.dreams({ observed: peerName, page: 1, size: 20 })).items }))
+    : cmd === "dreams-get" && arg ? await dreams((honcho) => honcho.getDream(arg))
     : cmd === "setup-state" ? { ok: true, ...(await state()) }
     : cmd === "setup-connect" ? await connectExisting()
     : cmd === "signin-start" ? await beginSignIn()
