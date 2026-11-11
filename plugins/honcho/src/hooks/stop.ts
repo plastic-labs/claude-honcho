@@ -1,7 +1,8 @@
-import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, isLoggingEnabled, getCachedStdin, readStdinText } from "../config.js";
+import { Session, Peer } from "@honcho-ai/sdk";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, isLoggingEnabled } from "../config.js";
+import { createHonchoClient } from "../honcho-client.js";
 import { existsSync, readFileSync } from "fs";
-import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
+import { chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
 import { visStopMessage } from "../visual.js";
 import { isHarnessInjected, isSlashCommand } from "../prompt-filters.js";
@@ -127,16 +128,6 @@ export async function handleStop(): Promise<void> {
     process.exit(0);
   }
 
-  // Early exit if plugin is disabled
-  if (!isPluginEnabled()) {
-    process.exit(0);
-  }
-
-  // Skip if message saving is disabled
-  if (config.saveMessages === false) {
-    process.exit(0);
-  }
-
   let hookInput: HookInput = {};
   try {
     const input = getCachedStdin() ?? await readStdinText();
@@ -155,11 +146,13 @@ export async function handleStop(): Promise<void> {
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const transcriptPath = hookInput.transcript_path;
-  const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
-  const sessionName = getSessionName(cwd, instanceId || undefined);
+  const sessionName = getSessionName(hookInput.session_id);
 
-  // Set log context
-  setLogContext(cwd, sessionName);
+  setLogContext(cwd, sessionName ?? undefined);
+  if (!sessionName) {
+    logHook("stop", "No Claude Code session id; skipping");
+    process.exit(0);
+  }
 
   const turnMessages = getCurrentTurnAssistantMessages(transcriptPath || "", hookInput.last_assistant_message);
 
@@ -171,7 +164,7 @@ export async function handleStop(): Promise<void> {
   logHook("stop", `Capturing ${turnMessages.length} assistant message(s) this turn`);
 
   try {
-    const honcho = new Honcho(getHonchoClientOptions(config));
+    const honcho = await createHonchoClient(config);
 
     // Local peer handle, no get-or-create hop (see postUserMessage in user-prompt.ts).
     const noEnsure = () => Promise.resolve();
@@ -185,9 +178,7 @@ export async function handleStop(): Promise<void> {
         aiPeer.message(chunk, {
           createdAt: block.timestamp || fallbackTs,
           metadata: {
-            instance_id: instanceId || undefined,
             type: i === lastIdx ? "assistant_response" : "assistant_intermediate",
-            session_affinity: sessionName,
           },
         })
       )

@@ -2,7 +2,7 @@
  * Backfill runner — imports local Claude Code session transcripts into Honcho.
  *
  * Scans ~/.claude/projects/<dir>/<uuid>.jsonl within a recency window, rebuilds
- * each conversation, names sessions with the same rules as the live hooks, and
+ * each conversation, names sessions by Claude Code session id like the live hooks, and
  * uploads with the original message timestamps.
  *
  * Usage:
@@ -12,18 +12,16 @@
  *   --dry-run         print the plan without uploading
  *   --yes             reserved; non-interactive, uploads unless --dry-run
  */
-import { Honcho } from "@honcho-ai/sdk";
 import {
   loadConfig,
-  getHonchoClientOptions,
-  getObservationMode,
-  deriveSessionName,
+  sanitizeForSessionName,
   getConfigDir,
   setDetectedHost,
-  type SessionStrategy,
 } from "../config.js";
 import { addMessagesBatched, chunkContent } from "../cache.js";
+import { createHonchoClient } from "../honcho-client.js";
 import { parseTranscriptForBackfill, findTranscripts, type ParsedMessage } from "./transcript-parse.js";
+import { getSessionScopes } from "../git.js";
 import * as s from "../styles.js";
 import { homedir } from "os";
 import { join, basename } from "path";
@@ -51,9 +49,23 @@ function parseArgs(argv: string[]): Args {
 
 const STATE_FILE = join(getConfigDir(), "backfill-state.json");
 
-/** Idempotency ledger: which (workspace, transcript@mtime) pairs already imported. */
+/** Idempotency ledger: which (workspace, transcript@mtime) pairs already imported, and
+ *  which chats the hooks save as they happen, so an import never uploads them twice. */
 interface BackfillState {
   imported: Record<string, number>; // key `${workspace}::${transcriptPath}` -> mtimeMs
+  live?: Record<string, number>; // key `${workspace}::${sessionName}` -> when its session start ran
+}
+
+/** Record that the hooks save this chat as it happens (its session start ran). */
+export function recordLiveSession(workspace: string, sessionName: string): void {
+  const state = loadState();
+  (state.live ??= {})[`${workspace}::${sessionName}`] = Date.now();
+  saveState(state);
+}
+
+/** Whether a session start recorded this chat (see recordLiveSession). */
+export function isLiveSession(workspace: string, sessionName: string, state: BackfillState = loadState()): boolean {
+  return !!state.live?.[`${workspace}::${sessionName}`];
 }
 
 function loadState(): BackfillState {
@@ -71,51 +83,34 @@ function saveState(state: BackfillState): void {
 
 interface SessionGroup {
   name: string;
+  scopes: string[];
   messages: Array<ParsedMessage & { sourceTranscript: string }>;
 }
 
-/** Group all messages into Honcho sessions, naming each via the configured strategy
- *  and per-message cwd/branch (+ the transcript uuid for chat-instance). */
+/** One Honcho session per transcript, named by its Claude Code session id like
+ *  the live hooks. */
 export function groupIntoSessions(
   transcripts: Array<{ path: string; mtimeMs: number }>,
-  strategy: SessionStrategy,
-  peerName: string | undefined,
-  sessionPeerPrefix: boolean | undefined,
-  sessionOverrides: Record<string, string> = {}
 ): { groups: Map<string, SessionGroup>; parsed: number; empty: number } {
   const groups = new Map<string, SessionGroup>();
   let parsed = 0;
   let empty = 0;
 
   for (const { path } of transcripts) {
-    const { messages, cwd: tCwd, gitBranch: tBranch, sessionId } = parseTranscriptForBackfill(path);
+    const { messages, sessionId, cwd } = parseTranscriptForBackfill(path);
     if (messages.length === 0) {
       empty++;
       continue;
     }
     parsed++;
     const source = basename(path);
-    for (const msg of messages) {
-      const cwd = msg.cwd || tCwd;
-      if (!cwd) continue; // can't name a session without a directory
-      // Honor manual per-directory overrides exactly as getSessionName() does,
-      // so backfilled sessions share names with future live sessions.
-      const name =
-        strategy === "per-directory" && sessionOverrides[cwd]
-          ? sessionOverrides[cwd]
-          : deriveSessionName(strategy, cwd, {
-              peerName,
-              sessionPeerPrefix,
-              branch: msg.gitBranch || tBranch,
-              instanceId: sessionId,
-            });
-      let group = groups.get(name);
-      if (!group) {
-        group = { name, messages: [] };
-        groups.set(name, group);
-      }
-      group.messages.push({ ...msg, sourceTranscript: source });
+    const name = sanitizeForSessionName(sessionId || basename(path, ".jsonl"));
+    let group = groups.get(name);
+    if (!group) {
+      group = { name, scopes: cwd ? getSessionScopes(cwd) : [], messages: [] };
+      groups.set(name, group);
     }
+    for (const msg of messages) group.messages.push({ ...msg, sourceTranscript: source });
   }
   return { groups, parsed, empty };
 }
@@ -130,15 +125,13 @@ export async function run(): Promise<void> {
 
   const config = loadConfig();
   if (!config) {
-    console.log(s.warn("No Honcho config found — run /honcho:setup first."));
+    console.log(s.warn("No Honcho config found — run /honcho setup first."));
     process.exit(1);
   }
 
   const targetWorkspace = args.workspace || config.workspace;
-  const strategy: SessionStrategy = config.sessionStrategy ?? "per-directory";
 
   console.log(`  ${s.label("Workspace")}:   ${targetWorkspace}${args.workspace ? s.dim("  (override)") : ""}`);
-  console.log(`  ${s.label("Strategy")}:    ${strategy}`);
   console.log(`  ${s.label("Window")}:      last ${args.days} days`);
   console.log(`  ${s.label("User peer")}:   ${config.peerName}`);
   console.log(`  ${s.label("AI peer")}:     ${config.aiPeer}`);
@@ -161,17 +154,21 @@ export async function run(): Promise<void> {
     process.exit(0);
   }
 
-  // Group into sessions
-  const { groups, parsed, empty } = groupIntoSessions(
-    todo,
-    strategy,
-    config.peerName,
-    config.sessionPeerPrefix,
-    config.sessions ?? {}
-  );
+  // Group into sessions, leaving out chats the hooks already saved (this one included)
+  const { groups, parsed, empty } = groupIntoSessions(todo);
+  const live = [...groups.keys()].filter((name) => isLiveSession(targetWorkspace, name, state));
+  for (const name of live) groups.delete(name);
   const totalMessages = [...groups.values()].reduce((n, g) => n + g.messages.length, 0);
 
   console.log(s.listItem(`${parsed} transcript(s) with content${empty ? s.dim(` (${empty} empty, skipped)`) : ""}`));
+  if (live.length > 0) {
+    console.log(s.listItem(s.dim(`${live.length} chat(s) the plugin already saved as they happened — skipping`)));
+  }
+  if (groups.size === 0) {
+    console.log("");
+    console.log(s.success("Nothing new to import."));
+    process.exit(0);
+  }
   console.log(s.listItem(`${groups.size} session(s), ${totalMessages} message(s) to upload`));
   console.log("");
 
@@ -190,13 +187,8 @@ export async function run(): Promise<void> {
   }
 
   // Upload
-  const opts = getHonchoClientOptions(config);
-  opts.workspaceId = targetWorkspace;
   // Backfilling large histories: give the network more headroom than the hooks.
-  opts.timeout = 60_000;
-  opts.maxRetries = 3;
-  const honcho = new Honcho(opts);
-  const observationMode = getObservationMode(config);
+  const honcho = await createHonchoClient(config, { workspaceId: targetWorkspace, timeout: 60_000, maxRetries: 3 });
 
   console.log(s.section(`Uploading to ${targetWorkspace}`));
 
@@ -207,14 +199,12 @@ export async function run(): Promise<void> {
   for (const g of sorted) {
     try {
       const [session, userPeer, aiPeer] = await Promise.all([
-        honcho.session(g.name),
+        g.scopes.length ? honcho.session(g.name, { scopes: g.scopes }) : honcho.session(g.name),
         honcho.peer(config.peerName),
         honcho.peer(config.aiPeer),
       ]);
 
-      const peers: Parameters<typeof session.addPeers>[0] =
-        observationMode === "directional" ? [userPeer, [aiPeer, { observeOthers: true }]] : [userPeer, aiPeer];
-      await session.addPeers(peers);
+      await session.addPeers([userPeer, aiPeer]);
 
       const fallbackTs = new Date().toISOString();
       const messages = g.messages.flatMap((m) => {
@@ -225,7 +215,6 @@ export async function run(): Promise<void> {
             metadata: {
               backfill: true,
               source_transcript: m.sourceTranscript,
-              session_affinity: g.name,
               type: m.role === "assistant"
                 ? (m.isResponse ? "assistant_response" : "assistant_intermediate")
                 : undefined,
@@ -247,10 +236,12 @@ export async function run(): Promise<void> {
 
   // Only mark imported on a fully clean run; leave failures unmarked so a re-run retries.
   if (errors.length === 0) {
+    // Re-read: a session start may have recorded a live chat while this ran.
+    const latest = loadState();
     for (const t of todo) {
-      state.imported[`${targetWorkspace}::${t.path}`] = t.mtimeMs;
+      latest.imported[`${targetWorkspace}::${t.path}`] = t.mtimeMs;
     }
-    saveState(state);
+    saveState(latest);
   }
 
   console.log("");

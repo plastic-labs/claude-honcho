@@ -1,20 +1,15 @@
-import { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText, getObservationMode, getInjectionConfig } from "../config.js";
+import type { Honcho } from "@honcho-ai/sdk";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, getAuthNotice, migrateConfig, type HonchoCLAUDEConfig } from "../config.js";
+import { isLiveSession, recordLiveSession } from "../skills/backfill.js";
+import { createHonchoClient } from "../honcho-client.js";
 import { renderSessionStart } from "../injection.js";
-import {
-  setCachedSessionId,
-  resetMessageCount,
-  setClaudeInstanceId,
-  getCachedGitState,
-  setCachedGitState,
-  detectGitChanges,
-} from "../cache.js";
+import { resetMessageCount } from "../cache.js";
 import { Spinner } from "../spinner.js";
 import { setMemoryState, setSessionLink } from "../state.js";
 import { honchoSessionUrl } from "../styles.js";
-import { captureGitState } from "../git.js";
+import { getSessionScopes } from "../git.js";
 import { logHook, logApiCall, logFlow, logAsync, setLogContext } from "../log.js";
-import { verboseApiResult, verboseList, clearVerboseLog, visComposedInjection } from "../visual.js";
+import { clearVerboseLog, visComposedInjection } from "../visual.js";
 
 
 interface HookInput {
@@ -28,7 +23,7 @@ interface HookInput {
 // This hook runs synchronously, so these fetches block startup. Bound them
 // well under the 30s hook ceiling so a slow server degrades to an empty
 // injection instead of a hung session start.
-const CONTEXT_FETCH_TIMEOUT_MS = 10000;
+const CARD_FETCH_TIMEOUT_MS = 10000;
 
 /** Resolve a promise with its value, or null if `ms` elapses or it rejects. */
 function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
@@ -38,15 +33,27 @@ function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
   ]);
 }
 
+/**
+ * Get or create this chat's session (joining `scopes`, when given) and add both
+ * peers, and record the chat as saved live so /honcho import leaves it alone.
+ */
+async function joinSession(honcho: Honcho, config: HonchoCLAUDEConfig, sessionName: string, scopes?: string[]) {
+  const [session, userPeer, aiPeer] = await Promise.all([
+    scopes ? honcho.session(sessionName, { scopes }) : honcho.session(sessionName),
+    honcho.peer(config.peerName),
+    honcho.peer(config.aiPeer),
+  ]);
+  // Observation uses Honcho's defaults: both peers observe themselves only.
+  await session.addPeers([userPeer, aiPeer]);
+  recordLiveSession(config.workspace, sessionName);
+  return { session, userPeer };
+}
+
 export async function handleSessionStart(): Promise<void> {
+  const migrated = await migrateConfig();
   const config = loadConfig();
   if (!config) {
-    console.log(JSON.stringify({ systemMessage: "[honcho] Not configured. Run /honcho:setup to connect Honcho memory." }));
-    process.exit(0);
-  }
-
-  // Early exit if plugin is disabled
-  if (!isPluginEnabled()) {
+    console.log(JSON.stringify({ systemMessage: "[honcho] Not configured. Run /honcho setup to connect Honcho memory." }));
     process.exit(0);
   }
 
@@ -63,22 +70,28 @@ export async function handleSessionStart(): Promise<void> {
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
   const claudeInstanceId = hookInput.session_id;
 
-  // Store Claude's instance ID for parallel session support
-  // Global write kept for backward compat (post-tool-use, MCP server, etc.)
-  if (claudeInstanceId) {
-    setClaudeInstanceId(claudeInstanceId);
+  // Set log context early so all logs include cwd/session
+  const sessionName = getSessionName(claudeInstanceId);
+  setLogContext(cwd, sessionName ?? undefined);
+  if (!sessionName) {
+    logHook("session-start", "No Claude Code session id; skipping");
+    process.exit(0);
   }
 
-  // Set log context early so all logs include cwd/session
-  const sessionName = getSessionName(cwd, claudeInstanceId);
-  setLogContext(cwd, sessionName);
-
   // A resumed conversation already carries its session-start injection; only
-  // the local session bookkeeping is refreshed.
+  // the local session bookkeeping is refreshed. A chat no session start of this
+  // version recorded (it predates the upgrade, or its start failed) has no
+  // Honcho session yet, so that is created with its scopes.
   const source = hookInput.source ?? "startup";
   if (source === "resume") {
-    setCachedSessionId(cwd, sessionName, sessionName, claudeInstanceId);
     setSessionLink(honchoSessionUrl(config, sessionName), sessionName, claudeInstanceId);
+    if (!isLiveSession(config.workspace, sessionName)) {
+      try {
+        await joinSession(await createHonchoClient(config), config, sessionName, getSessionScopes(cwd));
+      } catch (error) {
+        logHook("session-start", `Could not set up the resumed session: ${error}`, { error: String(error) });
+      }
+    }
     logHook("session-start", "Resumed conversation; skipping injection");
     process.exit(0);
   }
@@ -90,16 +103,6 @@ export async function handleSessionStart(): Promise<void> {
     resetMessageCount();
   }
 
-  // Capture git state (before any API calls for speed)
-  const previousGitState = getCachedGitState(cwd);
-  const currentGitState = captureGitState(cwd);
-  const gitChanges = currentGitState ? detectGitChanges(previousGitState, currentGitState) : [];
-
-  // Update git state cache
-  if (currentGitState) {
-    setCachedGitState(cwd, currentGitState);
-  }
-
   // Start loading animation with session name visible in the spinner message
   const spinner = new Spinner({ style: "neural" });
   spinner.start(`${sessionName} · loading memory`);
@@ -107,133 +110,42 @@ export async function handleSessionStart(): Promise<void> {
   setSessionLink(honchoSessionUrl(config, sessionName), sessionName, claudeInstanceId);
 
   try {
-    logHook("session-start", `Starting session in ${cwd}`, { branch: currentGitState?.branch });
+    logHook("session-start", `Starting session in ${cwd}`);
     logFlow("init", `workspace: ${config.workspace}, peers: ${config.peerName}/${config.aiPeer}`);
 
     // New SDK: workspace is provided at construction time
-    const honcho = new Honcho(getHonchoClientOptions(config));
+    const honcho = await createHonchoClient(config);
 
     // Step 1-3: Get session and peers using new fluent API (lazily created)
     spinner.update(`${sessionName} · loading session`);
 
     const startTime = Date.now();
     // New SDK: session() and peer() are async and create lazily
-    const [session, userPeer, aiPeer] = await Promise.all([
-      honcho.session(sessionName),
-      honcho.peer(config.peerName),
-      honcho.peer(config.aiPeer),
-    ]);
+    // Scopes are attached when the chat starts, while the session is empty;
+    // re-attaching after compaction would queue a backfill of its messages.
+    const scopes = getSessionScopes(cwd);
+    const { userPeer } = await joinSession(honcho, config, sessionName, source === "compact" ? undefined : scopes);
     logApiCall("honcho.session/peer", "GET", `session + 2 peers`, Date.now() - startTime, true);
 
-    // Write CWD to cache so MCP server can resolve the project directory
-    // Also stores instanceId per-cwd to prevent cross-session collision
-    setCachedSessionId(cwd, sessionName, session.id, claudeInstanceId);
-
-    // Step 4: Add peers to session (materializes session server-side).
-    // Peer defaults (observeMe, observeOthers) are managed server-side —
-    // configure them via API or on app.honcho.dev. We only override observeOthers
-    // for the AI peer in directional mode so it can observe the user.
-    const observationMode = getObservationMode(config);
-    const peers: Parameters<typeof session.addPeers>[0] = observationMode === "directional"
-      ? [userPeer, [aiPeer, { observeOthers: true }]]
-      : [userPeer, aiPeer];
-    await session.addPeers(peers);
-
-    // Only persist session names for per-directory strategy (stable names).
-    // Dynamic strategies (git-branch, chat-instance) change per session,
-    // so locking them as overrides defeats the purpose.
-    if (!getSessionForPath(cwd) && (!config.sessionStrategy || config.sessionStrategy === "per-directory")) {
-      setSessionForPath(cwd, sessionName);
-    }
-
-    // Upload git changes as observations (fire-and-forget)
-    // These capture external activity that happened OUTSIDE of Claude sessions
-    if (config.saveGitEvents === true && gitChanges.length > 0) {
-      const gitObservations = gitChanges
-        .filter((c) => c.type !== "initial") // Don't log initial state as observation
-        .map((change) =>
-          userPeer.message(`[Git External] ${change.description}`, {
-            metadata: {
-              type: "git_change",
-              change_type: change.type,
-              from: change.from,
-              to: change.to,
-              external: true,
-            },
-          })
-        );
-
-      if (gitObservations.length > 0) {
-        session.addMessages(gitObservations).catch((e) =>
-          logHook("session-start", `Git observations upload failed: ${e}`)
-        );
-      }
-    }
-
-    // Step 5: Fetch only what the configured session-start components need —
-    // the SDK long summary and/or the context() representation + peer card.
-    // Nothing is cached here; the per-turn hook does its own fresh,
-    // prompt-scoped fetch, so a session with no context components pays for no
-    // context round-trip.
-    spinner.update(`${sessionName} · fetching context`);
-
-    const injection = getInjectionConfig(config);
-    const startComponents = injection.sessionStart;
-    const wantSummary = startComponents.includes("summary");
-    const wantContext =
-      startComponents.includes("peerCard") || startComponents.includes("peerRepresentation");
-
-    logAsync("context-fetch", `Starting context fetch${wantSummary ? " + summary" : ""}`);
+    // Step 5: Fetch the peer card. No context() call: the rest of memory is
+    // recalled on demand through the chat tool.
+    spinner.update(`${sessionName} · fetching peer card`);
 
     const fetchStart = Date.now();
+    const peerCard = await raceTimeout(userPeer.getCard().then((c) => c ?? []), CARD_FETCH_TIMEOUT_MS);
+    logAsync("card-fetch", `userPeer.getCard() ${peerCard ? `ok (${peerCard.length} items)` : "unavailable"} in ${Date.now() - fetchStart}ms`);
 
-    // unified: user observes self — use userPeer, no target.
-    // directional: aiPeer observes user — use aiPeer with target.
-    const contextLabel = observationMode === "unified" ? "userPeer.context()" : "aiPeer.context(target=user)";
-    const [userContextResult, summaryResult] = await Promise.allSettled([
-      wantContext
-        ? raceTimeout(
-            observationMode === "unified"
-              ? userPeer.context({ maxConclusions: 25, includeMostFrequent: true })
-              : aiPeer.context({ target: config.peerName, maxConclusions: 25, includeMostFrequent: true }),
-            CONTEXT_FETCH_TIMEOUT_MS
-          )
-        : Promise.resolve(null),
-      wantSummary ? raceTimeout(session.summaries(), CONTEXT_FETCH_TIMEOUT_MS) : Promise.resolve(null),
-    ]);
-
-    const fetchDuration = Date.now() - fetchStart;
-    const asyncResults = [
-      ...(wantContext ? [{ name: contextLabel, success: userContextResult.status === "fulfilled" && userContextResult.value !== null }] : []),
-      ...(wantSummary ? [{ name: "session.summaries()", success: summaryResult.status === "fulfilled" && summaryResult.value !== null }] : []),
-    ];
-    const successCount = asyncResults.filter(r => r.success).length;
-    logAsync("context-fetch", `Fetched ${successCount}/${asyncResults.length} in ${fetchDuration}ms`, asyncResults);
-
-    // Verbose output (file-based — ~/.honcho/verbose.log)
-    if (userContextResult.status === "fulfilled" && userContextResult.value) {
-      const ctx = userContextResult.value as any;
-      verboseApiResult(`${contextLabel} → representation`, ctx.representation);
-      verboseList(`${contextLabel} → peerCard`, ctx.peerCard);
-    }
-
-    // Compose the configured session-start injection. Default [] renders to an
-    // empty payload — nothing injected at session start.
-    const contextValue = userContextResult.status === "fulfilled" ? (userContextResult.value as any) : null;
-    const summaryValue = summaryResult.status === "fulfilled" ? (summaryResult.value as any) : null;
-    const rendered = renderSessionStart(startComponents, {
-      summary: summaryValue ? (summaryValue.longSummary?.content ?? "") : null,
-      peerCard: contextValue ? (contextValue.peerCard ?? []) : null,
-      representation: contextValue ? (contextValue.representation ?? "") : null,
-      remember: config.rememberTool === true,
-    });
+    const rendered = renderSessionStart({ peerCard, scopes });
 
     // Stop the spinner before any stdout write — a live spinner would corrupt
     // the hook's JSON and leave UI artifacts.
     spinner.stop();
     setMemoryState("idle", undefined, claudeInstanceId);
 
-    const systemMessage = visComposedInjection("session-start", rendered.labels, rendered.notes);
+    const authNotice = [migrated, getAuthNotice(config)].filter(Boolean).join("\n");
+    const systemMessage = [authNotice, visComposedInjection("session-start", rendered.labels, rendered.notes)]
+      .filter(Boolean)
+      .join("\n") || undefined;
     if (rendered.content) {
       console.log(JSON.stringify({
         hookSpecificOutput: {
@@ -242,16 +154,18 @@ export async function handleSessionStart(): Promise<void> {
         },
         systemMessage,
       }));
-    } else if (rendered.notes.length) {
+    } else if (rendered.notes.length || authNotice) {
       console.log(JSON.stringify({ systemMessage }));
     }
 
-    logFlow("complete", `Cache warmed: ${successCount}/1 context · injected: ${rendered.labels.join(", ") || "none"}`);
+    logFlow("complete", `injected: ${rendered.labels.join(", ") || "none"}`);
     process.exit(0);
   } catch (error) {
     logHook("session-start", `Error: ${error}`, { error: String(error) });
     spinner.stop();
     setMemoryState("idle", undefined, claudeInstanceId);
+    const authNotice = [migrated, getAuthNotice(config)].filter(Boolean).join("\n");
+    if (authNotice) console.log(JSON.stringify({ systemMessage: authNotice }));
     process.exit(0);
   }
 }

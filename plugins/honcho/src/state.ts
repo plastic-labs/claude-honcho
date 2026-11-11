@@ -21,11 +21,27 @@ function stateFile(sessionId?: string): string {
 function sessionFile(sessionId?: string): string {
   return join(DIR, sessionId ? `session-${sessionId}.json` : "session.json");
 }
+function noticeFile(sessionId: string): string {
+  return join(DIR, `notice-${sessionId}.json`);
+}
+
+/** Set by the mod (hooks/register.tsx). */
+export function isModActive(): boolean {
+  return process.env.HONCHO_MOD_UI === "1";
+}
+
+// The version nag, which the mod shows as a toast.
+export function setNotice(text: string, sessionId: string): void {
+  try {
+    writeFileSync(noticeFile(sessionId), JSON.stringify({ text }));
+  } catch {
+    // best-effort
+  }
+}
 
 export type MemoryPhase =
   | "idle"
   | "loading"
-  | "compacting"
   | "recalling"
   | "querying";    // an explicit honcho MCP tool call (search/chat/context/...)
 
@@ -50,7 +66,7 @@ export function setSessionLink(url: string | null, name: string | undefined, ses
 // Clean up this window's files when its session ends, so they don't accumulate.
 export function clearSessionFiles(sessionId?: string): void {
   if (!sessionId) return;
-  for (const f of [stateFile(sessionId), sessionFile(sessionId)]) {
+  for (const f of [stateFile(sessionId), sessionFile(sessionId), noticeFile(sessionId)]) {
     try { unlinkSync(f); } catch { /* already gone */ }
   }
 }

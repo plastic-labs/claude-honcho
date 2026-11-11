@@ -1,135 +1,10 @@
-import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { coerceBoolean, getHonchoClientOptions, getTelemetryHeaders, resolveWorktreeMainRoot, worktreeMainRootFor } from "../src/config";
-
-describe("coerceBoolean", () => {
-  test("passes real booleans through", () => {
-    expect(coerceBoolean(true)).toBe(true);
-    expect(coerceBoolean(false)).toBe(false);
-  });
-
-  test('string "false" is false (MCP args arrive as strings)', () => {
-    expect(coerceBoolean("false")).toBe(false);
-    expect(coerceBoolean("FALSE")).toBe(false);
-    expect(coerceBoolean(" false ")).toBe(false);
-    expect(coerceBoolean("0")).toBe(false);
-    expect(coerceBoolean("")).toBe(false);
-  });
-
-  test('string "true" and other truthy strings are true', () => {
-    expect(coerceBoolean("true")).toBe(true);
-    expect(coerceBoolean("1")).toBe(true);
-  });
-
-  test("non-string non-boolean values coerce naturally", () => {
-    expect(coerceBoolean(1)).toBe(true);
-    expect(coerceBoolean(0)).toBe(false);
-    expect(coerceBoolean(undefined)).toBe(false);
-    expect(coerceBoolean(null)).toBe(false);
-  });
-});
-
-describe("worktree main-root resolution", () => {
-  const makeTmp = () => mkdtempSync(join(tmpdir(), "honcho-wt-"));
-
-  test("linked worktree resolves to the main repository root", () => {
-    const tmp = makeTmp();
-    try {
-      const main = join(tmp, "main-repo");
-      const wt = join(tmp, "worktrees", "feature-x");
-      mkdirSync(join(main, ".git", "worktrees", "feature-x"), { recursive: true });
-      mkdirSync(wt, { recursive: true });
-      writeFileSync(join(wt, ".git"), `gitdir: ${join(main, ".git", "worktrees", "feature-x")}\n`);
-      expect(resolveWorktreeMainRoot(wt)).toBe(main);
-      expect(worktreeMainRootFor(wt)).toBe(main);
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  test("subdirectory of a worktree walks up to the pointer", () => {
-    const tmp = makeTmp();
-    try {
-      const main = join(tmp, "main-repo");
-      const wt = join(tmp, "wt");
-      mkdirSync(join(wt, "src", "deep"), { recursive: true });
-      writeFileSync(join(wt, ".git"), `gitdir: ${join(main, ".git", "worktrees", "wt")}\n`);
-      expect(worktreeMainRootFor(join(wt, "src", "deep"))).toBe(main);
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  test("regular repository (.git directory) returns null", () => {
-    const tmp = makeTmp();
-    try {
-      mkdirSync(join(tmp, ".git"), { recursive: true });
-      expect(resolveWorktreeMainRoot(tmp)).toBeNull();
-      expect(worktreeMainRootFor(tmp)).toBeNull();
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  test("no .git at all returns null", () => {
-    const tmp = makeTmp();
-    try {
-      expect(resolveWorktreeMainRoot(tmp)).toBeNull();
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  test("gitdir pointer outside a worktrees dir (e.g. submodule) returns null", () => {
-    const tmp = makeTmp();
-    try {
-      writeFileSync(join(tmp, ".git"), `gitdir: ${join(tmp, "elsewhere", "modules", "sub")}\n`);
-      expect(resolveWorktreeMainRoot(tmp)).toBeNull();
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  test("relative gitdir pointer resolves against the worktree dir", () => {
-    const tmp = makeTmp();
-    try {
-      const main = join(tmp, "main-repo");
-      const wt = join(tmp, "wt");
-      mkdirSync(wt, { recursive: true });
-      writeFileSync(join(wt, ".git"), "gitdir: ../main-repo/.git/worktrees/wt\n");
-      expect(resolveWorktreeMainRoot(wt)).toBe(main);
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  test("bare-hub worktree (<hub>.git/worktrees/<n>) resolves to the hub", () => {
-    const tmp = makeTmp();
-    try {
-      const hub = join(tmp, "project.git");
-      const wt = join(tmp, "wt");
-      mkdirSync(wt, { recursive: true });
-      writeFileSync(join(wt, ".git"), `gitdir: ${join(hub, "worktrees", "wt")}\n`);
-      expect(resolveWorktreeMainRoot(wt)).toBe(hub);
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  test("separate-git-dir worktree (no .git in gitdir path) returns null", () => {
-    const tmp = makeTmp();
-    try {
-      const wt = join(tmp, "wt");
-      mkdirSync(wt, { recursive: true });
-      writeFileSync(join(wt, ".git"), `gitdir: ${join(tmp, "detached-gitdir", "worktrees", "wt")}\n`);
-      expect(resolveWorktreeMainRoot(wt)).toBeNull();
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-});
+import {
+  getHonchoClientOptions, getTelemetryHeaders, isLoggingEnabled, loadConfig, migrateConfig,
+} from "../src/config";
 
 describe("telemetry headers", () => {
   test("identify host and plugin, omit the agent model", () => {
@@ -142,5 +17,53 @@ describe("telemetry headers", () => {
   test("ride along on every client's default headers", () => {
     const opts = getHonchoClientOptions({ apiKey: "k", workspace: "w" } as never);
     expect(opts.defaultHeaders).toEqual(getTelemetryHeaders());
+  });
+});
+
+describe("upgrading from 0.3.4", () => {
+  let dir: string;
+  let saved: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    saved = { ...process.env };
+    for (const k of Object.keys(process.env)) if (k.startsWith("HONCHO_")) delete process.env[k];
+    dir = mkdtempSync(join(tmpdir(), "honcho-cfg-"));
+    process.env.HONCHO_CONFIG_PATH = join(dir, "config.json");
+  });
+
+  afterEach(() => {
+    process.env = saved;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  // 0.3.4 also read the block spelled `claude-code`; migration writes `claude_code` beside it.
+  test.each(["claude_code", "claude-code"])("keeps logging: false in hosts[%p] as an off switch through the migration", async (key) => {
+    const path = process.env.HONCHO_CONFIG_PATH!;
+    writeFileSync(path, JSON.stringify({ apiKey: "k", peerName: "p", hosts: { [key]: { workspace: "w", logging: false } } }));
+
+    expect(await migrateConfig("claude_code")).toContain("Moved your Honcho settings");
+    const hosts = JSON.parse(readFileSync(path, "utf-8")).hosts;
+    expect(hosts.claude_code).toMatchObject({ apiKey: "k", peerName: "p", workspace: "w" });
+    expect(hosts[key].logging).toBe(false);
+    expect(isLoggingEnabled("claude_code")).toBe(false);
+  });
+
+  test("HONCHO_LOGGING=false turns logging off over a config file that has it on", () => {
+    writeFileSync(process.env.HONCHO_CONFIG_PATH!, JSON.stringify({ hosts: { claude_code: { apiKey: "k", schemaVersion: 2, logging: true } } }));
+    expect(isLoggingEnabled("claude_code")).toBe(true);
+    process.env.HONCHO_LOGGING = "false";
+    expect(isLoggingEnabled("claude_code")).toBe(false);
+  });
+
+  test("HONCHO_ENDPOINT=local still points an env-only setup at a local Honcho", () => {
+    process.env.HONCHO_API_KEY = "k";
+    process.env.HONCHO_ENDPOINT = "local";
+    expect(loadConfig("claude_code")?.baseUrl).toBe("http://localhost:8000");
+  });
+
+  test("HONCHO_ENDPOINT doesn't move a setup that has a key in its config file", () => {
+    writeFileSync(process.env.HONCHO_CONFIG_PATH!, JSON.stringify({ hosts: { claude_code: { apiKey: "k", schemaVersion: 2 } } }));
+    process.env.HONCHO_ENDPOINT = "local";
+    expect(loadConfig("claude_code")?.baseUrl).toBe("https://api.honcho.dev");
   });
 });

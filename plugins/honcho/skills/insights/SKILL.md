@@ -1,6 +1,6 @@
 ---
 description: Distill accumulated Honcho memory into concrete Claude Code config updates — CLAUDE.md edits, output-style rules, and skill ideas
-allowed-tools: chat, honcho_remember, get_context, Read, Glob, AskUserQuestion, Write, Edit
+allowed-tools: chat, Read, Glob, AskUserQuestion, Write, Edit
 user-invocable: true
 ---
 
@@ -54,10 +54,8 @@ Skip anything on this list, which is already written into their config: <the lis
 })
 ```
 
-If that call errors or hits the 120s ceiling, fall back to `honcho_remember` with
-`reasoning_level: "high"`. That tool is opt-in and only registered when the `rememberTool`
-config flag is on, so it may not be available — if it is missing, treat this path as thin and
-go straight to `get_context`. With a focus argument, send one query for that focus; with no
+If that call errors or hits the 120s ceiling, send the same questions as separate `chat`
+calls at `reasoning_level: "high"`. With a focus argument, send one query for that focus; with no
 argument, send all five axes (they run in parallel):
 
 1. How does this user want an agent to behave — autonomy, gating, what needs approval first?
@@ -65,8 +63,6 @@ argument, send all five axes (they run in parallel):
 3. What multi-step workflows have they repeated, that could be automated as a skill?
 4. What corrections or frustrations have they voiced — things to stop doing?
 5. What tooling, environment, and project defaults should be assumed without asking?
-
-Use `get_context` only if both paths come back thin — it is raw material, not analysis.
 
 ## Step 3: Filter
 

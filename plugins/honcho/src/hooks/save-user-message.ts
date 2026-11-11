@@ -1,8 +1,9 @@
-import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, readStdinText } from "../config.js";
-import { getInstanceIdForCwd, chunkContent, addMessagesBatched } from "../cache.js";
+import { Session, Peer } from "@honcho-ai/sdk";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText } from "../config.js";
+import { createHonchoClient } from "../honcho-client.js";
+import { chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
-import { isHarnessInjected, isSlashCommand, isTerseReply, stripLeadingReminders } from "../prompt-filters.js";
+import { isHarnessInjected, isSlashCommand, stripLeadingReminders } from "../prompt-filters.js";
 
 interface HookInput {
   prompt?: string;
@@ -16,9 +17,8 @@ interface HookInput {
  * prompt to Honcho off the turn's critical path.
  *
  * This runs as a separate `async: true` hook so the write never blocks the
- * model's response. It's the write half of UserPromptSubmit; user-prompt.ts is
- * the read half (context/dialectic injection), which stays synchronous because
- * its additionalContext must reach the model before it answers this turn.
+ * model's response. user-prompt.ts is the synchronous half; it only shows the
+ * session link and update banners.
  *
  * Being async, it runs detached — it awaits the upload to completion here
  * rather than racing process exit, so a slow POST still lands.
@@ -26,10 +26,6 @@ interface HookInput {
 export async function handleSaveUserMessage(): Promise<void> {
   const config = loadConfig();
   if (!config) {
-    process.exit(0);
-  }
-
-  if (!isPluginEnabled() || config.saveMessages === false) {
     process.exit(0);
   }
 
@@ -49,10 +45,13 @@ export async function handleSaveUserMessage(): Promise<void> {
   }
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
-  const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
-  const sessionName = getSessionName(cwd, instanceId || undefined);
+  const sessionName = getSessionName(hookInput.session_id);
 
-  setLogContext(cwd, sessionName);
+  setLogContext(cwd, sessionName ?? undefined);
+  if (!sessionName) {
+    logHook("save-user-message", "No Claude Code session id; skipping");
+    process.exit(0);
+  }
 
   if (isHarnessInjected(prompt) || isSlashCommand(prompt)) {
     logHook("save-user-message", "Skipping upload (slash command or harness-injected content)");
@@ -60,7 +59,7 @@ export async function handleSaveUserMessage(): Promise<void> {
   }
 
   try {
-    await postUserMessage(config, stripLeadingReminders(prompt), instanceId || undefined, sessionName);
+    await postUserMessage(config, stripLeadingReminders(prompt), sessionName);
   } catch (e) {
     logHook("save-user-message", `Upload failed: ${e}`);
   }
@@ -74,25 +73,14 @@ export async function handleSaveUserMessage(): Promise<void> {
 async function postUserMessage(
   config: any,
   prompt: string,
-  instanceId: string | undefined,
   sessionName: string,
 ): Promise<void> {
-  const honcho = new Honcho(getHonchoClientOptions(config));
+  const honcho = await createHonchoClient(config);
   const noEnsure = () => Promise.resolve();
 
   const userPeer = new Peer(config.peerName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);
   const createdAt = new Date().toISOString();
-  const configuration = isTerseReply(prompt) ? { reasoning: { enabled: false } } : undefined;
-  const messages = chunkContent(prompt).map((chunk) =>
-    userPeer.message(chunk, {
-      createdAt,
-      metadata: {
-        instance_id: instanceId || undefined,
-        session_affinity: sessionName,
-      },
-      ...(configuration ? { configuration } : {}),
-    })
-  );
+  const messages = chunkContent(prompt).map((chunk) => userPeer.message(chunk, { createdAt }));
 
   logApiCall("session.addMessages", "POST", `user prompt (${prompt.length} chars, ${messages.length} msg, direct)`);
   const session = new Session(sessionName, honcho.workspaceId, honcho.http, undefined, undefined, noEnsure);

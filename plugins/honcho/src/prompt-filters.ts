@@ -2,13 +2,6 @@
 
 import { existsSync } from "fs";
 
-// Terse acknowledgements
-export const TRIVIAL_REPLY_PATTERN = /^(yes|no|ok|sure|thanks|y|n|yep|nope|yeah|nah|continue|go ahead|do it|proceed)$/i;
-
-export function isTerseReply(prompt: string): boolean {
-  return TRIVIAL_REPLY_PATTERN.test(prompt.trim());
-}
-
 // Harness-injected turns that Claude Code delivers in the user-message slot but
 // the human never typed: background-task events, slash-command stdout, injected
 // system reminders.

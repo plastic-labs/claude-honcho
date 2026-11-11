@@ -60,9 +60,7 @@ if (!result.success) {
 }
 await assertNoDuplicateModules(result.outputs);
 
-// Skill runners: separate build rooted at src/ so entries land in
-// dist/skills/, where setup-runner's ../../scripts hop finds the staged
-// statusline script.
+// Skill runners: separate build rooted at src/ so entries land in dist/skills/.
 const runnerEntries = (await readdir(join(ROOT, "src/skills")))
   .filter((f) => f.endsWith("-runner.ts"))
   .map((f) => join(ROOT, "src/skills", f));
@@ -85,7 +83,6 @@ await assertNoDuplicateModules(runnerResult.outputs);
 // them.
 await mkdir(join(STAGE, "scripts"), { recursive: true });
 await cp(join(ROOT, "scripts/check-version.sh"), join(STAGE, "scripts/check-version.sh"));
-await cp(join(ROOT, "scripts/honcho-statusline.sh"), join(STAGE, "scripts/honcho-statusline.sh"));
 
 // README and LICENSE live at the repo root; npm renders the former as the
 // package page and both are expected in a published tarball.
@@ -131,6 +128,11 @@ const hooksJson = rewriteEntryPoints(await Bun.file(join(ROOT, "hooks/hooks.json
 assertStagedPaths("hooks/hooks.json", hooksJson);
 assertQuotedRoot("hooks/hooks.json", hooksJson);
 await Bun.write(join(STAGE, "hooks/hooks.json"), hooksJson);
+
+// The mod's hooks module ships as source; Claude Code compiles it itself.
+for (const mod of (JSON.parse(hooksJson).modules ?? []) as string[]) {
+  await cp(join(ROOT, "hooks", mod), join(STAGE, "hooks", mod));
+}
 
 const mcpServers = await Bun.file(join(ROOT, "mcp-servers.json")).json();
 for (const server of Object.values(mcpServers) as Array<{ command: string; args: string[] }>) {

@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Smoke-test a staged plugin tree: every bundled entry point must run under
 # node from a bare directory (no node_modules on the resolution path), with
-# config states that exit before any network call.
+# config states that exit before any network call. That is how the published
+# package runs, so this catches a dependency left out of the bundle. Manifest
+# paths and quoting are checked statically by build.ts, and output wording
+# belongs to the unit tests, so this only checks that each entry point runs.
 set -euo pipefail
 
 STAGE_DIR="${1:?usage: smoke.sh <staged-plugin-dir>}"
@@ -15,30 +18,20 @@ SMOKE="$(mktemp -d)"
 cp -R "$STAGE_DIR/." "$SMOKE"
 cd "$SMOKE"
 
-# Hooks + MCP server: disabled config, exits after config load.
-# (Standalone assignment so a mktemp failure propagates under set -e.)
+# Hooks + MCP server: a dead local base URL, so every call fails fast and none
+# reaches Honcho cloud. (Standalone assignment so a mktemp failure propagates
+# under set -e.)
 TMP_HOME="$(mktemp -d)"
 export HOME="$TMP_HOME"
+export HONCHO_BASE_URL="http://127.0.0.1:9"
 mkdir -p "$HOME/.honcho"
-echo '{"apiKey":"smoke","enabled":false}' > "$HOME/.honcho/config.json"
+echo '{"apiKey":"smoke"}' > "$HOME/.honcho/config.json"
 
 for hook in dist/hooks/*.js; do
   echo "smoke: $hook"
   echo '{"session_id":"smoke","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup"}' \
     | bounded node "$hook"
 done
-
-# Every hooks.json command, run the way Claude Code runs it, from a plugin
-# root with a space in it.
-SPACED="$(mktemp -d)/plugin root"
-mkdir -p "$SPACED"
-cp -R . "$SPACED"
-node -e 'for (const groups of Object.values(require(process.argv[1]).hooks)) for (const g of groups) for (const h of g.hooks) console.log(h.command)' "$SPACED/hooks/hooks.json" |
-  while IFS= read -r cmd; do
-    echo "smoke: $cmd"
-    echo '{"session_id":"smoke","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup"}' \
-      | CLAUDE_PLUGIN_ROOT="$SPACED" bounded bash -c "$cmd"
-  done
 
 echo "smoke: dist/mcp-server.js"
 printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}\n' \
@@ -55,20 +48,18 @@ TMP_HOME="$(mktemp -d)"
 export HOME="$TMP_HOME"
 unset HONCHO_API_KEY
 
-# Setup exits 1 by design when no key is found; assert it reached that
-# decision rather than expecting success.
-echo "smoke: dist/skills/setup-runner.js"
-(bounded node dist/skills/setup-runner.js </dev/null || true) | grep -q "No API key found"
+echo "smoke: dist/skills/pane-runner.js"
+bounded node dist/skills/pane-runner.js setup-state </dev/null >/dev/null
 echo "smoke: dist/skills/status-runner.js"
-bounded node dist/skills/status-runner.js </dev/null | grep -q "Not configured"
+bounded node dist/skills/status-runner.js </dev/null >/dev/null
 
-# The MCP server must start without a key and answer tools with setup steps.
+# The MCP server must start without a key and still answer a tool call.
 echo "smoke: dist/mcp-server.js (no key)"
 {
   printf '%s\n' \
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_config","arguments":{}}}'
   sleep 1
-} | bounded node dist/mcp-server.js 2>/dev/null | grep -q "run /honcho:setup"
+} | bounded node dist/mcp-server.js 2>/dev/null | grep -q '"id":2'
 
 echo "smoke: all entry points OK"

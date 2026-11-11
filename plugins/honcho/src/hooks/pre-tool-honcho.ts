@@ -1,13 +1,11 @@
 import { initHook, getCachedStdin } from "../config.js";
-import { setMemoryState } from "../state.js";
+import { setMemoryState, isModActive } from "../state.js";
 
 // Maps each honcho MCP tool to the short verb the statusline flashes while the
 // call is in flight. Anything unmapped falls back to the raw tool suffix.
 const LABELS: Record<string, string> = {
   search: "searching",
   chat: "asking",
-  get_context: "context",
-  get_representation: "recall",
   create_conclusion: "writing",
   list_conclusions: "listing",
   delete_conclusion: "writing",
@@ -19,6 +17,7 @@ const LABELS: Record<string, string> = {
 // calling onto the statusline. Best-effort and dependency-light so it adds
 // negligible latency to the tool call.
 export async function handlePreToolHoncho(): Promise<void> {
+  if (isModActive()) process.exit(0); // the mod shows this
   try {
     const raw = getCachedStdin();
     const input = raw && raw.trim() ? JSON.parse(raw) : {};
