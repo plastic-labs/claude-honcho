@@ -4,7 +4,7 @@
  */
 import { Honcho, type Page, type Conclusion } from "@honcho-ai/sdk";
 import type { QueueStatus } from "@honcho-ai/sdk";
-import { loadConfig, getEndpointInfo, getSessionName, describeAuth, getAuthNotice } from "../config.js";
+import { loadConfig, getEndpointInfo, getSessionName, describeAuth, getAuthNotice, uploadsDisabledBy } from "../config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import * as s from "../styles.js";
 
@@ -43,6 +43,8 @@ export async function status(): Promise<void> {
     console.log(`  ${s.label("Session")}:     ${getSessionName() ?? "unknown"}`);
     console.log(`  ${s.label("Peers")}:       ${config.peerName} / ${config.aiPeer}`);
     console.log(`  ${s.label("Auth")}:        ${describeAuth(config)}`);
+    const savingOff = uploadsDisabledBy();
+    if (savingOff) console.log(`  ${s.label("Saving")}:      ${s.warn("off")} ${s.dim(`(${savingOff})`)}`);
     const authNotice = getAuthNotice(config);
     if (authNotice) console.log(`  ${s.warn(authNotice)}`);
 

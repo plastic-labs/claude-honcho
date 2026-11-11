@@ -18,10 +18,12 @@ SMOKE="$(mktemp -d)"
 cp -R "$STAGE_DIR/." "$SMOKE"
 cd "$SMOKE"
 
-# Hooks + MCP server: disabled config, exits after config load.
+# Hooks + MCP server: disabled config, exits after config load. A dead local
+# base URL keeps any call that does get through away from Honcho cloud.
 # (Standalone assignment so a mktemp failure propagates under set -e.)
 TMP_HOME="$(mktemp -d)"
 export HOME="$TMP_HOME"
+export HONCHO_BASE_URL="http://127.0.0.1:9"
 mkdir -p "$HOME/.honcho"
 echo '{"apiKey":"smoke","enabled":false}' > "$HOME/.honcho/config.json"
 

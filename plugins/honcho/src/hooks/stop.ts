@@ -1,5 +1,5 @@
 import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText } from "../config.js";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, uploadsDisabledBy } from "../config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { existsSync, readFileSync } from "fs";
 import { chunkContent, addMessagesBatched } from "../cache.js";
@@ -124,7 +124,7 @@ function readTranscriptTurnBlocks(transcriptPath: string): TurnBlock[] {
 
 export async function handleStop(): Promise<void> {
   const config = loadConfig();
-  if (!config) {
+  if (!config || uploadsDisabledBy()) {
     process.exit(0);
   }
 

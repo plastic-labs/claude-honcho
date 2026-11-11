@@ -372,7 +372,7 @@ export async function runMcpServer(): Promise<void> {
       tools: [
         {
           name: "search",
-          description: "Semantic search across messages and derived conclusions. Messages default to the current session; use scope='workspace' to search across all sessions. Conclusions are always searched workspace-wide.",
+          description: "Semantic search across messages and derived conclusions. Messages are searched across all sessions by default; use scope='session' for this chat's session only. Conclusions are always searched workspace-wide.",
           inputSchema: {
             type: "object",
             properties: {
@@ -388,8 +388,8 @@ export async function runMcpServer(): Promise<void> {
               scope: {
                 type: "string",
                 enum: ["session", "workspace"],
-                description: "Search scope. 'session' searches only the current directory's session (default). 'workspace' searches across all sessions.",
-                default: "session",
+                description: "Search scope. 'workspace' (default) searches all sessions. 'session' searches only this Claude Code chat's session.",
+                default: "workspace",
               },
             },
             required: ["query"],
@@ -612,7 +612,7 @@ export async function runMcpServer(): Promise<void> {
 
     // Only create_conclusion and a session-scoped search need this chat's session.
     const sessionName = getSessionName();
-    const needsSession = name === "create_conclusion" || (name === "search" && ((args?.scope as string) ?? "session") === "session");
+    const needsSession = name === "create_conclusion" || (name === "search" && args?.scope === "session");
     if (!sessionName && needsSession) {
       return {
         content: [{ type: "text", text: "Error: no Claude Code session id available" }],
@@ -630,11 +630,8 @@ export async function runMcpServer(): Promise<void> {
         case "search": {
           const query = args?.query as string;
           const limit = (args?.limit as number) ?? 10;
-          const scope = (args?.scope as string) ?? "session";
           const [messages, conclusions] = await Promise.all([
-            scope === "workspace"
-              ? honcho.search(query, { limit })
-              : session!.search(query, { limit }),
+            session ? session.search(query, { limit }) : honcho.search(query, { limit }),
             userPeer.conclusionsOf(config.peerName).query(query, limit, undefined, DERIVED_ONLY).catch(() => []),
           ]);
 

@@ -89,7 +89,7 @@ The honcho plugin provides these tools via MCP:
 
 | Tool                 | Description                                                    |
 | -------------------- | -------------------------------------------------------------- |
-| `search`             | Semantic search across session messages and derived conclusions |
+| `search`             | Semantic search across messages (all sessions, or `scope: "session"` for this chat) and derived conclusions |
 | `chat`               | Ask Honcho about the user, optionally limited to a `scope`, or about the whole workspace (`workspace: true`) |
 | `create_conclusion`  | Save insights about the user to memory                         |
 | `list_conclusions`   | List derived conclusions (explicit ones are excluded)          |
@@ -215,7 +215,7 @@ Environment variables override `hosts.claude_code` in `~/.honcho/config.json`.
 | `HONCHO_WORKSPACE`     | No       | `claude_code` | Workspace name                                                    |
 | `HONCHO_AI_PEER`       | No       | `claude`      | AI peer name                                                      |
 | `HONCHO_HOST`          | No       | auto-detected | Force host detection: `claude_code`, `cursor`, or `obsidian`      |
-| `HONCHO_BASE_URL`      | No       | Honcho cloud  | Honcho API URL                                                    |
+| `HONCHO_BASE_URL`      | No       | Honcho cloud  | Honcho API URL (the old `HONCHO_ENDPOINT` still works when this is unset) |
 
 ## How It Works
 

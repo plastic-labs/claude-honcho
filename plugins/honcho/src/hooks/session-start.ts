@@ -115,7 +115,7 @@ export async function handleSessionStart(): Promise<void> {
 
     const fetchStart = Date.now();
     const peerCard = await raceTimeout(userPeer.getCard().then((c) => c ?? []), CARD_FETCH_TIMEOUT_MS);
-    logAsync("card-fetch", `userPeer.getCard() ${peerCard ? "ok (${peerCard.length} items)" : "unavailable"} in ${Date.now() - fetchStart}ms`);
+    logAsync("card-fetch", `userPeer.getCard() ${peerCard ? `ok (${peerCard.length} items)` : "unavailable"} in ${Date.now() - fetchStart}ms`);
 
     const rendered = renderSessionStart({ peerCard, scopes });
 

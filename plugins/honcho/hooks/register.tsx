@@ -371,7 +371,8 @@ export const register: Register = (on) => {
         const raw = value.join(' ')
         let parsed: unknown = raw
         try { parsed = JSON.parse(raw) } catch { /* plain string */ }
-        return { text: await mcp($, 'set_config', { field, value: parsed }) }
+        // The user typed the command, which is the confirmation set_config asks for.
+        return { text: await mcp($, 'set_config', { field, value: parsed, confirm: true }) }
       }
       case 'setup':
         return { text: await openSetup($) }

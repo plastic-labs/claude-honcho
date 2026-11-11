@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { existsSync, readFileSync } from "fs";
 import {
   checkConfig,
+  claudeHonchoReader,
   configPath,
   ensureFreshCredential,
   migrateHost,
@@ -14,7 +15,11 @@ import {
   telemetryHeaders,
   DEFAULT_BASE_URL,
   type Credential,
+  type Env,
 } from "@honcho-ai/harness-plugin-core";
+
+/** How 0.3.4 and earlier read the file; an unmigrated block is read and migrated through it. */
+const LEGACY = claudeHonchoReader;
 
 export function sanitizeForSessionName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
@@ -90,6 +95,7 @@ export async function initHook(): Promise<void> {
   try { input = JSON.parse(stdinText || "{}"); } catch { process.exit(0); }
   if (input.cursor_version) process.exit(0);
   setDetectedHost(detectHost(input));
+  if (pluginDisabledBy()) process.exit(0);
 }
 
 // ============================================
@@ -146,17 +152,58 @@ export function getPluginVersion(): string {
   return "unknown";
 }
 
+/** `HONCHO_ENDPOINT` from 0.3.4 and earlier as a base URL: `local` is a local Honcho, a URL is used as is. */
+function legacyEndpoint(value: string | undefined): string | undefined {
+  if (value === "local") return "http://localhost:8000";
+  if (value?.startsWith("http")) return value.replace(/\/v3\/?$/, "");
+  return undefined;
+}
+
+/** process.env, with `HONCHO_ENDPOINT` standing in for an unset `HONCHO_BASE_URL`. */
+function honchoEnv(): Env {
+  const env = process.env;
+  const endpoint = env.HONCHO_BASE_URL ? undefined : legacyEndpoint(env.HONCHO_ENDPOINT);
+  return endpoint ? { ...env, HONCHO_BASE_URL: endpoint } : env;
+}
+
 function resolveHost(host: HonchoHost) {
   return resolveConfig(readConfigFile(), {
     host,
+    env: honchoEnv(),
     defaults: { workspace: DEFAULT_WORKSPACE[host], aiPeer: DEFAULT_AI_PEER[host] },
+    legacy: LEGACY,
   });
+}
+
+/**
+ * Off switches from 0.3.4 and earlier, still honored so an upgrade never starts
+ * uploading for someone who turned them off. Read as those versions read them:
+ * the env var, then hosts.<host>, then the top level. Returns what turned it
+ * off, or undefined.
+ */
+function optOut(key: "enabled" | "saveMessages", envVar: string, host: HonchoHost): string | undefined {
+  if (process.env[envVar] === "false") return `${envVar}=false`;
+  const file = readConfigFile();
+  const hosts = file.hosts && typeof file.hosts === "object" ? file.hosts : {};
+  const block = hosts[host] ?? hosts[host.replace(/_/g, "-")];
+  const own = block && typeof block === "object" ? block[key] : undefined;
+  return (own ?? file[key]) === false ? `${key}: false in ~/.honcho/config.json` : undefined;
+}
+
+/** What turned every hook off (`enabled: false`), or undefined. */
+export function pluginDisabledBy(host: HonchoHost = getDetectedHost()): string | undefined {
+  return optOut("enabled", "HONCHO_ENABLED", host);
+}
+
+/** What stops message uploads (`enabled` or `saveMessages` off), or undefined. */
+export function uploadsDisabledBy(host: HonchoHost = getDetectedHost()): string | undefined {
+  return pluginDisabledBy(host) ?? optOut("saveMessages", "HONCHO_SAVE_MESSAGES", host);
 }
 
 /** This host's config, or null when it has no credential. */
 export function loadConfig(host: HonchoHost = getDetectedHost()): HonchoCLAUDEConfig | null {
   const cfg = resolveHost(host);
-  const cred = pickCredential(readConfigFile(), { host, baseUrl: cfg.baseUrl });
+  const cred = pickCredential(readConfigFile(), { host, baseUrl: cfg.baseUrl, env: honchoEnv(), legacy: LEGACY });
   if (!cred) return null;
   const { token, ...authState } = cred;
   return {
@@ -175,18 +222,18 @@ export function loadConfig(host: HonchoHost = getDetectedHost()): HonchoCLAUDECo
  */
 export async function saveConfig(config: HonchoCLAUDEConfig): Promise<void> {
   const host = getDetectedHost();
-  const env = process.env;
+  const env = honchoEnv();
   const patch: Record<string, string | undefined> = {};
   if (!env.HONCHO_PEER_NAME) patch.peerName = config.peerName;
   if (!env.HONCHO_WORKSPACE) patch.workspace = config.workspace === DEFAULT_WORKSPACE[host] ? undefined : config.workspace;
   if (!env.HONCHO_AI_PEER) patch.aiPeer = config.aiPeer === DEFAULT_AI_PEER[host] ? undefined : config.aiPeer;
   if (!env.HONCHO_BASE_URL) patch.baseUrl = config.baseUrl === DEFAULT_BASE_URL ? undefined : config.baseUrl;
-  await saveHost(configPath(), host, patch);
+  await saveHost(configPath(), host, patch, LEGACY);
 }
 
 /** Set or clear this host's API key (setup pane). */
 export async function saveHostApiKey(key: string | undefined): Promise<void> {
-  await saveHost(configPath(), getDetectedHost(), { apiKey: key });
+  await saveHost(configPath(), getDetectedHost(), { apiKey: key }, LEGACY);
 }
 
 /** The API origin this plugin targets, even when no credential is configured yet. */
@@ -197,15 +244,18 @@ export function getConfiguredOrigin(host: HonchoHost = getDetectedHost()): strin
 /** Problems in the config file that affect this host; `honcho doctor` fixes them. */
 export function getConfigIssues(host: HonchoHost = getDetectedHost()): string[] {
   return checkConfig(readConfigFile())
-    .filter((i) => i.path === "(top level)" || i.path === `hosts.${host}` || (i.path === "hosts" && i.message.includes(host)))
+    .filter((i) => i.path === "schemaVersion" || (i.path === "hosts" && i.message.includes(host)))
     .map((i) => i.message);
 }
 
-/** Keys this plugin wrote to its block in earlier versions and no longer reads. */
+/**
+ * Keys this plugin wrote to its block in earlier versions and no longer reads.
+ * Not `enabled` or `saveMessages`: those stay as off switches (see optOut).
+ */
 const DEAD_HOST_KEYS = [
   "sessionStrategy", "sessionPeerPrefix", "sessions", "injection", "contextRefresh", "messageUpload",
   "reasoningLevel", "statusline", "saveToolUse", "saveGitEvents", "redactPatterns", "rememberTool",
-  "observationMode", "saveMessages", "enabled", "logging", "globalOverride", "linkedHosts",
+  "observationMode", "logging", "globalOverride", "linkedHosts",
 ];
 
 /**
@@ -215,7 +265,7 @@ const DEAD_HOST_KEYS = [
  */
 export async function migrateConfig(host: HonchoHost = getDetectedHost()): Promise<string | undefined> {
   try {
-    const changed = await migrateHost(configPath(), host, DEAD_HOST_KEYS);
+    const changed = await migrateHost(configPath(), host, DEAD_HOST_KEYS, LEGACY);
     if (changed.length) return `[honcho] Moved your Honcho settings into hosts.${host} in ~/.honcho/config.json.`;
   } catch {
     // Never block a session on this; the next one tries again.
@@ -258,7 +308,7 @@ export interface HonchoClientOptions {
  */
 export async function refreshCredential(config: HonchoCLAUDEConfig): Promise<void> {
   const host = config.auth?.host ?? getDetectedHost();
-  const cred = await ensureFreshCredential({ path: configPath(), host, baseUrl: config.baseUrl, env: process.env });
+  const cred = await ensureFreshCredential({ path: configPath(), host, baseUrl: config.baseUrl, env: honchoEnv(), legacy: LEGACY });
   if (!cred) return;
   const { token, ...authState } = cred;
   config.apiKey = token;
@@ -313,6 +363,11 @@ export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClient
   };
 }
 
+/** Whether the config targets Honcho cloud, the API app.honcho.dev shows. */
+export function isProductionEndpoint(config: HonchoCLAUDEConfig): boolean {
+  return config.baseUrl === DEFAULT_BASE_URL;
+}
+
 export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url: string } {
-  return { type: config.baseUrl === DEFAULT_BASE_URL ? "production" : "custom", url: config.baseUrl };
+  return { type: isProductionEndpoint(config) ? "production" : "custom", url: config.baseUrl };
 }

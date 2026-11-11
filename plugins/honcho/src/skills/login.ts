@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { pollForToken, requestDeviceCode, saveGrant, OAuthError, type DeviceCode } from "@honcho-ai/harness-plugin-core";
 import { getConfigDir, getConfigPath } from "../config.js";
@@ -45,6 +45,7 @@ function openBrowser(url: string): void {
 export async function startSignIn(): Promise<{ url: string; code: string; expiresIn: number }> {
   const device = await requestDeviceCode({ clientId: CLIENT_ID, source: SOURCE });
   const pending: Pending = { ...device, expiresAt: Math.floor(Date.now() / 1000) + device.expiresIn };
+  mkdirSync(getConfigDir(), { recursive: true });
   writeFileSync(pendingPath(), JSON.stringify(pending), { mode: 0o600 });
   openBrowser(device.verificationUriComplete);
   return { url: device.verificationUriComplete, code: device.userCode, expiresIn: device.expiresIn };

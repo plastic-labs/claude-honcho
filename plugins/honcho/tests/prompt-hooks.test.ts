@@ -31,9 +31,8 @@ describe("UserPromptSubmit hooks", () => {
     try {
       mkdirSync(join(home, ".honcho"));
       writeFileSync(join(home, ".honcho/config.json"), JSON.stringify({
-        schemaVersion: 2,
         hosts: {
-          claude_code: { apiKey: "test-only", peerName: "human", workspace: "test", baseUrl: `http://127.0.0.1:${server.port}` },
+          claude_code: { schemaVersion: 2, apiKey: "test-only", peerName: "human", workspace: "test", baseUrl: `http://127.0.0.1:${server.port}` },
         },
       }));
       const base = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("HONCHO_") && !key.startsWith("CLAUDE_")));
