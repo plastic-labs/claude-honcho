@@ -10,6 +10,7 @@
  */
 
 import { arrows, symbols } from "./unicode.js";
+import { isLoggingEnabled } from "./config.js";
 
 // Plain text (no ANSI) for systemMessage — shown in Claude Code's UI
 const sym = {
@@ -89,6 +90,7 @@ function ensureVerboseLog(): void {
 }
 
 function writeVerbose(text: string): void {
+  if (!isLoggingEnabled()) return;
   ensureVerboseLog();
   const timestamp = new Date().toISOString().split("T")[1].split(".")[0];
   appendFileSync(VERBOSE_LOG, `[${timestamp}] ${text}\n`);
@@ -98,6 +100,7 @@ function writeVerbose(text: string): void {
  * Clear the verbose log (call at session start)
  */
 export function clearVerboseLog(): void {
+  if (!isLoggingEnabled()) return;
   ensureVerboseLog();
   writeFileSync(VERBOSE_LOG, "");
 }

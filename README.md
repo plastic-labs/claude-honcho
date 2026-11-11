@@ -72,7 +72,7 @@ Run `/clear` or restart Claude Code. Memory loads at the start of each session, 
 ### Step 4 (optional): Teach Honcho about you
 
 - `/honcho:interview` -- Claude asks about your preferences and saves what it learns. It carries across projects.
-- `/honcho import` -- add your past Claude Code sessions to Honcho.
+- `/honcho import` -- add your past Claude Code sessions to Honcho. Chats the plugin already saved are skipped.
 
 ## What You Get
 
@@ -137,7 +137,7 @@ All configuration lives in a single global file at `~/.honcho/config.json`. You 
 
 `HONCHO_API_KEY` overrides both.
 
-Each plugin keeps its settings in its own block under `hosts`; nothing at the top level is read. If your file still has top-level settings or old key names, the plugin copies them into `hosts.claude_code` at session start and says so once; `honcho doctor` in the Honcho CLI cleans up the rest. Logs go to `~/.honcho/activity.log`. To turn the plugin off, disable it in Claude Code's `/plugin` menu.
+Each plugin keeps its settings in its own block under `hosts`; nothing at the top level is read. If your file still has top-level settings or old key names, the plugin copies them into `hosts.claude_code` at session start and says so once, and leaves the top level and other plugins' blocks as they are. Logs go to `~/.honcho/activity.log`. To turn the plugin off, disable it in Claude Code's `/plugin` menu.
 
 ### Sessions
 
@@ -213,9 +213,9 @@ Environment variables override `hosts.claude_code` in `~/.honcho/config.json`.
 | `HONCHO_API_KEY`       | **Yes**  | —             | Your Honcho API key from [app.honcho.dev](https://app.honcho.dev) |
 | `HONCHO_PEER_NAME`     | No       | `$USER`       | Your identity in the memory system                                |
 | `HONCHO_WORKSPACE`     | No       | `claude_code` | Workspace name                                                    |
-| `HONCHO_AI_PEER`       | No       | `claude`      | AI peer name                                                      |
+| `HONCHO_AI_PEER`       | No       | `claude`      | AI peer name (the old `HONCHO_CLAUDE_PEER` still works in an env-only setup) |
 | `HONCHO_HOST`          | No       | auto-detected | Force host detection: `claude_code`, `cursor`, or `obsidian`      |
-| `HONCHO_BASE_URL`      | No       | Honcho cloud  | Honcho API URL (the old `HONCHO_ENDPOINT` still works when this is unset) |
+| `HONCHO_BASE_URL`      | No       | Honcho cloud  | Honcho API URL (the old `HONCHO_ENDPOINT` still works in an env-only setup, with no key or sign-in in the config file) |
 
 ## How It Works
 

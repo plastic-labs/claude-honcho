@@ -6,6 +6,7 @@ import {
   checkConfig,
   claudeHonchoReader,
   configPath,
+  effectiveBlock,
   ensureFreshCredential,
   migrateHost,
   pickCredential,
@@ -95,7 +96,6 @@ export async function initHook(): Promise<void> {
   try { input = JSON.parse(stdinText || "{}"); } catch { process.exit(0); }
   if (input.cursor_version) process.exit(0);
   setDetectedHost(detectHost(input));
-  if (pluginDisabledBy()) process.exit(0);
 }
 
 // ============================================
@@ -159,51 +159,67 @@ function legacyEndpoint(value: string | undefined): string | undefined {
   return undefined;
 }
 
-/** process.env, with `HONCHO_ENDPOINT` standing in for an unset `HONCHO_BASE_URL`. */
-function honchoEnv(): Env {
+/**
+ * Env vars that 0.3.4 and earlier read only when there was no config file:
+ * `HONCHO_ENDPOINT` for the server and `HONCHO_CLAUDE_PEER` (`HONCHO_CURSOR_PEER`
+ * for Cursor) for the AI peer. Each stands in for its newer var while that var
+ * is unset and this host's block has neither that setting nor a credential of
+ * its own, so a config file someone set up still wins, as it did then.
+ * Returns newer var → [old var, value].
+ */
+export function legacyEnv(host: HonchoHost = getDetectedHost()): Record<string, [string, string]> {
   const env = process.env;
-  const endpoint = env.HONCHO_BASE_URL ? undefined : legacyEndpoint(env.HONCHO_ENDPOINT);
-  return endpoint ? { ...env, HONCHO_BASE_URL: endpoint } : env;
+  const peerVar = host === "cursor" ? "HONCHO_CURSOR_PEER" : "HONCHO_CLAUDE_PEER";
+  // [newer var, the block setting it fills, old var, value]
+  const candidates: [string, string, string, string | undefined][] = [
+    ["HONCHO_BASE_URL", "baseUrl", "HONCHO_ENDPOINT", legacyEndpoint(env.HONCHO_ENDPOINT)],
+    ["HONCHO_AI_PEER", "aiPeer", peerVar, env[peerVar] || undefined],
+  ];
+  const set = candidates.filter(([newVar, , , value]) => value && !env[newVar]);
+  if (!set.length) return {};
+  const block = effectiveBlock(readConfigFile(), host, LEGACY);
+  if (block.apiKey || block.oauth) return {};
+  return Object.fromEntries(
+    set.filter(([, setting]) => !block[setting]).map(([newVar, , oldVar, value]) => [newVar, [oldVar, value as string]])
+  );
+}
+
+/** process.env, with the `legacyEnv` vars standing in for their newer names. */
+function honchoEnv(host: HonchoHost): Env {
+  const legacy = Object.entries(legacyEnv(host));
+  if (!legacy.length) return process.env;
+  return { ...process.env, ...Object.fromEntries(legacy.map(([k, [, value]]) => [k, value])) };
 }
 
 function resolveHost(host: HonchoHost) {
   return resolveConfig(readConfigFile(), {
     host,
-    env: honchoEnv(),
+    env: honchoEnv(host),
     defaults: { workspace: DEFAULT_WORKSPACE[host], aiPeer: DEFAULT_AI_PEER[host] },
     legacy: LEGACY,
   });
 }
 
 /**
- * Off switches from 0.3.4 and earlier, still honored so an upgrade never starts
- * uploading for someone who turned them off. Read as those versions read them:
- * the env var, then hosts.<host>, then the top level. Returns what turned it
- * off, or undefined.
+ * False when `logging: false` or `HONCHO_LOGGING=false` (from 0.3.4 and earlier)
+ * turned the logs in ~/.honcho off. Read as those versions read it: the env var,
+ * then hosts.<host> (also spelled with `-`, which migration leaves in place
+ * beside the new block), then the top level.
  */
-function optOut(key: "enabled" | "saveMessages", envVar: string, host: HonchoHost): string | undefined {
-  if (process.env[envVar] === "false") return `${envVar}=false`;
+export function isLoggingEnabled(host: HonchoHost = getDetectedHost()): boolean {
+  if (process.env.HONCHO_LOGGING === "false") return false;
   const file = readConfigFile();
   const hosts = file.hosts && typeof file.hosts === "object" ? file.hosts : {};
-  const block = hosts[host] ?? hosts[host.replace(/_/g, "-")];
-  const own = block && typeof block === "object" ? block[key] : undefined;
-  return (own ?? file[key]) === false ? `${key}: false in ~/.honcho/config.json` : undefined;
-}
-
-/** What turned every hook off (`enabled: false`), or undefined. */
-export function pluginDisabledBy(host: HonchoHost = getDetectedHost()): string | undefined {
-  return optOut("enabled", "HONCHO_ENABLED", host);
-}
-
-/** What stops message uploads (`enabled` or `saveMessages` off), or undefined. */
-export function uploadsDisabledBy(host: HonchoHost = getDetectedHost()): string | undefined {
-  return pluginDisabledBy(host) ?? optOut("saveMessages", "HONCHO_SAVE_MESSAGES", host);
+  const own = [hosts[host], hosts[host.replace(/_/g, "-")]]
+    .map((block) => (block && typeof block === "object" ? block.logging : undefined))
+    .find((v) => v !== undefined);
+  return (own ?? file.logging) !== false;
 }
 
 /** This host's config, or null when it has no credential. */
 export function loadConfig(host: HonchoHost = getDetectedHost()): HonchoCLAUDEConfig | null {
   const cfg = resolveHost(host);
-  const cred = pickCredential(readConfigFile(), { host, baseUrl: cfg.baseUrl, env: honchoEnv(), legacy: LEGACY });
+  const cred = pickCredential(readConfigFile(), { host, baseUrl: cfg.baseUrl, env: honchoEnv(host), legacy: LEGACY });
   if (!cred) return null;
   const { token, ...authState } = cred;
   return {
@@ -218,16 +234,21 @@ export function loadConfig(host: HonchoHost = getDetectedHost()): HonchoCLAUDECo
 
 /**
  * Write this host's settings to its block. Values that only came from env
- * vars, and defaults, are not written.
+ * vars, and defaults, are not written, except `field`: the setting the user
+ * just set is always written, even while an env var overrides it.
  */
-export async function saveConfig(config: HonchoCLAUDEConfig): Promise<void> {
+export async function saveConfig(
+  config: HonchoCLAUDEConfig,
+  field?: "peerName" | "workspace" | "aiPeer" | "baseUrl",
+): Promise<void> {
   const host = getDetectedHost();
-  const env = honchoEnv();
+  const env = honchoEnv(host);
+  const write = (key: typeof field, envVar: string) => key === field || !env[envVar];
   const patch: Record<string, string | undefined> = {};
-  if (!env.HONCHO_PEER_NAME) patch.peerName = config.peerName;
-  if (!env.HONCHO_WORKSPACE) patch.workspace = config.workspace === DEFAULT_WORKSPACE[host] ? undefined : config.workspace;
-  if (!env.HONCHO_AI_PEER) patch.aiPeer = config.aiPeer === DEFAULT_AI_PEER[host] ? undefined : config.aiPeer;
-  if (!env.HONCHO_BASE_URL) patch.baseUrl = config.baseUrl === DEFAULT_BASE_URL ? undefined : config.baseUrl;
+  if (write("peerName", "HONCHO_PEER_NAME")) patch.peerName = config.peerName;
+  if (write("workspace", "HONCHO_WORKSPACE")) patch.workspace = config.workspace === DEFAULT_WORKSPACE[host] ? undefined : config.workspace;
+  if (write("aiPeer", "HONCHO_AI_PEER")) patch.aiPeer = config.aiPeer === DEFAULT_AI_PEER[host] ? undefined : config.aiPeer;
+  if (write("baseUrl", "HONCHO_BASE_URL")) patch.baseUrl = config.baseUrl === DEFAULT_BASE_URL ? undefined : config.baseUrl;
   await saveHost(configPath(), host, patch, LEGACY);
 }
 
@@ -241,7 +262,7 @@ export function getConfiguredOrigin(host: HonchoHost = getDetectedHost()): strin
   return resolveHost(host).baseUrl;
 }
 
-/** Problems in the config file that affect this host; `honcho doctor` fixes them. */
+/** Problems in the config file that affect this host. */
 export function getConfigIssues(host: HonchoHost = getDetectedHost()): string[] {
   return checkConfig(readConfigFile())
     .filter((i) => i.path === "schemaVersion" || (i.path === "hosts" && i.message.includes(host)))
@@ -250,12 +271,12 @@ export function getConfigIssues(host: HonchoHost = getDetectedHost()): string[] 
 
 /**
  * Keys this plugin wrote to its block in earlier versions and no longer reads.
- * Not `enabled` or `saveMessages`: those stay as off switches (see optOut).
+ * Not `logging`: that stays as an off switch (see isLoggingEnabled).
  */
 const DEAD_HOST_KEYS = [
   "sessionStrategy", "sessionPeerPrefix", "sessions", "injection", "contextRefresh", "messageUpload",
   "reasoningLevel", "statusline", "saveToolUse", "saveGitEvents", "redactPatterns", "rememberTool",
-  "observationMode", "logging", "globalOverride", "linkedHosts",
+  "observationMode", "saveMessages", "enabled", "globalOverride", "linkedHosts",
 ];
 
 /**
@@ -308,7 +329,7 @@ export interface HonchoClientOptions {
  */
 export async function refreshCredential(config: HonchoCLAUDEConfig): Promise<void> {
   const host = config.auth?.host ?? getDetectedHost();
-  const cred = await ensureFreshCredential({ path: configPath(), host, baseUrl: config.baseUrl, env: honchoEnv(), legacy: LEGACY });
+  const cred = await ensureFreshCredential({ path: configPath(), host, baseUrl: config.baseUrl, env: honchoEnv(host as HonchoHost), legacy: LEGACY });
   if (!cred) return;
   const { token, ...authState } = cred;
   config.apiKey = token;

@@ -17,6 +17,7 @@ import {
   getEndpointInfo,
   getKnownHosts,
   getConfigIssues,
+  legacyEnv,
   setDetectedHost,
   type HonchoCLAUDEConfig,
   getPluginVersion,
@@ -128,6 +129,10 @@ function handleGetConfig() {
     const envVal = process.env[envVar];
     if (envVal) warnings.push(`${field} is shadowed by env var ${envVar}="${envVal}"`);
   }
+  for (const [envVar, [oldVar, value]] of Object.entries(legacyEnv(host))) {
+    const field = Object.keys(ENV_SHADOW_MAP).find((f) => ENV_SHADOW_MAP[f] === envVar);
+    warnings.push(`${field} comes from the older env var ${oldVar}="${value}"; setting ${field} with set_config replaces it.`);
+  }
 
   // HONCHO_API_KEY is omitted from ENV_SHADOW_MAP and handled specially: an API
   // key selects the Honcho *environment*, so when the env var overrides the
@@ -150,7 +155,7 @@ function handleGetConfig() {
     }
   }
 
-  for (const issue of getConfigIssues(host)) warnings.push(`${issue} Run \`honcho doctor\` with the Honcho CLI to fix it.`);
+  warnings.push(...getConfigIssues(host));
 
   // Pre-render the status card
   const hostLabel = endpointInfo
@@ -262,7 +267,11 @@ async function handleSetConfig(args: Record<string, unknown>) {
   }
 
   // Persist
-  await saveConfig(cfg);
+  await saveConfig(cfg, field as Parameters<typeof saveConfig>[1]);
+  // A key belongs to the server it was saved for, so moving baseUrl can leave none.
+  if (!loadConfig()) {
+    warnings.push(`No credential is saved for ${cfg.baseUrl} (an API key is dropped when the server changes). Run /honcho setup to add one.`);
+  }
 
   // Return updated resolved config
   const endpointInfo = getEndpointInfo(cfg);

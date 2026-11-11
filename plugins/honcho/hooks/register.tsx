@@ -29,6 +29,8 @@ let activity: string | undefined
 let noticeShown = false
 let dreams: { loading: boolean; error?: string; runs: Run[]; peer?: string; workspace?: string; at?: number } = { loading: false, runs: [] }
 let overview: { loading: boolean; error?: string; data?: Overview } = { loading: false }
+// The Claude Code session the overview was loaded for; a new one (after /clear) reloads it.
+let overviewFor: string | undefined
 let detail: { loading: boolean; error?: string; run?: RunDetail } | undefined
 let cardOpen = false
 
@@ -87,7 +89,8 @@ async function runner($: EngineInterface, args: string[], stdin?: string): Promi
 
 function explain(r: { status?: number; error: string }): string {
   if (r.status === 404) return 'Dream history is not available on this Honcho server yet.'
-  if (r.status === 401 || r.status === 403) return 'Needs a workspace or admin key; peer-scoped keys are refused.'
+  if (r.status === 401) return 'Honcho rejected your sign-in or API key. Run /honcho setup to connect again.'
+  if (r.status === 403) return 'Needs a workspace or admin key; peer-scoped keys are refused.'
   let detail = r.error
   try { detail = JSON.parse(r.error).detail ?? r.error } catch { /* not JSON */ }
   if (r.status && r.status >= 500) return `Honcho server error (${r.status}): ${detail}. Try refresh in a minute.`
@@ -105,6 +108,7 @@ async function loadDreams($: EngineInterface): Promise<void> {
 }
 
 async function loadOverview($: EngineInterface): Promise<void> {
+  overviewFor = await $.session.id()
   overview = { ...overview, loading: true, error: undefined }
   $.ui.invalidate('ui.render')
   const r = (await runner($, ['overview'])) as { ok: boolean; status?: number; error?: string } & Overview
@@ -153,7 +157,11 @@ function setSetup($: EngineInterface, next: NonNullable<typeof setup>): void {
 }
 
 function finishSetup($: EngineInterface, r: SetupReply): void {
-  if (!r.ok) return setSetup($, { ...setup, busy: undefined, signIn: undefined, error: r.error })
+  if (!r.ok) {
+    // The saved credential (or the one just entered) didn't work: offer the ways to connect again.
+    const state = setup?.state && { ...setup.state, connected: false }
+    return setSetup($, { ...setup, state, busy: undefined, signIn: undefined, error: r.error })
+  }
   connected = true
   const state = r as SetupState
   if (state.hasName) return setSetup($, { state, done: true })
@@ -393,7 +401,7 @@ export const register: Register = (on) => {
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
-    if (paneOpen) void loadOverview($)
+    if (paneOpen && (await $.session.id()) !== overviewFor) void loadOverview($)
     return next(e)
   })
 

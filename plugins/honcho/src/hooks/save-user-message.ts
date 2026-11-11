@@ -1,5 +1,5 @@
-import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, uploadsDisabledBy } from "../config.js";
+import { Session, Peer } from "@honcho-ai/sdk";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText } from "../config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { chunkContent, addMessagesBatched } from "../cache.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -25,7 +25,7 @@ interface HookInput {
  */
 export async function handleSaveUserMessage(): Promise<void> {
   const config = loadConfig();
-  if (!config || uploadsDisabledBy()) {
+  if (!config) {
     process.exit(0);
   }
 

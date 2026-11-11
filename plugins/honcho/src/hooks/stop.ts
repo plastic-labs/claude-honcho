@@ -1,5 +1,5 @@
-import { Honcho, Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, uploadsDisabledBy } from "../config.js";
+import { Session, Peer } from "@honcho-ai/sdk";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, isLoggingEnabled } from "../config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { existsSync, readFileSync } from "fs";
 import { chunkContent, addMessagesBatched } from "../cache.js";
@@ -124,7 +124,7 @@ function readTranscriptTurnBlocks(transcriptPath: string): TurnBlock[] {
 
 export async function handleStop(): Promise<void> {
   const config = loadConfig();
-  if (!config || uploadsDisabledBy()) {
+  if (!config) {
     process.exit(0);
   }
 
@@ -194,7 +194,7 @@ export async function handleStop(): Promise<void> {
     logHook("stop", `Saved ${turnMessages.length} assistant message(s)`);
   } catch (error) {
     logHook("stop", `Upload failed: ${error}`, { error: String(error) });
-    const seeLog = " (see ~/.honcho/activity.log)";
+    const seeLog = isLoggingEnabled() ? " (see ~/.honcho/activity.log)" : "";
     visStopMessage("warn", `upload failed, ${turnMessages.length} assistant msg(s) not saved${seeLog}`);
   }
 

@@ -90,7 +90,7 @@ dependency or a leftover `.ts` reference.
 - `src/hooks/` -- hook implementations (session-start, session-end, user-prompt, pre-tool-honcho, stop, save-user-message)
 - `src/mcp/server.ts` -- MCP server for memory tools
 - `src/config.ts` -- configuration management
-- `src/cache.ts` -- local caching layer
+- `src/cache.ts` -- first-prompt counter and message chunking/batching
 - `hooks/` -- thin entry-point wrappers that import from `src/`, plus `hooks.json`
 - `skills/` -- markdown skill definitions; the ones with runners call into `src/skills/`
 

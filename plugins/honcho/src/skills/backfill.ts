@@ -12,10 +12,8 @@
  *   --dry-run         print the plan without uploading
  *   --yes             reserved; non-interactive, uploads unless --dry-run
  */
-import { Honcho } from "@honcho-ai/sdk";
 import {
   loadConfig,
-  getHonchoClientOptions,
   sanitizeForSessionName,
   getConfigDir,
   setDetectedHost,
@@ -51,9 +49,23 @@ function parseArgs(argv: string[]): Args {
 
 const STATE_FILE = join(getConfigDir(), "backfill-state.json");
 
-/** Idempotency ledger: which (workspace, transcript@mtime) pairs already imported. */
+/** Idempotency ledger: which (workspace, transcript@mtime) pairs already imported, and
+ *  which chats the hooks save as they happen, so an import never uploads them twice. */
 interface BackfillState {
   imported: Record<string, number>; // key `${workspace}::${transcriptPath}` -> mtimeMs
+  live?: Record<string, number>; // key `${workspace}::${sessionName}` -> when its session start ran
+}
+
+/** Record that the hooks save this chat as it happens (its session start ran). */
+export function recordLiveSession(workspace: string, sessionName: string): void {
+  const state = loadState();
+  (state.live ??= {})[`${workspace}::${sessionName}`] = Date.now();
+  saveState(state);
+}
+
+/** Whether a session start recorded this chat (see recordLiveSession). */
+export function isLiveSession(workspace: string, sessionName: string, state: BackfillState = loadState()): boolean {
+  return !!state.live?.[`${workspace}::${sessionName}`];
 }
 
 function loadState(): BackfillState {
@@ -142,11 +154,21 @@ export async function run(): Promise<void> {
     process.exit(0);
   }
 
-  // Group into sessions
+  // Group into sessions, leaving out chats the hooks already saved (this one included)
   const { groups, parsed, empty } = groupIntoSessions(todo);
+  const live = [...groups.keys()].filter((name) => isLiveSession(targetWorkspace, name, state));
+  for (const name of live) groups.delete(name);
   const totalMessages = [...groups.values()].reduce((n, g) => n + g.messages.length, 0);
 
   console.log(s.listItem(`${parsed} transcript(s) with content${empty ? s.dim(` (${empty} empty, skipped)`) : ""}`));
+  if (live.length > 0) {
+    console.log(s.listItem(s.dim(`${live.length} chat(s) the plugin already saved as they happened — skipping`)));
+  }
+  if (groups.size === 0) {
+    console.log("");
+    console.log(s.success("Nothing new to import."));
+    process.exit(0);
+  }
   console.log(s.listItem(`${groups.size} session(s), ${totalMessages} message(s) to upload`));
   console.log("");
 
@@ -214,10 +236,12 @@ export async function run(): Promise<void> {
 
   // Only mark imported on a fully clean run; leave failures unmarked so a re-run retries.
   if (errors.length === 0) {
+    // Re-read: a session start may have recorded a live chat while this ran.
+    const latest = loadState();
     for (const t of todo) {
-      state.imported[`${targetWorkspace}::${t.path}`] = t.mtimeMs;
+      latest.imported[`${targetWorkspace}::${t.path}`] = t.mtimeMs;
     }
-    saveState(state);
+    saveState(latest);
   }
 
   console.log("");
