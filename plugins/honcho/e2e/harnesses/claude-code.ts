@@ -421,9 +421,9 @@ function variant(name: string, observationMode: "unified" | "directional"): Harn
       const honchoLogs = ["activity.log", "verbose.log"].map((f) => join(home, ".honcho", f)).filter((f) => existsSync(f));
       artifacts.push(...honchoLogs, ...(transcript.file ? [transcript.file] : []));
 
-      // Per-directory session naming: "<peer>-<cwd basename>".
+      // Each chat is its own Honcho session, named after the Claude Code session id.
       const expect: Expectation = {
-        session: `${userPeer}-project`,
+        session: conversation.sessionId,
         userPeer,
         aiPeer: AI_PEER,
         topology: {
