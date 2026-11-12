@@ -37,9 +37,9 @@ export interface Expectation {
   derivedPairs: Array<[observer: string, observed: string]>;
   /** (observer, observed) pairs that must stay empty under this topology. */
   emptyPairs: Array<[observer: string, observed: string]>;
-  /** The collection the integration reads memory back from. */
+  /** The peer card the integration injects at session start. */
   recallPair: [observer: string, observed: string];
-  /** Another collection about the same user that it must not read from. */
+  /** Another peer card about the same user that it must not inject. */
   decoyPair: [observer: string, observed: string];
 }
 
