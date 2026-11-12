@@ -11,7 +11,7 @@ From `plugins/honcho/`:
 
 ```bash
 bun run e2e                       # build .stage, start the sandbox, run, assert, tear down
-bun run e2e --variant unified     # one variant only
+bun run e2e --variant default     # one variant only
 bun run e2e --model real          # a real model instead of the scripted mock (see below)
 bun run e2e --keep                # leave the sandbox up and keep the run dirs
 bun run e2e --no-build            # reuse an existing .stage/
@@ -106,21 +106,18 @@ Each variant then checks (`assert.ts`):
   `observe_me` / `observe_others` as the server reports them.
 - **Derivation.** After the deriver queue drains, conclusions exist for every expected
   `(observer, observed)` pair, and pairs the topology rules out stay empty.
-- **Recall.** Mock-derived text is the same placeholder in every collection, so it can't show
-  where a context came from. The run therefore writes one uniquely-texted conclusion into the
-  collection the integration reads (the probe) and another into a different collection about
-  the same user (the decoy):
-  - Through the API, each collection's `context()` holds its own text and not the other's.
+- **Recall.** The plugin injects the user's own peer card at session start and nothing per
+  prompt. The run therefore adds one uniquely-texted entry to that card (the probe) and another
+  to the AI peer's card about the same user (the decoy):
+  - Through the API, each card holds its own text and not the other's.
   - Through the integration, a fresh harness session in the same workspace gets one prompt,
     and the probe must reach the model while the decoy must not. In mock mode that is checked
     against the model request the mock received. In real mode it is checked against what the
     plugin's hooks emitted. For Claude Code, the probe arrives through the plugin's
-    `UserPromptSubmit` context injection.
+    `SessionStart` context injection.
 
-The `claude-code` adapter runs two variants. Under `unified` (the default), the user's
-self-collection is the memory, and the AI must not build its own view of the user. Under
-`directional`, the plugin sets `observe_others` on the AI peer, and the AI's view of the user
-must fill up.
+The `claude-code` adapter runs one variant, `default`: the user's self-collection is the memory,
+and the AI must not build its own view of the user.
 
 What it deliberately does not assert, because the sandbox runs Honcho's mock provider: the text
 or level of derived conclusions (they are synthetic placeholders, always `explicit`), and

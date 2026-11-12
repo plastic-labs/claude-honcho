@@ -321,7 +321,7 @@ function transcriptUserTexts(configDir: string, sessionId: string): { texts: str
   return { texts, file };
 }
 
-function variant(name: string, observationMode: "unified" | "directional"): HarnessVariant {
+function variant(name: string): HarnessVariant {
   return {
     name,
     async run(ctx) {
@@ -337,7 +337,7 @@ function variant(name: string, observationMode: "unified" | "directional"): Harn
           apiKey: SANDBOX_API_KEY,
           peerName: userPeer,
           endpoint: { baseUrl: ctx.baseUrl },
-          hosts: { claude_code: { workspace: ctx.workspace, observationMode } },
+          hosts: { claude_code: { workspace: ctx.workspace } },
         }, null, 2),
       );
 
@@ -421,22 +421,23 @@ function variant(name: string, observationMode: "unified" | "directional"): Harn
       const honchoLogs = ["activity.log", "verbose.log"].map((f) => join(home, ".honcho", f)).filter((f) => existsSync(f));
       artifacts.push(...honchoLogs, ...(transcript.file ? [transcript.file] : []));
 
-      // Per-directory session naming: "<peer>-<cwd basename>".
+      // Each chat is its own Honcho session, named after the Claude Code session id.
       const expect: Expectation = {
-        session: `${userPeer}-project`,
+        session: conversation.sessionId,
         userPeer,
         aiPeer: AI_PEER,
         topology: {
           [userPeer]: { observeMe: true, observeOthers: false },
-          [AI_PEER]: { observeMe: true, observeOthers: observationMode === "directional" },
+          [AI_PEER]: { observeMe: true, observeOthers: false },
         },
-        // unified: the user's self-collection is the shared memory, and the AI
-        // must not grow a private view of the user. directional: the AI keeps
-        // its own view of the user.
-        derivedPairs: observationMode === "unified" ? [[userPeer, userPeer]] : [[AI_PEER, userPeer]],
-        emptyPairs: observationMode === "unified" ? [[AI_PEER, userPeer]] : [],
-        recallPair: observationMode === "unified" ? [userPeer, userPeer] : [AI_PEER, userPeer],
-        decoyPair: observationMode === "unified" ? [AI_PEER, userPeer] : [userPeer, userPeer],
+        // The user's self-collection is the memory, and the AI must not grow a
+        // private view of the user.
+        derivedPairs: [[userPeer, userPeer]],
+        emptyPairs: [[AI_PEER, userPeer]],
+        // Session start injects the user's own peer card, never the AI's card
+        // about the user.
+        recallPair: [userPeer, userPeer],
+        decoyPair: [AI_PEER, userPeer],
       };
 
       return {
@@ -447,8 +448,8 @@ function variant(name: string, observationMode: "unified" | "directional"): Harn
           artifacts,
           mock: attestation,
         },
-        // A new `claude` process in the same HOME and project: SessionStart and
-        // UserPromptSubmit fetch memory exactly as they would for the user.
+        // A new `claude` process in the same HOME and project: SessionStart
+        // injects the peer card exactly as it would for the user.
         async recall(prompt) {
           const from = mock?.requests.length ?? 0;
           const recallRun = await session([{ prompt }], "recall");
@@ -483,5 +484,5 @@ export const claudeCode: HarnessAdapter = {
       throw new Error("no Anthropic credentials: set ANTHROPIC_API_KEY or log in with `claude`");
     }
   },
-  variants: [variant("unified", "unified"), variant("directional", "directional")],
+  variants: [variant("default")],
 };

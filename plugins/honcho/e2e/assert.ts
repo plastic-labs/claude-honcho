@@ -52,12 +52,6 @@ function checkMockAttestation(check: Check, model: ModelMode, what: string, mock
   );
 }
 
-async function contextText(honcho: Honcho, [observer, observed]: [string, string]): Promise<string> {
-  const peer = await honcho.peer(observer);
-  const ctx = await peer.context({ ...(observer === observed ? {} : { target: observed }), maxConclusions: 100 });
-  return ctx.representation ?? "";
-}
-
 async function allMessages(honcho: Honcho, sessionId: string): Promise<Message[]> {
   const session = await honcho.session(sessionId);
   const out: Message[] = [];
@@ -230,13 +224,11 @@ export async function assertRoundTrip(opts: AssertOptions, expect: Expectation, 
 }
 
 /**
- * Recall, after the round trip: write a uniquely-texted conclusion into the
- * collection the integration reads (`probe`) and another into a different
- * collection about the same user (`decoy`). Mock-derived text is the same
- * placeholder in every collection, so only unique text can show which
- * collection a context came from. Checked twice: through the API, and through
- * the integration itself, by starting a fresh harness session and looking at
- * what it put in front of the model.
+ * Recall, after the round trip: put a uniquely-texted entry in the peer card
+ * the integration injects (`probe`) and another in a different card about the
+ * same user (`decoy`). Checked twice: through the API, and through the
+ * integration itself, by starting a fresh harness session and looking at what
+ * it put in front of the model.
  */
 export async function assertRecall(
   opts: AssertOptions,
@@ -249,20 +241,28 @@ export async function assertRecall(
   const [po, pd] = expect.recallPair;
   const [dob, dd] = expect.decoyPair;
 
-  await (await honcho.peer(po)).conclusionsOf(pd).create({ content: probe, sessionId: expect.session });
-  await (await honcho.peer(dob)).conclusionsOf(dd).create({ content: decoy, sessionId: expect.session });
+  const card = async ([observer, observed]: [string, string]): Promise<string[]> => {
+    const peer = await honcho.peer(observer);
+    return (await peer.getCard(observer === observed ? undefined : observed)) ?? [];
+  };
+  const setCard = async ([observer, observed]: [string, string], entries: string[]) => {
+    const peer = await honcho.peer(observer);
+    await peer.setCard(entries, observer === observed ? undefined : observed);
+  };
+  await setCard(expect.recallPair, [...(await card(expect.recallPair)), probe]);
+  await setCard(expect.decoyPair, [...(await card(expect.decoyPair)), decoy]);
 
-  const probeCtx = await contextText(honcho, expect.recallPair);
-  const decoyCtx = await contextText(honcho, expect.decoyPair);
+  const probeCard = (await card(expect.recallPair)).join("\n");
+  const decoyCard = (await card(expect.decoyPair)).join("\n");
   check(
-    `${po} -> ${pd} context holds its own probe and not the decoy`,
-    probeCtx.includes(probe) && !probeCtx.includes(decoy),
-    `context: ${JSON.stringify(probeCtx.slice(0, 600))}`,
+    `${po} -> ${pd} card holds its own probe and not the decoy`,
+    probeCard.includes(probe) && !probeCard.includes(decoy),
+    `card: ${JSON.stringify(probeCard.slice(0, 600))}`,
   );
   check(
-    `${dob} -> ${dd} context holds the decoy and not the probe`,
-    decoyCtx.includes(decoy) && !decoyCtx.includes(probe),
-    `context: ${JSON.stringify(decoyCtx.slice(0, 600))}`,
+    `${dob} -> ${dd} card holds the decoy and not the probe`,
+    decoyCard.includes(decoy) && !decoyCard.includes(probe),
+    `card: ${JSON.stringify(decoyCard.slice(0, 600))}`,
   );
 
   opts.log("recall: starting a fresh harness session");
