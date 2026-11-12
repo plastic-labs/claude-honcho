@@ -1,0 +1,3 @@
+[test]
+# hooks/*.test.tsx run under `claude plugin test`, which supplies claude-code/testing.
+root = "./tests"

@@ -47,7 +47,12 @@ let setup: {
   signIn?: { url: string; code: string }; askKey?: boolean; askName?: boolean
 } | undefined
 let poller: { cancel: () => void } | undefined
-let paneOpen = false
+// Asked of the engine each time, never kept in a module variable: a reload resets
+// module variables while the pane stays up, and the status-bar button, /honcho and
+// the pane's own mark can each close it.
+async function paneIsOpen($: EngineInterface): Promise<boolean> {
+  return (await $.ui.panes()).some((pane) => pane.id === PANE)
+}
 
 async function home($: EngineInterface): Promise<string> {
   return (await $.env.get('HOME')) ?? ''
@@ -127,7 +132,7 @@ async function loadDetail($: EngineInterface, id: string): Promise<void> {
 }
 
 async function togglePane($: EngineInterface): Promise<string> {
-  if (paneOpen) {
+  if (await paneIsOpen($)) {
     await $.ui.close({ id: PANE })
     return 'Honcho pane closed.'
   }
@@ -139,7 +144,6 @@ async function openSetup($: EngineInterface): Promise<string> {
   cardOpen = false
   setup = { busy: 'Checking your Honcho connection…' }
   const opened = await $.ui.open({ id: PANE, title: 'Honcho setup' })
-  paneOpen = true
   void (async () => {
     const r = (await runner($, ['setup-state'])) as SetupReply
     if (!r.ok) return setSetup($, { error: r.error })
@@ -220,7 +224,6 @@ async function openPane($: EngineInterface): Promise<string> {
   detail = undefined
   cardOpen = false
   const opened = await $.ui.open({ id: PANE, title: 'Honcho' })
-  paneOpen = true
   void loadAll($)
   // Poll only while a run is in progress.
   poller?.cancel()
@@ -395,13 +398,12 @@ export const register: Register = (on) => {
   on('ui.close', { id: PANE }, async ($, e, next) => {
     poller?.cancel()
     poller = undefined
-    paneOpen = false
     setup = undefined
     return next(e)
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
-    if (paneOpen && (await $.session.id()) !== overviewFor) void loadOverview($)
+    if ((await paneIsOpen($)) && (await $.session.id()) !== overviewFor) void loadOverview($)
     return next(e)
   })
 
