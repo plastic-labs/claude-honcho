@@ -3,7 +3,8 @@
 import { execSync } from "child_process";
 import { hostname } from "os";
 import { basename, dirname, resolve } from "path";
-import { sanitizeForSessionName } from "./config.js";
+import { getDetectedHost, sanitizeForSessionName } from "./config.js";
+import { projectScopeDir } from "./local-config.js";
 
 /**
  * Run a git command and return the output, or null if it fails
@@ -25,9 +26,12 @@ export function getRepoName(cwd: string): string {
   return basename(dir) === ".git" ? basename(dirname(dir)) : basename(dir).replace(/\.git$/, "");
 }
 
-/** Honcho scopes a new session joins: its repository and this machine. */
+/** Honcho scopes a new session joins: its repository and this machine. Under a
+ *  repo-local .honcho/config.json the repository is the project root's (or with
+ *  splitSubmodules, the nearest repository inside it), not the cwd's. */
 export function getSessionScopes(cwd: string): string[] {
-  const scopes = [getRepoName(cwd), hostname().split(".")[0]]
+  const repoDir = projectScopeDir(cwd, getDetectedHost()) ?? cwd;
+  const scopes = [getRepoName(repoDir), hostname().split(".")[0]]
     .map(sanitizeForSessionName)
     .filter((s) => /[a-z0-9]/.test(s));
   return [...new Set(scopes)];

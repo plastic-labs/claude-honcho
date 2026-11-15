@@ -1,7 +1,7 @@
 import type { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, getAuthNotice, migrateConfig, type HonchoCLAUDEConfig } from "../config.js";
+import { initHook, loadConfig, getSessionName, getChatSessionName, getCachedStdin, readStdinText, getAuthNotice, migrateConfig, type HonchoCLAUDEConfig } from "../config.js";
 import { isLiveSession, recordLiveSession } from "../skills/backfill.js";
-import { createHonchoClient } from "../honcho-client.js";
+import { createHonchoClient, openSession } from "../honcho-client.js";
 import { renderSessionStart } from "../injection.js";
 import { resetMessageCount } from "../cache.js";
 import { Spinner } from "../spinner.js";
@@ -36,16 +36,18 @@ function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
 /**
  * Get or create this chat's session (joining `scopes`, when given) and add both
  * peers, and record the chat as saved live so /honcho import leaves it alone.
+ * `chatName` is the chat's own session name; it differs from `sessionName` when
+ * a repo-local config puts every chat in the project into one session.
  */
-async function joinSession(honcho: Honcho, config: HonchoCLAUDEConfig, sessionName: string, scopes?: string[]) {
+async function joinSession(honcho: Honcho, config: HonchoCLAUDEConfig, sessionName: string, scopes?: string[], chatName: string = sessionName) {
   const [session, userPeer, aiPeer] = await Promise.all([
-    scopes ? honcho.session(sessionName, { scopes }) : honcho.session(sessionName),
+    scopes ? openSession(honcho, sessionName, scopes, chatName !== sessionName) : honcho.session(sessionName),
     honcho.peer(config.peerName),
     honcho.peer(config.aiPeer),
   ]);
   // Observation uses Honcho's defaults: both peers observe themselves only.
   await session.addPeers([userPeer, aiPeer]);
-  recordLiveSession(config.workspace, sessionName);
+  recordLiveSession(config.workspace, chatName);
   return { session, userPeer };
 }
 
@@ -72,8 +74,9 @@ export async function handleSessionStart(): Promise<void> {
 
   // Set log context early so all logs include cwd/session
   const sessionName = getSessionName(claudeInstanceId);
+  const chatName = getChatSessionName(claudeInstanceId);
   setLogContext(cwd, sessionName ?? undefined);
-  if (!sessionName) {
+  if (!sessionName || !chatName) {
     logHook("session-start", "No Claude Code session id; skipping");
     process.exit(0);
   }
@@ -85,9 +88,9 @@ export async function handleSessionStart(): Promise<void> {
   const source = hookInput.source ?? "startup";
   if (source === "resume") {
     setSessionLink(honchoSessionUrl(config, sessionName), sessionName, claudeInstanceId);
-    if (!isLiveSession(config.workspace, sessionName)) {
+    if (!isLiveSession(config.workspace, chatName)) {
       try {
-        await joinSession(await createHonchoClient(config), config, sessionName, getSessionScopes(cwd));
+        await joinSession(await createHonchoClient(config), config, sessionName, getSessionScopes(cwd), chatName);
       } catch (error) {
         logHook("session-start", `Could not set up the resumed session: ${error}`, { error: String(error) });
       }
@@ -124,7 +127,7 @@ export async function handleSessionStart(): Promise<void> {
     // Scopes are attached when the chat starts, while the session is empty;
     // re-attaching after compaction would queue a backfill of its messages.
     const scopes = getSessionScopes(cwd);
-    const { userPeer } = await joinSession(honcho, config, sessionName, source === "compact" ? undefined : scopes);
+    const { userPeer } = await joinSession(honcho, config, sessionName, source === "compact" ? undefined : scopes, chatName);
     logApiCall("honcho.session/peer", "GET", `session + 2 peers`, Date.now() - startTime, true);
 
     // Step 5: Fetch the peer card. No context() call: the rest of memory is

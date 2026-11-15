@@ -18,6 +18,7 @@ import {
   type Credential,
   type Env,
 } from "@honcho-ai/harness-plugin-core";
+import { getLocalContext, localSessionName, setLocalConfigContext, type LocalContext } from "./local-config.js";
 
 /** How 0.3.4 and earlier read the file; an unmigrated block is read and migrated through it. */
 const LEGACY = claudeHonchoReader;
@@ -96,6 +97,15 @@ export async function initHook(): Promise<void> {
   try { input = JSON.parse(stdinText || "{}"); } catch { process.exit(0); }
   if (input.cursor_version) process.exit(0);
   setDetectedHost(detectHost(input));
+
+  // Repo-local .honcho/config.json for this hook's working directory (none: no-op),
+  // found from the same cwd the handlers use.
+  const roots = input.workspace_roots;
+  const text = (v: unknown) => (typeof v === "string" ? v : "");
+  const cwd = text(Array.isArray(roots) ? roots[0] : undefined) || text(input.cwd) || process.cwd();
+  setLocalConfigContext(cwd, getDetectedHost());
+  // A project that turned Honcho off: no hook does anything there.
+  if (!isHonchoEnabled()) process.exit(0);
 }
 
 // ============================================
@@ -114,6 +124,12 @@ export interface HonchoCLAUDEConfig {
   aiPeer: string;
   /** Honcho API origin (Honcho cloud unless the host block sets baseUrl) */
   baseUrl: string;
+  /** Set when a repo-local .honcho/config.json overlaid this config (see local-config.ts). */
+  localConfig?: {
+    path: string;
+    /** The credential is the repo-local file's apiKey (never refreshed or written back). */
+    credential: boolean;
+  };
 }
 
 export function getConfigPath(): string {
@@ -216,8 +232,21 @@ export function isLoggingEnabled(host: HonchoHost = getDetectedHost()): boolean 
   return (own ?? file.logging) !== false;
 }
 
-/** This host's config, or null when it has no credential. */
+/**
+ * This host's config, or null when it has no credential. A repo-local
+ * .honcho/config.json registered for this process overlays the global one.
+ */
 export function loadConfig(host: HonchoHost = getDetectedHost()): HonchoCLAUDEConfig | null {
+  return loadConfigFor(getLocalContext(), host);
+}
+
+/** loadConfig() under a given repo-local config (null: the global config alone). */
+export function loadConfigFor(local: LocalContext | null, host: HonchoHost = getDetectedHost()): HonchoCLAUDEConfig | null {
+  return local ? loadLocalConfig(host, local) : loadGlobalConfig(host);
+}
+
+/** This host's config from ~/.honcho/config.json alone, ignoring any repo-local config. */
+export function loadGlobalConfig(host: HonchoHost = getDetectedHost()): HonchoCLAUDEConfig | null {
   const cfg = resolveHost(host);
   const cred = pickCredential(readConfigFile(), { host, baseUrl: cfg.baseUrl, env: honchoEnv(host), legacy: LEGACY });
   if (!cred) return null;
@@ -236,12 +265,14 @@ export function loadConfig(host: HonchoHost = getDetectedHost()): HonchoCLAUDECo
  * Write this host's settings to its block. Values that only came from env
  * vars, and defaults, are not written, except `field`: the setting the user
  * just set is always written, even while an env var overrides it.
+ * A value that came from a repo-local config is never written to the global file.
  */
 export async function saveConfig(
   config: HonchoCLAUDEConfig,
   field?: "peerName" | "workspace" | "aiPeer" | "baseUrl",
 ): Promise<void> {
   const host = getDetectedHost();
+  config = withoutLocalValues(config, host);
   const env = honchoEnv(host);
   const write = (key: typeof field, envVar: string) => key === field || !env[envVar];
   const patch: Record<string, string | undefined> = {};
@@ -259,7 +290,8 @@ export async function saveHostApiKey(key: string | undefined): Promise<void> {
 
 /** The API origin this plugin targets, even when no credential is configured yet. */
 export function getConfiguredOrigin(host: HonchoHost = getDetectedHost()): string {
-  return resolveHost(host).baseUrl;
+  const local = getLocalContext();
+  return local ? localSettingsFor(host, local).baseUrl : resolveHost(host).baseUrl;
 }
 
 /** Problems in the config file that affect this host. */
@@ -302,6 +334,14 @@ export function getClaudeSettingsPath(): string {
  *  Hooks pass hookInput.session_id; the MCP server and skills read
  *  CLAUDE_CODE_SESSION_ID, which Claude Code sets for its child processes. */
 export function getSessionName(sessionId?: string): string | null {
+  // A repo-local config can put every chat in the project into one session.
+  const pinned = localSessionName(getLocalContext());
+  if (pinned) return sanitizeForSessionName(pinned);
+  return getChatSessionName(sessionId);
+}
+
+/** The Honcho session name of the Claude Code chat itself, ignoring any repo-local pin. */
+export function getChatSessionName(sessionId?: string): string | null {
   const id = sessionId || process.env.CLAUDE_CODE_SESSION_ID;
   return id ? sanitizeForSessionName(id) : null;
 }
@@ -328,6 +368,8 @@ export interface HonchoClientOptions {
  * instead of holding on to a token.
  */
 export async function refreshCredential(config: HonchoCLAUDEConfig): Promise<void> {
+  // A repo-local apiKey is the credential as written; the global grant must not replace it.
+  if (config.localConfig?.credential) return;
   const host = config.auth?.host ?? getDetectedHost();
   const cred = await ensureFreshCredential({ path: configPath(), host, baseUrl: config.baseUrl, env: honchoEnv(host as HonchoHost), legacy: LEGACY });
   if (!cred) return;
@@ -344,6 +386,7 @@ export function describeAuth(config: HonchoCLAUDEConfig): string {
     const mins = Math.round((a.expiresAt - Date.now() / 1000) / 60);
     return mins > 0 ? ` (token refreshes in ${mins}m)` : " (token expired)";
   };
+  if (config.localConfig?.credential) return `API key from ${config.localConfig.path}`;
   switch (a?.source) {
     case "env": return "HONCHO_API_KEY env var";
     case "oauth": return `signed in with Honcho${expiry()}`;
@@ -391,4 +434,86 @@ export function isProductionEndpoint(config: HonchoCLAUDEConfig): boolean {
 
 export function getEndpointInfo(config: HonchoCLAUDEConfig): { type: string; url: string } {
   return { type: isProductionEndpoint(config) ? "production" : "custom", url: config.baseUrl };
+}
+
+// ============================================
+// Repo-local config overlay (see local-config.ts)
+// ============================================
+
+type OverlayField = "peerName" | "workspace" | "aiPeer" | "baseUrl";
+const OVERLAY_FIELDS: readonly OverlayField[] = ["peerName", "workspace", "aiPeer", "baseUrl"];
+const OVERLAY_ENV: Record<OverlayField, string> = {
+  peerName: "HONCHO_PEER_NAME",
+  workspace: "HONCHO_WORKSPACE",
+  aiPeer: "HONCHO_AI_PEER",
+  baseUrl: "HONCHO_BASE_URL",
+};
+
+/**
+ * This host's settings with a repo-local config on top. Precedence, highest
+ * first: HONCHO_* env var, the repo-local file, the global file, defaults.
+ */
+function localSettingsFor(host: HonchoHost, local: LocalContext): Record<OverlayField, string> {
+  const env = honchoEnv(host);
+  const global = resolveHost(host);
+  const out = {} as Record<OverlayField, string>;
+  for (const key of OVERLAY_FIELDS) {
+    out[key] = env[OVERLAY_ENV[key]] ? global[key] : local.settings[key] ?? global[key];
+  }
+  return out;
+}
+
+/** loadConfig() for a project with a repo-local config. */
+function loadLocalConfig(host: HonchoHost, local: LocalContext): HonchoCLAUDEConfig | null {
+  const env = honchoEnv(host);
+  const settings = localSettingsFor(host, local);
+  // The repo's own apiKey, unless HONCHO_API_KEY overrides it as it overrides any
+  // configured key; otherwise the global credential for the server in use.
+  const ownKey = !env.HONCHO_API_KEY && local.settings.apiKey;
+  const cred: Credential | null = ownKey
+    ? { token: ownKey, source: "apiKey" }
+    : pickCredential(readConfigFile(), { host, baseUrl: settings.baseUrl, env, legacy: LEGACY });
+  if (!cred) return null;
+  const { token, ...authState } = cred;
+  return {
+    apiKey: token,
+    auth: { ...authState, host },
+    ...settings,
+    localConfig: { path: local.path, credential: !!ownKey },
+  };
+}
+
+/**
+ * `config` with every value that came from the repo-local config put back to
+ * its global value, so saveConfig() never copies a project's override into
+ * ~/.honcho/config.json. A value the caller changed is kept.
+ */
+function withoutLocalValues(config: HonchoCLAUDEConfig, host: HonchoHost): HonchoCLAUDEConfig {
+  const local = getLocalContext();
+  if (!local) return config;
+  const global = resolveHost(host);
+  const out = { ...config };
+  for (const key of OVERLAY_FIELDS) {
+    const own = local.settings[key];
+    if (own !== undefined && out[key] === own) out[key] = global[key];
+  }
+  delete out.localConfig;
+  return out;
+}
+
+/** Settings this project's repo-local config overrides (empty without one). */
+export function getLocalOverrides(): OverlayField[] {
+  const local = getLocalContext();
+  return local ? OVERLAY_FIELDS.filter((k) => local.settings[k] !== undefined) : [];
+}
+
+/** False when this project's repo-local config sets `enabled: false`. */
+export function isHonchoEnabled(): boolean {
+  return getLocalContext()?.settings.enabled !== false;
+}
+
+/** False when this project's repo-local config sets `saveMessages: false` (or `enabled: false`). */
+export function isMessageSavingEnabled(): boolean {
+  const s = getLocalContext()?.settings;
+  return s?.enabled !== false && s?.saveMessages !== false;
 }

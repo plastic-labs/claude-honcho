@@ -112,7 +112,7 @@ The honcho plugin provides these tools via MCP:
 
 ## Configuration
 
-All configuration lives in a single global file at `~/.honcho/config.json`. You can edit it directly, use `/honcho set <field> <value>`, or use the `set_config` MCP tool. Environment variables override the file.
+Configuration lives in a global file at `~/.honcho/config.json`, which a repository can override for its own tree (see [Per-Project Configuration](#per-project-configuration)). You can edit it directly, use `/honcho set <field> <value>`, or use the `set_config` MCP tool. Environment variables override the file.
 
 ### Config File Reference
 
@@ -145,7 +145,38 @@ Each Claude Code chat maps to one Honcho session whose id is the Claude Code ses
 
 New sessions also join two Honcho scopes: one named after the git repository (worktrees share the main repo's name; outside git, the directory name) and one named after the machine's hostname. Use them to query memory from just one project or one machine.
 
-This mapping isn't configurable. If you want a different session layout, connect to Honcho through the [Honcho MCP server](https://mcp.honcho.dev) and manage sessions yourself.
+A repository's `.honcho/config.json` can put all of a project's chats into one session (see [Per-Project Configuration](#per-project-configuration)). For any other layout, connect to Honcho through the [Honcho MCP server](https://mcp.honcho.dev) and manage sessions yourself.
+
+### Per-Project Configuration
+
+A repository can hold its own `.honcho/config.json` to change the settings for everything under it, most often to keep a project's memory in its own workspace:
+
+```jsonc
+// <repo>/.honcho/config.json
+{
+  "hosts": {
+    "claude_code": {
+      "workspace": "my-project",
+      "sessionName": "my-project"   // optional: one session for every chat in this repo
+    }
+  }
+}
+```
+
+- **Overlay, not replacement.** Only the fields the file sets change. The credential, server and everything else come from `~/.honcho/config.json`, so the file holds no secrets and can be committed. It has the same shape as the global file (a `hosts.claude_code` block or flat fields). `HONCHO_*` environment variables still win.
+- **Nearest file wins.** The plugin walks up from the working directory to the closest `.honcho/config.json` (never `~/.honcho` itself), so one file at the root covers every subfolder and another file can carve out a subtree. The hooks, the MCP server, `/honcho` and `/honcho import` all honor it.
+- **Read-only.** The plugin never writes the file. `/honcho set` and `set_config` refuse a field it sets, and nothing from it is ever copied into the global config. `/honcho status` and `get_config` show when one is active.
+
+| Field | Effect |
+| --- | --- |
+| `workspace`, `peerName`, `aiPeer`, `baseUrl`, `apiKey` | Replace the global setting for this project. Set `apiKey` only for a different server, and keep that file out of git. |
+| `sessionName` | Every chat in the project writes to this one session instead of its own. |
+| `sessionStrategy` | `"per-repo"`: one session per git repository under the project, named after its directory. `"per-directory"`: one session named after the project root. |
+| `splitSubmodules` | `true`: a git repository nested inside the project (a submodule) gets its own repo scope, and its own session under `"per-directory"`. |
+| `saveMessages` | `false`: the project's messages are not uploaded, live or by `/honcho import`. |
+| `enabled` | `false`: the plugin's hooks do nothing in the project. |
+
+A session in the project joins the project's repo scope, named after the project root (the folder holding `.honcho/`), so subfolders don't each get their own. A session shared by several chats joins only the scopes it isn't in yet, because sending scopes for a session that already has messages queues a backfill of all of them.
 
 ### Memory Injection
 
@@ -284,7 +315,7 @@ export HONCHO_BASE_URL="http://localhost:8000"
 
 ### Temporarily disabling memory
 
-Disable the plugin in Claude Code's `/plugin` menu, and enable it again when you're done.
+Disable the plugin in Claude Code's `/plugin` menu, and enable it again when you're done. To keep one project out of Honcho, set `"enabled": false` (or just `"saveMessages": false`) in its `.honcho/config.json`.
 
 ---
 

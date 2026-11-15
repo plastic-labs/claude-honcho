@@ -1,5 +1,5 @@
 import { Session, Peer } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, isLoggingEnabled } from "../config.js";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, isLoggingEnabled, isMessageSavingEnabled } from "../config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { existsSync, readFileSync } from "fs";
 import { chunkContent, addMessagesBatched } from "../cache.js";
@@ -125,6 +125,10 @@ function readTranscriptTurnBlocks(transcriptPath: string): TurnBlock[] {
 export async function handleStop(): Promise<void> {
   const config = loadConfig();
   if (!config) {
+    process.exit(0);
+  }
+  // A repo-local config can keep a project's messages out of Honcho.
+  if (!isMessageSavingEnabled()) {
     process.exit(0);
   }
 

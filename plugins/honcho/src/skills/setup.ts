@@ -2,6 +2,7 @@ import { readFileSync } from "fs";
 import { isCloud, readConfigFile, suggestPeerName } from "@honcho-ai/harness-plugin-core";
 import {
   loadConfig,
+  loadGlobalConfig,
   saveConfig,
   getConfigPath,
   configExists,
@@ -119,7 +120,8 @@ export async function saveApiKey(key: string): Promise<Reply> {
   let previous: string | undefined;
   try { previous = JSON.parse(readFileSync(getConfigPath(), "utf-8")).hosts?.claude_code?.apiKey; } catch { /* no config yet */ }
   await saveHostApiKey(key);
-  const config = loadConfig();
+  // The key goes to the global config, so check it there, not against a repo-local key.
+  const config = loadGlobalConfig();
   const problem = config ? await validate(config) : "Could not read the config.";
   if (problem) {
     await saveHostApiKey(previous);
