@@ -22,7 +22,9 @@ import {
   type HonchoCLAUDEConfig,
   getPluginVersion,
   refreshCredential,
+  getLocalOverrides,
 } from "../config.js";
+import { getLocalContext, setLocalConfigContext } from "../local-config.js";
 import { setClientApiKey } from "../honcho-client.js";
 import { honchoSessionUrl } from "../styles.js";
 
@@ -157,6 +159,16 @@ function handleGetConfig() {
 
   warnings.push(...getConfigIssues(host));
 
+  const local = getLocalContext();
+  if (local) {
+    const fields = getLocalOverrides();
+    warnings.push(
+      `Repo-local config ${local.path} is active for this project` +
+      (fields.length ? ` and sets ${fields.join(", ")}` : "") +
+      `. Edit that file to change this project's settings.`
+    );
+  }
+
   // Pre-render the status card
   const hostLabel = endpointInfo
     ? endpointInfo.type === "production"
@@ -175,7 +187,10 @@ function handleGetConfig() {
   return {
     content: [{
       type: "text",
-      text: JSON.stringify({ card, resolved, current, host: hostInfo, warnings, configPath: cfgPath, configExists: cfgExists }, null, 2),
+      text: JSON.stringify({
+        card, resolved, current, host: hostInfo, warnings, configPath: cfgPath, configExists: cfgExists,
+        localConfig: { active: !!local, path: local?.path ?? null, overrides: getLocalOverrides() },
+      }, null, 2),
     }],
   };
 }
@@ -211,6 +226,24 @@ async function handleSetConfig(args: Record<string, unknown>) {
           description: descriptions[field] ?? "Pass confirm=true to proceed.",
         }, null, 2),
       }],
+    };
+  }
+
+  // The plugin never writes a repo-local config, and the global value would not
+  // apply in this project while that file sets the field.
+  const local = getLocalContext();
+  if (local && (getLocalOverrides() as string[]).includes(field)) {
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          success: false,
+          field,
+          localConfig: local.path,
+          error: `${field} is set by this project's repo-local config (${local.path}). Edit that file to change it here; the plugin does not write it.`,
+        }, null, 2),
+      }],
+      isError: true,
     };
   }
 
@@ -356,6 +389,8 @@ function createClients(): HonchoClients | null {
 
 export async function runMcpServer(): Promise<void> {
   setDetectedHost("claude_code");
+  // The project Claude Code launched this server for; its repo-local config, if any, applies.
+  setLocalConfigContext(process.env.CLAUDE_PROJECT_DIR || process.cwd(), "claude_code");
   // Without a key the server still starts; every tool answers with setup
   // instructions until a config appears, then the clients are built on first use.
   let clients = createClients();

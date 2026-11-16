@@ -1,6 +1,7 @@
 // Pane data for hooks/register.tsx, which has no Node. Prints one JSON object.
 import { HonchoError, type Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionName } from "../config.js";
+import { loadConfig, getSessionName, getDetectedHost } from "../config.js";
+import { setLocalConfigContext } from "../local-config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { honchoSessionUrl } from "../styles.js";
 import { state, connectExisting, beginSignIn, pollSignIn, saveApiKey, saveName } from "./setup.js";
@@ -43,6 +44,8 @@ async function dreams(read: (honcho: Honcho) => Promise<unknown>): Promise<Reply
 
 /** Runs one pane command and prints its reply as JSON. */
 export async function run(cmd?: string, arg?: string): Promise<void> {
+  // Runs in the session's working directory: its repo-local config applies.
+  setLocalConfigContext(process.cwd(), getDetectedHost());
   const peerName = loadConfig()?.peerName;
   const reply =
     cmd === "overview" ? await overview()

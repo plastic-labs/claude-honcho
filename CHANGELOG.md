@@ -8,6 +8,7 @@ All notable changes to claude-honcho will be documented in this file.
 
 - `/honcho setup` signs in to Honcho cloud with your browser, or takes an API key, then asks what Honcho should call you. A browser sign-in refreshes its own token.
 - Each new session joins two Honcho scopes, named after its git repository and the machine's hostname. `chat` takes `scope` to answer only from one scope's sessions, or `workspace: true` to ask across the whole workspace.
+- A repository's `.honcho/config.json` overrides `~/.honcho/config.json` for everything under it (the nearest file wins): its own workspace, peers, server or key, with everything it doesn't set taken from the global config. The plugin never writes the file, and `set_config` refuses a field it sets. `sessionName` or `sessionStrategy` (`per-repo`, `per-directory`) put the project's chats into one shared session, the repo scope is the project root's (`splitSubmodules` gives nested repositories their own), and `saveMessages: false` or `enabled: false` keeps a project out of Honcho. `/honcho import` sends each transcript where its project's config says.
 
 ### Changed
 

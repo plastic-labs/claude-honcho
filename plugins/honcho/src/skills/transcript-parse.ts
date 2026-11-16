@@ -2,8 +2,9 @@
  * Parse Claude Code session transcripts (`~/.claude/projects/<dir>/<uuid>.jsonl`)
  * for the /honcho import backfill.
  */
-import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "fs";
 import { homedir } from "os";
+import { StringDecoder } from "string_decoder";
 import { join } from "path";
 import { isHarnessInjected, isSlashCommand, stripLeadingReminders } from "../prompt-filters.js";
 
@@ -114,6 +115,47 @@ export function parseTranscriptForBackfill(transcriptPath: string): {
   }
 
   return { messages, sessionId, cwd };
+}
+
+/**
+ * The working directory a transcript was recorded in (its first entry with a
+ * cwd, as parseTranscriptForBackfill reports it), reading only as far as that
+ * entry instead of the whole file.
+ */
+export function transcriptCwd(transcriptPath: string): string | undefined {
+  let fd: number;
+  try {
+    fd = openSync(transcriptPath, "r");
+  } catch {
+    return undefined;
+  }
+  try {
+    const chunk = Buffer.alloc(64 * 1024);
+    const decoder = new StringDecoder("utf8"); // keeps a character split across chunks whole
+    let pending = "";
+    for (let pos = 0; ; ) {
+      const n = readSync(fd, chunk, 0, chunk.length, pos);
+      const eof = n === 0;
+      pos += n;
+      pending += eof ? decoder.end() : decoder.write(chunk.subarray(0, n));
+      const lines = pending.split("\n");
+      pending = eof ? "" : lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.includes('"cwd"')) continue;
+        try {
+          const entry = JSON.parse(line) as TranscriptEntry;
+          if (entry.cwd) return entry.cwd;
+        } catch {
+          continue;
+        }
+      }
+      if (eof) return undefined;
+    }
+  } catch {
+    return undefined;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 const PROJECTS_DIR = join(homedir(), ".claude", "projects");

@@ -4,11 +4,14 @@
  */
 import type { Page, Conclusion } from "@honcho-ai/sdk";
 import type { QueueStatus } from "@honcho-ai/sdk";
-import { loadConfig, getEndpointInfo, getSessionName, describeAuth, getAuthNotice } from "../config.js";
+import { loadConfig, getEndpointInfo, getSessionName, describeAuth, getAuthNotice, getDetectedHost, getLocalOverrides, isHonchoEnabled, isMessageSavingEnabled } from "../config.js";
+import { getLocalContext, setLocalConfigContext } from "../local-config.js";
 import { createHonchoClient } from "../honcho-client.js";
 import * as s from "../styles.js";
 
 export async function status(): Promise<void> {
+  // Runs in the session's working directory: its repo-local config applies.
+  setLocalConfigContext(process.cwd(), getDetectedHost());
   console.log("");
   console.log(s.header("honcho status"));
   console.log("");
@@ -43,6 +46,13 @@ export async function status(): Promise<void> {
     console.log(`  ${s.label("Session")}:     ${getSessionName() ?? "unknown"}`);
     console.log(`  ${s.label("Peers")}:       ${config.peerName} / ${config.aiPeer}`);
     console.log(`  ${s.label("Auth")}:        ${describeAuth(config)}`);
+    const local = getLocalContext();
+    if (local) {
+      const fields = getLocalOverrides();
+      const off = !isHonchoEnabled() ? "plugin off here" : !isMessageSavingEnabled() ? "messages not saved" : "";
+      const notes = [fields.length ? `sets ${fields.join(", ")}` : "", off].filter(Boolean).join("; ");
+      console.log(`  ${s.label("Repo config")}: ${local.path}${notes ? s.dim(`  (${notes})`) : ""}`);
+    }
     const authNotice = getAuthNotice(config);
     if (authNotice) console.log(`  ${s.warn(authNotice)}`);
 
