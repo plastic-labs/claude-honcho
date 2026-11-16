@@ -39,11 +39,21 @@ jobs:
       - name: Build release stage
         run: bun run scripts/build.ts
 
+      # Pinned so a Claude Code release can't change what passes; bump it on
+      # purpose and rerun this job.
+      #
+      # The honcho plugin ships as .stage (published to npm), so that is what
+      # gets validated. The source tree is not: since 2.1.323, validate
+      # type-checks every .ts/.tsx under a plugin's hooks/, types/ and tests/
+      # against the hooks-module engine types only (no tsconfig, Node or Bun
+      # types, or node_modules), which the source tree's bun tests and Node
+      # hook wrappers can never satisfy. The stage holds the same manifests,
+      # hooks.json and register.tsx, rewritten for release.
       - name: Validate plugins
         run: |
-          npm install -g @anthropic-ai/claude-code
+          npm install -g @anthropic-ai/claude-code@2.1.325
+          claude --version
           claude plugin validate .stage --strict
-          claude plugin validate . --strict
           claude plugin validate ../honcho-dev --strict
           claude plugin validate ../.. --strict
 
