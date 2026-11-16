@@ -93,7 +93,7 @@ is a local mock by default. See [`plugins/honcho/e2e/README.md`](plugins/honcho/
 
 ### Key Files
 
-- `src/hooks/` -- hook implementations (session-start, session-end, user-prompt, pre-tool-honcho, stop, save-user-message)
+- `src/hooks/` -- hook implementations (session-start, session-end, user-prompt, stop, save-user-message)
 - `src/mcp/server.ts` -- MCP server for memory tools
 - `src/config.ts` -- configuration management
 - `src/cache.ts` -- first-prompt counter and message chunking/batching
