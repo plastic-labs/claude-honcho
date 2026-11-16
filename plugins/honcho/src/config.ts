@@ -1,7 +1,7 @@
 import { homedir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import {
   checkConfig,
   claudeHonchoReader,
@@ -296,35 +296,6 @@ export async function migrateConfig(host: HonchoHost = getDetectedHost()): Promi
 
 export function getClaudeSettingsPath(): string {
   return join(homedir(), ".claude", "settings.json");
-}
-
-/**
- * Before the mod, /honcho:setup copied a statusLine script to
- * ~/.honcho/honcho-statusline.sh and registered it in ~/.claude/settings.json,
- * where it still draws "◇ honcho ↗" beside the mod's footer button. Remove the
- * registration and the script, but only while the registration still points
- * at that script: a statusLine the user set up themselves is left alone.
- * Returns a one-line notice when it removed something.
- */
-export function removeLegacyStatusline(
-  settingsPath = getClaudeSettingsPath(),
-  script = join(getConfigDir(), "honcho-statusline.sh"),
-): string | undefined {
-  try {
-    if (!existsSync(settingsPath)) return undefined;
-    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-    if (settings?.statusLine?.command !== script) return undefined;
-    delete settings.statusLine;
-    // Write beside and rename, so Claude Code never reads a half-written file.
-    const tmp = `${settingsPath}.honcho-tmp`;
-    writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n");
-    renameSync(tmp, settingsPath);
-    try { unlinkSync(script); } catch { /* already gone */ }
-    return "[honcho] Removed the old Honcho statusLine from ~/.claude/settings.json; the honcho button in the footer replaces it.";
-  } catch {
-    // Never block a session on this; the next one tries again.
-    return undefined;
-  }
 }
 
 /** Honcho session for a Claude Code chat: the Claude Code session id itself.

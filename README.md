@@ -270,6 +270,10 @@ The plugin hooks into Claude Code's lifecycle events:
 
 4. **Run `/honcho status`** to see connection state, workspace, and session info.
 
+### An old `◇ honcho ↗` in the status line
+
+That's the statusLine script older versions of `/honcho:setup` installed. It's no longer maintained; the honcho button in the footer replaces it. To remove it, delete the `"statusLine"` entry that points at `honcho-statusline.sh` from `~/.claude/settings.json`, then delete `~/.honcho/honcho-statusline.sh`.
+
 ### Using a local Honcho instance
 
 Via config file:

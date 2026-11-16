@@ -1,5 +1,5 @@
 import type { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, getAuthNotice, migrateConfig, removeLegacyStatusline, type HonchoCLAUDEConfig } from "../config.js";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, getAuthNotice, migrateConfig, type HonchoCLAUDEConfig } from "../config.js";
 import { isLiveSession, recordLiveSession } from "../skills/backfill.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { renderSessionStart } from "../injection.js";
@@ -50,7 +50,7 @@ async function joinSession(honcho: Honcho, config: HonchoCLAUDEConfig, sessionNa
 }
 
 export async function handleSessionStart(): Promise<void> {
-  const migrated = [await migrateConfig(), removeLegacyStatusline()].filter(Boolean).join("\n") || undefined;
+  const migrated = await migrateConfig();
   const config = loadConfig();
   if (!config) {
     console.log(JSON.stringify({ systemMessage: "[honcho] Not configured. Run /honcho setup to connect Honcho memory." }));
