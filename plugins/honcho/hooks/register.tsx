@@ -500,8 +500,8 @@ export const register: Register = (on) => {
                 <Text weight="semibold">Created ({run.created.length})</Text>
                 {run.created.length === 0 && <Text dimColor>none</Text>}
                 {run.created.map((c) => (
-                  <Text dimColor={c.conclusion.status !== 'current'}>
-                    + {clip(c.conclusion.content, width - 4)}
+                  <Text wrap="wrap" dimColor={c.conclusion.status !== 'current'}>
+                    + {c.conclusion.content ?? '(unavailable)'}
                     {c.conclusion.status === 'removed' ? ` (removed later)` : ''}
                   </Text>
                 ))}
@@ -509,7 +509,7 @@ export const register: Register = (on) => {
               <Box flexDirection="column">
                 <Text weight="semibold">Removed ({run.removed.length})</Text>
                 {run.removed.length === 0 && <Text dimColor>none</Text>}
-                {run.removed.map((r) => <Text color="red">- {clip(r.content, width - 4)}</Text>)}
+                {run.removed.map((r) => <Text wrap="wrap" color="red">- {r.content ?? '(unavailable)'}</Text>)}
               </Box>
               {run.peer_card && (
                 <Box flexDirection="column">
