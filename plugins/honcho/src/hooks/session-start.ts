@@ -1,11 +1,11 @@
 import type { Honcho } from "@honcho-ai/sdk";
-import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, getAuthNotice, migrateConfig, type HonchoCLAUDEConfig } from "../config.js";
+import { initHook, loadConfig, getSessionName, getCachedStdin, readStdinText, getAuthNotice, migrateConfig, removeLegacyStatusline, type HonchoCLAUDEConfig } from "../config.js";
 import { isLiveSession, recordLiveSession } from "../skills/backfill.js";
 import { createHonchoClient } from "../honcho-client.js";
 import { renderSessionStart } from "../injection.js";
 import { resetMessageCount } from "../cache.js";
 import { Spinner } from "../spinner.js";
-import { setMemoryState, setSessionLink } from "../state.js";
+import { setSessionLink } from "../state.js";
 import { honchoSessionUrl } from "../styles.js";
 import { getSessionScopes } from "../git.js";
 import { logHook, logApiCall, logFlow, logAsync, setLogContext } from "../log.js";
@@ -50,7 +50,7 @@ async function joinSession(honcho: Honcho, config: HonchoCLAUDEConfig, sessionNa
 }
 
 export async function handleSessionStart(): Promise<void> {
-  const migrated = await migrateConfig();
+  const migrated = [await migrateConfig(), removeLegacyStatusline()].filter(Boolean).join("\n") || undefined;
   const config = loadConfig();
   if (!config) {
     console.log(JSON.stringify({ systemMessage: "[honcho] Not configured. Run /honcho setup to connect Honcho memory." }));
@@ -106,7 +106,6 @@ export async function handleSessionStart(): Promise<void> {
   // Start loading animation with session name visible in the spinner message
   const spinner = new Spinner({ style: "neural" });
   spinner.start(`${sessionName} · loading memory`);
-  setMemoryState("loading", sessionName, claudeInstanceId);
   setSessionLink(honchoSessionUrl(config, sessionName), sessionName, claudeInstanceId);
 
   try {
@@ -140,7 +139,6 @@ export async function handleSessionStart(): Promise<void> {
     // Stop the spinner before any stdout write — a live spinner would corrupt
     // the hook's JSON and leave UI artifacts.
     spinner.stop();
-    setMemoryState("idle", undefined, claudeInstanceId);
 
     const authNotice = [migrated, getAuthNotice(config)].filter(Boolean).join("\n");
     const systemMessage = [authNotice, visComposedInjection("session-start", rendered.labels, rendered.notes)]
@@ -163,7 +161,6 @@ export async function handleSessionStart(): Promise<void> {
   } catch (error) {
     logHook("session-start", `Error: ${error}`, { error: String(error) });
     spinner.stop();
-    setMemoryState("idle", undefined, claudeInstanceId);
     const authNotice = [migrated, getAuthNotice(config)].filter(Boolean).join("\n");
     if (authNotice) console.log(JSON.stringify({ systemMessage: authNotice }));
     process.exit(0);

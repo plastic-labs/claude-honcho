@@ -38,6 +38,7 @@ All notable changes to claude-honcho will be documented in this file.
 - `injection.sessionStart`. Session start always injects the directives and your peer card.
 - `endpoint.environment`. Set `baseUrl` instead (`http://localhost:8000` for a local Honcho), the same key every other Honcho plugin reads. Session start moves an existing `endpoint` into `baseUrl`.
 - The PreCompact hook. Claude Code writes PreCompact stdout only to its debug log, so the "memory anchor" never reached the model or the compaction summary. SessionStart already re-injects memory after compaction (`source: "compact"`).
+- The old statusLine (`◇ honcho ↗`) that `/honcho:setup` installed. Session start removes its entry from `~/.claude/settings.json` and deletes `~/.honcho/honcho-statusline.sh`, but only while that entry still points at the script. The PreToolUse hook and the `~/.honcho/state-*.json` files that fed it are gone too. The honcho button in the footer replaces it.
 
 ## [0.3.4] - 2026-10-21
 

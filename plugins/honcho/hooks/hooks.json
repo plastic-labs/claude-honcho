@@ -31,18 +31,6 @@
         ]
       }
     ],
-    "PreToolUse": [
-      {
-        "matcher": "mcp__plugin_honcho_honcho__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun run \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-honcho.ts\"",
-            "timeout": 4
-          }
-        ]
-      }
-    ],
     "UserPromptSubmit": [
       {
         "hooks": [
